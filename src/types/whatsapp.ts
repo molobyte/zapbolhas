@@ -182,6 +182,11 @@ export interface ElectronAPI {
     mediaType: 'image' | 'video';
     filename: string;
   } | null>;
+  readClipboardImage?: () => Promise<{
+    dataUrl: string;
+    mediaType: 'image';
+    filename: string;
+  } | null>;
   getWhatsAppStickers?: () => Promise<StickerItem[]>;
   getUserStickers?: () => Promise<StickerItem[]>;
   importStickersFromDisk?: () => Promise<StickerItem[]>;

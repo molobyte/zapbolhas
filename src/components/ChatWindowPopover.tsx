@@ -54,6 +54,14 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const [inputText, setInputText] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTab, setPickerTab] = useState<PickerTab>('emoji');
+  const [pendingMedia, setPendingMedia] = useState<{
+    mediaDataUrl: string;
+    mediaType?: 'image' | 'video';
+    filename?: string;
+    caption?: string;
+    previousInputText?: string;
+  } | null>(null);
+  const [pendingCaption, setPendingCaption] = useState('');
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionAtIndex, setMentionAtIndex] = useState(-1);
@@ -247,16 +255,167 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     await sendSticker(stickerDataUrl);
   };
 
-  const handleSendMedia = async (media: {
+  const handleSelectMediaForPreview = (media: {
     mediaDataUrl: string;
     mediaType?: 'image' | 'video';
     filename?: string;
     caption?: string;
   }) => {
-    userHasScrolledUpRef.current = false;
     setPickerOpen(false);
-    await sendMedia(media);
+    setPendingCaption(media.caption || '');
+    setPendingMedia({
+      ...media,
+      previousInputText: inputText,
+    });
   };
+
+  const handleCancelPendingMedia = useCallback(() => {
+    if (pendingMedia?.previousInputText !== undefined) {
+      setInputText(pendingMedia.previousInputText);
+    }
+    setPendingMedia(null);
+    setPendingCaption('');
+  }, [pendingMedia]);
+
+  const handleConfirmPendingMedia = useCallback(async () => {
+    if (!pendingMedia) return;
+    const toSend = {
+      mediaDataUrl: pendingMedia.mediaDataUrl,
+      mediaType: pendingMedia.mediaType || 'image',
+      filename: pendingMedia.filename || 'foto.jpg',
+      caption: pendingCaption.trim() ? pendingCaption.trim() : undefined,
+    };
+    setPendingMedia(null);
+    setPendingCaption('');
+    setInputText('');
+    userHasScrolledUpRef.current = false;
+    await sendMedia(toSend);
+  }, [pendingMedia, pendingCaption, sendMedia]);
+
+  const processImageFileForPreview = useCallback(
+    (file: File | Blob, fallbackName = 'imagem.png') => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          const textAlreadyTyped = inputText.trim();
+          setPickerOpen(false);
+          setPendingCaption(textAlreadyTyped);
+          setPendingMedia({
+            mediaDataUrl: reader.result,
+            mediaType: 'image',
+            filename: (file as File).name || fallbackName,
+            previousInputText: inputText,
+          });
+        }
+      };
+      reader.readAsDataURL(file);
+    },
+    [inputText]
+  );
+
+  const handleClipboardPaste = useCallback(
+    async (e: React.ClipboardEvent | ClipboardEvent) => {
+      if (viewingImage) return;
+
+      const clipboardData = ('clipboardData' in e ? e.clipboardData : null) as DataTransfer | null;
+      let handled = false;
+
+      if (clipboardData) {
+        // 1. Arquivos arrastados ou colados do Explorer
+        if (clipboardData.files && clipboardData.files.length > 0) {
+          for (let i = 0; i < clipboardData.files.length; i++) {
+            const file = clipboardData.files[i];
+            if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)) {
+              e.preventDefault();
+              e.stopPropagation();
+              processImageFileForPreview(file, file.name);
+              return;
+            }
+          }
+        }
+
+        // 2. Itens copiados no Clipboard (PrintScreen, Snipping Tool, navegador)
+        if (clipboardData.items && clipboardData.items.length > 0) {
+          for (let i = 0; i < clipboardData.items.length; i++) {
+            const item = clipboardData.items[i];
+            if (item.type.startsWith('image/')) {
+              const file = item.getAsFile();
+              if (file) {
+                e.preventDefault();
+                e.stopPropagation();
+                processImageFileForPreview(file, 'clipboard.png');
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      // 3. Fallback nativo do Electron (somente se não houver texto puro no clipboard)
+      if (!handled && window.electronAPI?.readClipboardImage) {
+        const hasPlainText = clipboardData && Boolean(clipboardData.getData('text/plain'));
+        if (!hasPlainText) {
+          try {
+            const clip = await window.electronAPI.readClipboardImage();
+            if (clip && clip.dataUrl) {
+              e.preventDefault();
+              e.stopPropagation();
+              setPickerOpen(false);
+              setPendingCaption(inputText.trim());
+              setPendingMedia({
+                mediaDataUrl: clip.dataUrl,
+                mediaType: 'image',
+                filename: clip.filename || 'clipboard.png',
+                previousInputText: inputText,
+              });
+            }
+          } catch {
+            // Ignora
+          }
+        }
+      }
+    },
+    [viewingImage, inputText, processImageFileForPreview]
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0];
+        if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)) {
+          processImageFileForPreview(file, file.name);
+        }
+      }
+    },
+    [processImageFileForPreview]
+  );
+
+  useEffect(() => {
+    const handleGlobalPaste = (e: ClipboardEvent) => {
+      if (!activeChatId) return;
+      handleClipboardPaste(e);
+    };
+    window.addEventListener('paste', handleGlobalPaste);
+    return () => {
+      window.removeEventListener('paste', handleGlobalPaste);
+    };
+  }, [activeChatId, handleClipboardPaste]);
+
+  useEffect(() => {
+    if (!pendingMedia) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleCancelPendingMedia();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [pendingMedia, handleCancelPendingMedia]);
 
   const handleTogglePicker = (tab?: PickerTab) => {
     if (!tab) {
@@ -421,6 +580,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       data-interactive="true"
       onMouseEnter={onInteractiveEnter}
       onMouseLeave={onInteractiveLeave}
+      onPaste={handleClipboardPaste}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={handleDrop}
       initial={{ opacity: 0, y: 14, scale: 0.96, x: -popoverShiftX }}
       animate={{ opacity: 1, y: 0, scale: 1, x: -popoverShiftX }}
       exit={{ opacity: 0, y: 12, scale: 0.96, x: -popoverShiftX }}
@@ -619,7 +781,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             initialTab={pickerTab}
             onSelectEmoji={handleInsertEmoji}
             onSelectSticker={handleSendSticker}
-            onSelectMedia={handleSendMedia}
+            onSelectMedia={handleSelectMediaForPreview}
             onClose={() => setPickerOpen(false)}
           />
         )}
@@ -732,6 +894,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             value={inputText}
             onChange={handleInputChange}
             onKeyDown={handleInputKeyDown}
+            onPaste={handleClipboardPaste}
             placeholder={
               isGroupChat
                 ? 'Digite uma mensagem ou @ para marcar...'
@@ -870,6 +1033,97 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                 <FormattedText text={viewingImage.caption} />
               </div>
             )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Confirmação e Prévia de Envio de Imagem (Estilo Evidência 16.png) */}
+      <AnimatePresence>
+        {pendingMedia && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 bg-[#0B141A] flex flex-col justify-between overflow-hidden select-none"
+          >
+            {/* Barra Superior */}
+            <div className="px-3 py-2 bg-[#111B21] border-b border-white/10 flex items-center justify-between shrink-0 z-10">
+              <div className="min-w-0">
+                <div className="text-[12.5px] font-semibold text-[#E9EDEF] truncate">
+                  {pendingMedia.mediaType === 'video' ? 'Enviar vídeo' : 'Enviar foto'}
+                </div>
+                <div className="text-[11px] text-[#8696A0] truncate">
+                  Para {activeChat?.name}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCancelPendingMedia}
+                title="Cancelar envio (Esc)"
+                className="p-1.5 rounded-full hover:bg-[#202C33] text-[#8696A0] hover:text-[#E9EDEF] transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Área Central com a Imagem / Vídeo */}
+            <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center p-3 wa-scrollbar">
+              {pendingMedia.mediaType === 'video' ? (
+                <video
+                  src={pendingMedia.mediaDataUrl}
+                  controls
+                  autoPlay
+                  playsInline
+                  className="max-w-full max-h-full object-contain rounded-md shadow-2xl bg-black"
+                />
+              ) : (
+                <img
+                  src={pendingMedia.mediaDataUrl}
+                  alt="Pré-visualização da imagem"
+                  className="max-w-full max-h-full object-contain rounded-md shadow-2xl"
+                />
+              )}
+            </div>
+
+            {/* Barra Inferior com Legenda e Botões Cancelar / Confirmar */}
+            <div className="p-2.5 bg-[#111B21] border-t border-white/10 flex items-center gap-2 shrink-0 z-10">
+              <input
+                type="text"
+                value={pendingCaption}
+                onChange={(e) => setPendingCaption(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleConfirmPendingMedia();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    handleCancelPendingMedia();
+                  }
+                }}
+                placeholder="Adicionar legenda... (Opcional)"
+                autoFocus
+                className="flex-1 bg-[#202C33] text-[13px] text-[#D1D7DB] placeholder-[#8696A0] px-3.5 py-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#00A884]/60 transition-all border border-transparent"
+              />
+
+              <button
+                type="button"
+                onClick={handleCancelPendingMedia}
+                title="Cancelar envio (Esc)"
+                className="px-3 py-2 text-[12.5px] font-medium text-[#8696A0] hover:text-[#E9EDEF] hover:bg-[#202C33] rounded-lg transition-colors shrink-0"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmPendingMedia}
+                title="Confirmar e enviar foto (Enter)"
+                className="w-9 h-9 rounded-full bg-[#00A884] hover:bg-[#008f6f] text-white flex items-center justify-center shadow-lg transition-all hover:scale-105 active:scale-95 shrink-0"
+              >
+                <SendHorizontal className="w-4 h-4 ml-0.5" />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

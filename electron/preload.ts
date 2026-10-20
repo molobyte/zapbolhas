@@ -44,6 +44,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:select-media-file');
   },
 
+  readClipboardImage: () => {
+    return ipcRenderer.invoke('wa:read-clipboard-image');
+  },
+
   getWhatsAppStickers: () => {
     return ipcRenderer.invoke('wa:get-whatsapp-stickers');
   },

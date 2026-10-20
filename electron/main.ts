@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, screen, shell, clipboard } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
@@ -591,6 +591,23 @@ function registerIpcHandlers() {
       };
     } catch (err) {
       console.error('[main] Error selecting media file:', err);
+      return null;
+    }
+  });
+
+  ipcMain.handle('wa:read-clipboard-image', async () => {
+    try {
+      const img = clipboard.readImage();
+      if (!img || img.isEmpty()) {
+        return null;
+      }
+      return {
+        dataUrl: img.toDataURL(),
+        mediaType: 'image' as const,
+        filename: 'clipboard.png',
+      };
+    } catch (err) {
+      console.error('[main] Erro ao ler imagem da área de transferência:', err);
       return null;
     }
   });
