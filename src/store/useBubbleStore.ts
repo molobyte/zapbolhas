@@ -511,11 +511,15 @@ export function organizeBubbles(
     }
   });
 
+  const now = Date.now();
   const getSortKey = (entry: { item: BubbleItem; originalIndex: number }) => {
     if (typeof entry.item.lastActivity === 'number' && entry.item.lastActivity > 0) {
       return entry.item.lastActivity;
     }
-    return entry.originalIndex;
+    // Preserva a posição relativa caso não haja timestamp registrado
+    const fallback = now - (bubbles.length - entry.originalIndex) * 1000;
+    entry.item.lastActivity = fallback;
+    return fallback;
   };
 
   // Ordena por recência/atividade: mais antigas à esquerda, mais recentes à direita
@@ -1162,10 +1166,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       window.electronAPI.openSettingsWindow();
       return;
     }
-    const { activePopover, activeChatId, activeBubbles, maxBubbles, pinnedChatIds } = get();
+    const { activePopover, activeBubbles, maxBubbles, pinnedChatIds } = get();
     const nextBubbles =
-      activePopover === 'chat-window' && activeChatId
-        ? moveBubbleToMostRecent(activeBubbles, activeChatId, maxBubbles, pinnedChatIds)
+      activePopover === 'chat-window'
+        ? organizeBubbles(activeBubbles, maxBubbles, pinnedChatIds)
         : activeBubbles;
 
     set({
@@ -1281,10 +1285,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     if (activePopover === 'chat-list') {
       set({ activePopover: 'none', activeChatId: null, viewingImage: null });
     } else {
-      const { activeChatId, activeBubbles, maxBubbles, pinnedChatIds } = get();
+      const { activeBubbles, maxBubbles, pinnedChatIds } = get();
       const nextBubbles =
-        activePopover === 'chat-window' && activeChatId
-          ? moveBubbleToMostRecent(activeBubbles, activeChatId, maxBubbles, pinnedChatIds)
+        activePopover === 'chat-window'
+          ? organizeBubbles(activeBubbles, maxBubbles, pinnedChatIds)
           : activeBubbles;
 
       set({
@@ -1347,10 +1351,9 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         pinnedChatIds
       );
     } else {
-      const refreshed = activeBubbles.map((b) =>
-        b.chatId === chatId ? { ...b, unreadCount: 0, lastActivity: now } : b
+      updatedBubbles = activeBubbles.map((b) =>
+        b.chatId === chatId ? { ...b, unreadCount: 0 } : b
       );
-      updatedBubbles = organizeBubbles(refreshed, maxBubbles, pinnedChatIds);
     }
 
     const updatedChats = chats.map((c) =>
@@ -1400,9 +1403,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     } = get();
 
     if (activePopover === 'chat-window' && activeChatId === chatId) {
-      const updatedBubbles = moveBubbleToMostRecent(
+      const updatedBubbles = organizeBubbles(
         activeBubbles,
-        chatId,
         maxBubbles,
         pinnedChatIds
       );
@@ -1418,9 +1420,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
     let baseBubbles = activeBubbles;
     if (activePopover === 'chat-window' && activeChatId && activeChatId !== chatId) {
-      baseBubbles = moveBubbleToMostRecent(
+      baseBubbles = organizeBubbles(
         activeBubbles,
-        activeChatId,
         maxBubbles,
         pinnedChatIds
       );
@@ -1479,10 +1480,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   },
 
   minimizeActiveChat: () => {
-    const { activeChatId, activeBubbles, maxBubbles, pinnedChatIds } = get();
-    const updatedBubbles = activeChatId
-      ? moveBubbleToMostRecent(activeBubbles, activeChatId, maxBubbles, pinnedChatIds)
-      : activeBubbles;
+    const { activeBubbles, maxBubbles, pinnedChatIds } = get();
+    const updatedBubbles = organizeBubbles(activeBubbles, maxBubbles, pinnedChatIds);
 
     set({
       activeBubbles: updatedBubbles,
