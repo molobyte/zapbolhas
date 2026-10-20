@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   ActivePopover,
   BubbleItem,
+  ChatBubbleSize,
   ChatSummary,
   ConnectionMode,
   FormattedMessage,
@@ -445,7 +446,81 @@ function saveUserSettings(settings: SavedUserSettings) {
   }
 }
 
+const PINNED_STORAGE_KEY = 'whatsapp-bubbles-pinned-chats-v1';
+const CHAT_SIZES_STORAGE_KEY = 'whatsapp-bubbles-chat-sizes-v1';
+
+function loadPinnedChatIds(): string[] {
+  try {
+    const raw = localStorage.getItem(PINNED_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter((id) => typeof id === 'string');
+    }
+  } catch {
+    // Ignore localStorage error
+  }
+  return [];
+}
+
+function savePinnedChatIds(ids: string[]): void {
+  try {
+    localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    // Ignore localStorage error
+  }
+}
+
+function loadChatSizes(): Record<string, ChatBubbleSize> {
+  try {
+    const raw = localStorage.getItem(CHAT_SIZES_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null) return parsed;
+    }
+  } catch {
+    // Ignore localStorage error
+  }
+  return {};
+}
+
+function saveChatSizes(sizes: Record<string, ChatBubbleSize>): void {
+  try {
+    localStorage.setItem(CHAT_SIZES_STORAGE_KEY, JSON.stringify(sizes));
+  } catch {
+    // Ignore localStorage error
+  }
+}
+
+export function organizeBubbles(
+  bubbles: BubbleItem[],
+  maxBubbles: number,
+  pinnedChatIds: string[]
+): BubbleItem[] {
+  const isPinned = (chatId: string, itemPinned?: boolean) =>
+    itemPinned ?? pinnedChatIds.includes(chatId);
+
+  const unpinned: BubbleItem[] = [];
+  const pinned: BubbleItem[] = [];
+
+  for (const b of bubbles) {
+    if (isPinned(b.chatId, b.isPinned)) {
+      pinned.push({ ...b, isPinned: true });
+    } else {
+      unpinned.push({ ...b, isPinned: false });
+    }
+  }
+
+  // Available slots for unpinned bubbles (pinned are always kept)
+  const availableSlots = Math.max(0, maxBubbles - pinned.length);
+  const trimmedUnpinned = unpinned.slice(-availableSlots);
+
+  // Unpinned on left (0..k), pinned on right (closer to WhatsApp button)
+  return [...trimmedUnpinned, ...pinned];
+}
+
 const initialSettings = loadUserSettings();
+const initialPinnedChatIds = loadPinnedChatIds();
+const initialChatSizes = loadChatSizes();
 
 interface BubbleStoreState {
   mode: ConnectionMode;
@@ -466,6 +541,8 @@ interface BubbleStoreState {
 
   chats: ChatSummary[];
   activeBubbles: BubbleItem[];
+  pinnedChatIds: string[];
+  chatSizes: Record<string, ChatBubbleSize>;
   activePopover: ActivePopover;
   activeChatId: string | null;
   messagesByChat: Record<string, FormattedMessage[]>;
@@ -510,6 +587,8 @@ interface BubbleStoreState {
   toggleBubbleChat: (chatId: string) => void;
   minimizeActiveChat: () => void;
   closeBubble: (chatId: string) => void;
+  togglePinBubble: (chatId: string) => void;
+  setChatBubbleSize: (chatId: string, size: ChatBubbleSize) => void;
   sendMessage: (text: string, mentions?: string[]) => Promise<void>;
   sendSticker: (stickerDataUrl: string) => Promise<void>;
   sendVoiceNote: (durationSeconds?: number) => Promise<void>;
@@ -541,6 +620,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   chats: [],
   activeBubbles: [],
+  pinnedChatIds: initialPinnedChatIds,
+  chatSizes: initialChatSizes,
   activePopover: 'none',
   activeChatId: null,
   messagesByChat: {},
@@ -574,7 +655,11 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         activePopover: 'none',
         activeChatId: null,
         chats: INITIAL_MOCK_CHATS,
-        activeBubbles: INITIAL_MOCK_BUBBLES,
+        activeBubbles: organizeBubbles(
+          INITIAL_MOCK_BUBBLES,
+          get().maxBubbles,
+          get().pinnedChatIds
+        ),
         messagesByChat: INITIAL_MOCK_MESSAGES,
       });
     }
@@ -636,7 +721,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     if (userForcedMock || !realChats || realChats.length === 0) return;
 
     if (!hasSyncedRealChats) {
-      const { maxBubbles } = get();
+      const { maxBubbles, pinnedChatIds } = get();
       // Primeira sincronização real: cria bolhas para as conversas reais não silenciadas que possuem mensagens não lidas.
       // As mais recentes ficam na direita (final do array) e respeitam o limite maxBubbles.
       const initialRealBubbles: BubbleItem[] = realChats
@@ -648,14 +733,17 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           name: c.name,
           avatar: c.avatar,
           unreadCount: c.unreadCount,
+          isPinned: pinnedChatIds.includes(c.id),
         }));
+
+      const organizedInitial = organizeBubbles(initialRealBubbles, maxBubbles, pinnedChatIds);
 
       set({
         mode: 'whatsapp',
         waStatus: 'ready',
         hasSyncedRealChats: true,
         chats: realChats,
-        activeBubbles: initialRealBubbles,
+        activeBubbles: organizedInitial,
         messagesByChat: {},
         activePopover: activePopover === 'qr-code' ? 'chat-list' : activePopover,
         activeChatId: null,
@@ -663,7 +751,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       return;
     }
 
-    const { maxBubbles } = get();
+    const { maxBubbles, pinnedChatIds } = get();
     // Sincronizações subsequentes em segundo plano: atualiza lista e mantém bolhas sincronizadas
     const chatMap = new Map(realChats.map((c) => [c.id, c]));
     let updatedBubbles = activeBubbles.map((b) => {
@@ -676,6 +764,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         name: fresh.name,
         avatar: fresh.avatar,
         unreadCount: isCurrentlyOpen ? 0 : fresh.unreadCount,
+        isPinned: b.isPinned ?? pinnedChatIds.includes(b.chatId),
       };
     });
 
@@ -692,12 +781,11 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           name: c.name,
           avatar: c.avatar,
           unreadCount: c.unreadCount,
+          isPinned: pinnedChatIds.includes(c.id),
         });
       }
     }
-    if (updatedBubbles.length > maxBubbles) {
-      updatedBubbles = updatedBubbles.slice(-maxBubbles);
-    }
+    const organizedBubbles = organizeBubbles(updatedBubbles, maxBubbles, pinnedChatIds);
 
     const normalizedChats = realChats.map((c) => {
       const isCurrentlyOpen =
@@ -712,7 +800,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     set({
       mode: 'whatsapp',
       chats: normalizedChats,
-      activeBubbles: updatedBubbles,
+      activeBubbles: organizedBubbles,
     });
   },
 
@@ -916,7 +1004,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       customUserSoundName: s.customUserSoundName,
       customGroupSoundName: s.customGroupSoundName,
     });
-    const trimmedBubbles = s.activeBubbles.slice(-clamped);
+    const trimmedBubbles = organizeBubbles(s.activeBubbles, clamped, s.pinnedChatIds);
     const activeStillExists =
       !s.activeChatId || trimmedBubbles.some((b) => b.chatId === s.activeChatId);
     set({
@@ -1007,7 +1095,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         ? patch.customGroupSoundName
         : s.customGroupSoundName;
 
-    const trimmedBubbles = s.activeBubbles.slice(-nextMaxBubbles);
+    const trimmedBubbles = organizeBubbles(s.activeBubbles, nextMaxBubbles, s.pinnedChatIds);
     const activeStillExists =
       !s.activeChatId || trimmedBubbles.some((b) => b.chatId === s.activeChatId);
 
@@ -1183,20 +1271,34 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           }
         : undefined;
 
-    const { maxBubbles } = get();
+    const { maxBubbles, pinnedChatIds } = get();
     const exists = Boolean(existingBubble);
+    const isPinned = pinnedChatIds.includes(chatId);
     let updatedBubbles: BubbleItem[];
 
     if (!exists) {
-      updatedBubbles = [
-        ...activeBubbles,
-        {
-          chatId: targetChat.id,
-          name: targetChat.name,
-          avatar: targetChat.avatar,
-          unreadCount: 0,
-        },
-      ].slice(-maxBubbles);
+      const newBubble: BubbleItem = {
+        chatId: targetChat.id,
+        name: targetChat.name,
+        avatar: targetChat.avatar,
+        unreadCount: 0,
+        isPinned,
+      };
+      const unpinned = activeBubbles.filter((b) => !b.isPinned);
+      const pinned = activeBubbles.filter((b) => b.isPinned);
+      if (isPinned) {
+        updatedBubbles = organizeBubbles(
+          [...unpinned, ...pinned, newBubble],
+          maxBubbles,
+          pinnedChatIds
+        );
+      } else {
+        updatedBubbles = organizeBubbles(
+          [...unpinned, newBubble, ...pinned],
+          maxBubbles,
+          pinnedChatIds
+        );
+      }
     } else {
       updatedBubbles = activeBubbles.map((b) =>
         b.chatId === chatId ? { ...b, unreadCount: 0 } : b
@@ -1321,6 +1423,11 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   // 5.4 Fechar a conversa definitivamente (remove a bolha da barra inferior)
   closeBubble: (chatId) => {
     const { activeBubbles, activeChatId, activePopover } = get();
+    const bubble = activeBubbles.find((b) => b.chatId === chatId);
+    if (bubble?.isPinned) {
+      // Bloqueado: bolhas fixadas não podem ser fechadas até serem desfixadas
+      return;
+    }
     const updatedBubbles = activeBubbles.filter((b) => b.chatId !== chatId);
     const isClosingActiveChat =
       activePopover === 'chat-window' && activeChatId === chatId;
@@ -1332,6 +1439,43 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       replyingTo: isClosingActiveChat ? null : get().replyingTo,
       viewingImage: isClosingActiveChat ? null : get().viewingImage,
     });
+  },
+
+  // Fixar ou Desfixar conversa
+  togglePinBubble: (chatId: string) => {
+    const { activeBubbles, pinnedChatIds, maxBubbles } = get();
+    const isCurrentlyPinned = pinnedChatIds.includes(chatId);
+    const nextPinned = !isCurrentlyPinned;
+
+    const nextPinnedSet = new Set(pinnedChatIds);
+    if (nextPinned) {
+      nextPinnedSet.add(chatId);
+    } else {
+      nextPinnedSet.delete(chatId);
+    }
+    const nextPinnedIds = Array.from(nextPinnedSet);
+    savePinnedChatIds(nextPinnedIds);
+
+    const updated = activeBubbles.map((b) =>
+      b.chatId === chatId ? { ...b, isPinned: nextPinned } : b
+    );
+    const reordered = organizeBubbles(updated, maxBubbles, nextPinnedIds);
+
+    set({
+      activeBubbles: reordered,
+      pinnedChatIds: nextPinnedIds,
+    });
+  },
+
+  // Ajustar tamanho da janela de conversa deste usuário
+  setChatBubbleSize: (chatId: string, size: ChatBubbleSize) => {
+    const { chatSizes } = get();
+    const updated = {
+      ...chatSizes,
+      [chatId]: size,
+    };
+    saveChatSizes(updated);
+    set({ chatSizes: updated });
   },
 
   // Envio de mensagem de texto
@@ -1559,33 +1703,60 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       : [...existingMsgs, message];
 
     const bubbleExists = activeBubbles.some((b) => b.chatId === chat.id);
+    const { pinnedChatIds } = get();
+    const isPinned = pinnedChatIds.includes(chat.id);
     let updatedBubbles: BubbleItem[];
 
     if (!bubbleExists) {
-      // Se atingir o limite de Bubbles, remove a bolha mais antiga (início da fila) para dar lugar à mais recente
-      updatedBubbles = [
-        ...activeBubbles,
-        {
-          chatId: chat.id,
-          name: chat.name,
-          avatar: chat.avatar,
-          unreadCount: isChatCurrentlyOpen ? 0 : 1,
-        },
-      ].slice(-maxBubbles);
+      const newBubble: BubbleItem = {
+        chatId: chat.id,
+        name: chat.name,
+        avatar: chat.avatar,
+        unreadCount: isChatCurrentlyOpen ? 0 : 1,
+        isPinned,
+      };
+      const unpinned = activeBubbles.filter((b) => !b.isPinned);
+      const pinned = activeBubbles.filter((b) => b.isPinned);
+      if (isPinned) {
+        updatedBubbles = organizeBubbles(
+          [...unpinned, ...pinned, newBubble],
+          maxBubbles,
+          pinnedChatIds
+        );
+      } else {
+        updatedBubbles = organizeBubbles(
+          [...unpinned, newBubble, ...pinned],
+          maxBubbles,
+          pinnedChatIds
+        );
+      }
     } else {
-      // Move a bolha que acabou de receber mensagem para a posição mais recente (final da fila),
-      // garantindo que activeBubbles[0] seja sempre o contato mais antigo quando o limite for atingido
       const currentBubble = activeBubbles.find((b) => b.chatId === chat.id)!;
       const refreshedBubble: BubbleItem = {
         ...currentBubble,
         name: chat.name,
         avatar: chat.avatar,
         unreadCount: isChatCurrentlyOpen ? 0 : currentBubble.unreadCount + 1,
+        isPinned: currentBubble.isPinned ?? isPinned,
       };
-      updatedBubbles = [
-        ...activeBubbles.filter((b) => b.chatId !== chat.id),
-        refreshedBubble,
-      ].slice(-maxBubbles);
+      const withoutCurrent = activeBubbles.filter((b) => b.chatId !== chat.id);
+      if (refreshedBubble.isPinned) {
+        const unpinned = withoutCurrent.filter((b) => !b.isPinned);
+        const pinned = withoutCurrent.filter((b) => b.isPinned);
+        updatedBubbles = organizeBubbles(
+          [...unpinned, ...pinned, refreshedBubble],
+          maxBubbles,
+          pinnedChatIds
+        );
+      } else {
+        const unpinned = withoutCurrent.filter((b) => !b.isPinned);
+        const pinned = withoutCurrent.filter((b) => b.isPinned);
+        updatedBubbles = organizeBubbles(
+          [...unpinned, refreshedBubble, ...pinned],
+          maxBubbles,
+          pinnedChatIds
+        );
+      }
     }
 
     const activeStillInBubbles =
@@ -1676,7 +1847,11 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       userForcedMock: true,
       hasSyncedRealChats: false,
       chats: INITIAL_MOCK_CHATS,
-      activeBubbles: INITIAL_MOCK_BUBBLES,
+      activeBubbles: organizeBubbles(
+        INITIAL_MOCK_BUBBLES,
+        get().maxBubbles,
+        get().pinnedChatIds
+      ),
       activePopover: 'none',
       activeChatId: null,
       messagesByChat: INITIAL_MOCK_MESSAGES,

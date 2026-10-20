@@ -15,7 +15,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
-import { GroupParticipant } from '../types/whatsapp';
+import { GroupParticipant, CHAT_SIZE_CONFIG, ChatBubbleSize } from '../types/whatsapp';
 import { MessageBubble } from './MessageBubble';
 import { EmojiStickerPicker, PickerTab } from './EmojiStickerPicker';
 import { FormattedText } from './FormattedText';
@@ -38,6 +38,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     replyingTo,
     viewingImage,
     bubbleScale,
+    chatSizes,
     setReplyingTo,
     setViewingImage,
     minimizeActiveChat,
@@ -94,13 +95,19 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const messages = activeChatId ? messagesByChat[activeChatId] || [] : [];
   const unreadBanner = activeChatId ? unreadBannerByChat[activeChatId] : undefined;
 
+  const activeBubble = activeBubbles.find((b) => b.chatId === activeChatId);
+  const isPinned = Boolean(activeBubble?.isPinned);
+
+  const currentSizeKey: ChatBubbleSize = (activeChatId && chatSizes[activeChatId]) || 'pequeno';
+  const currentSize = CHAT_SIZE_CONFIG[currentSizeKey] || CHAT_SIZE_CONFIG.pequeno;
+
   // Calcula a posição horizontal exata da seta para apontar para o centro da bolha ativa no dock inferior,
-  // considerando o nível de zoom atual (bubbleScale)
+  // considerando o nível de zoom atual (bubbleScale) e o tamanho da janela
   const activeBubbleIndex = activeBubbles.findIndex((b) => b.chatId === activeChatId);
   const stepsFromRight =
     activeBubbleIndex >= 0 ? activeBubbles.length - activeBubbleIndex : 1;
   const arrowRightPx = Math.min(
-    344,
+    currentSize.width - 28,
     Math.max(12, Math.round(24 * bubbleScale + stepsFromRight * 60 * bubbleScale - 7))
   );
 
@@ -379,7 +386,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 12, scale: 0.96 }}
       transition={{ type: 'spring', stiffness: 420, damping: 28 }}
-      className="relative w-[372px] h-[476px] bg-[#0B141A] rounded-[8px] shadow-[0_16px_44px_rgba(0,0,0,0.88)] border border-white/[0.06] flex flex-col pointer-events-auto group/chat"
+      className={`relative ${currentSize.widthClass} ${currentSize.heightClass} bg-[#0B141A] rounded-[8px] shadow-[0_16px_44px_rgba(0,0,0,0.88)] border border-white/[0.06] flex flex-col pointer-events-auto group/chat transition-[width,height] duration-200`}
     >
       <div className="relative w-full h-full rounded-[8px] overflow-hidden flex flex-col">
         {/* Textura de Fundo Oficial WhatsApp Dark Doodles */}
@@ -415,9 +422,21 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => closeBubble(activeChatId)}
-            title="Fechar conversa e remover bolha"
-            className="w-6 h-6 rounded-full bg-[#202C33]/90 hover:bg-[#EF4444] text-[#E9EDEF] flex items-center justify-center transition-colors"
+            disabled={isPinned}
+            onClick={() => {
+              if (isPinned) return;
+              closeBubble(activeChatId);
+            }}
+            title={
+              isPinned
+                ? 'Conversa fixada (desfixe na bolha para fechar)'
+                : 'Fechar conversa e remover bolha'
+            }
+            className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
+              isPinned
+                ? 'bg-[#202C33]/40 text-[#8696A0]/40 cursor-not-allowed'
+                : 'bg-[#202C33]/90 hover:bg-[#EF4444] text-[#E9EDEF]'
+            }`}
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -854,7 +873,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
           style={{
             backgroundImage: `url('/wa-doodle-bg.png')`,
             backgroundSize: '180px 180px',
-            backgroundPosition: `-${372 - (arrowRightPx - 1) - 16}px -475px`,
+            backgroundPosition: `-${currentSize.width - (arrowRightPx - 1) - 16}px -${currentSize.height - 1}px`,
           }}
         />
       </div>

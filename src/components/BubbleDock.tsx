@@ -29,6 +29,7 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
   } = useBubbleStore();
 
   const [showContextMenu, setShowContextMenu] = useState(false);
+  const [activeBubbleMenuId, setActiveBubbleMenuId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -51,6 +52,7 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
   const handleRightClickLogo = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    setActiveBubbleMenuId(null);
     setShowContextMenu((prev) => !prev);
   };
 
@@ -151,8 +153,19 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
               key={bubble.chatId}
               bubble={bubble}
               isActive={activePopover === 'chat-window' && activeChatId === bubble.chatId}
-              onSelect={toggleBubbleChat}
+              isContextMenuOpen={activeBubbleMenuId === bubble.chatId}
+              onSelect={(chatId) => {
+                setActiveBubbleMenuId(null);
+                toggleBubbleChat(chatId);
+              }}
               onClose={closeBubble}
+              onOpenContextMenu={(chatId) => {
+                setShowContextMenu(false);
+                setActiveBubbleMenuId((prev) => (prev === chatId ? null : chatId));
+              }}
+              onCloseContextMenu={() => setActiveBubbleMenuId(null)}
+              onInteractiveEnter={onInteractiveEnter}
+              onInteractiveLeave={onInteractiveLeave}
             />
           ))}
         </AnimatePresence>

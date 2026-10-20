@@ -58,11 +58,41 @@ export interface FormattedMessage {
   audioData?: AudioData;
 }
 
+export type ChatBubbleSize = 'pequeno' | 'medio' | 'grande';
+
+export const CHAT_SIZE_CONFIG: Record<
+  ChatBubbleSize,
+  { width: number; height: number; widthClass: string; heightClass: string; label: string }
+> = {
+  pequeno: {
+    width: 372,
+    height: 476,
+    widthClass: 'w-[372px]',
+    heightClass: 'h-[476px]',
+    label: 'Pequeno (Atual)',
+  },
+  medio: {
+    width: 460,
+    height: 580,
+    widthClass: 'w-[460px]',
+    heightClass: 'h-[580px]',
+    label: 'Médio',
+  },
+  grande: {
+    width: 560,
+    height: 680,
+    widthClass: 'w-[560px]',
+    heightClass: 'h-[680px]',
+    label: 'Grande',
+  },
+};
+
 export interface BubbleItem {
   chatId: string;
   name: string;
   avatar: string;
   unreadCount: number;
+  isPinned?: boolean;
 }
 
 export interface ViewingImageState {
