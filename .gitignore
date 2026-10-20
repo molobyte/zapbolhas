@@ -20,3 +20,13 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 *.log
+
+# User local evidence / debug (apenas local)
+evidencias/
+
+# AI Agent instructions & local config
+GEMINI.md
+.agents/
+.agent/
+_agents/
+_agent/
