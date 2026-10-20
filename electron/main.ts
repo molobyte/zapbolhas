@@ -532,6 +532,69 @@ function registerIpcHandlers() {
     }
   );
 
+  ipcMain.handle(
+    'wa:send-media',
+    async (
+      _event,
+      payload: {
+        chatId: string;
+        mediaDataUrl: string;
+        caption?: string;
+        filename?: string;
+        quotedMessageId?: string;
+      }
+    ) => {
+      if (!waService) return null;
+      return await waService.sendMedia(payload);
+    }
+  );
+
+  ipcMain.handle('wa:select-media-file', async () => {
+    try {
+      const res = await dialog.showOpenDialog({
+        title: 'Selecionar Imagem ou Vídeo',
+        filters: [
+          {
+            name: 'Imagens e Vídeos',
+            extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov', 'webm', 'mkv', 'avi'],
+          },
+        ],
+        properties: ['openFile'],
+      });
+
+      if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
+        return null;
+      }
+
+      const filePath = res.filePaths[0];
+      const buf = fs.readFileSync(filePath);
+      const ext = (path.extname(filePath) || '').toLowerCase();
+      let mime = 'image/jpeg';
+      if (ext === '.png') mime = 'image/png';
+      else if (ext === '.webp') mime = 'image/webp';
+      else if (ext === '.gif') mime = 'image/gif';
+      else if (ext === '.mp4') mime = 'video/mp4';
+      else if (ext === '.mov') mime = 'video/quicktime';
+      else if (ext === '.webm') mime = 'video/webm';
+      else if (ext === '.mkv') mime = 'video/x-matroska';
+      else if (ext === '.avi') mime = 'video/x-msvideo';
+
+      const filename = path.basename(filePath);
+      const isVideo = mime.startsWith('video/');
+      const mediaType: 'image' | 'video' = isVideo ? 'video' : 'image';
+      const dataUrl = `data:${mime};base64,${buf.toString('base64')}`;
+
+      return {
+        dataUrl,
+        mediaType,
+        filename,
+      };
+    } catch (err) {
+      console.error('[main] Error selecting media file:', err);
+      return null;
+    }
+  });
+
   ipcMain.handle('wa:get-whatsapp-stickers', async () => {
     if (!waService) return [];
     return await waService.getWhatsAppStickers();

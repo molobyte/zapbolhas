@@ -2279,6 +2279,70 @@ export class WhatsAppService {
     }
   }
 
+  public async sendMedia(payload: {
+    chatId: string;
+    mediaDataUrl: string;
+    caption?: string;
+    filename?: string;
+    quotedMessageId?: string;
+  }): Promise<FormattedChatMessage | null> {
+    if (!this.client || this.status !== 'ready') {
+      return null;
+    }
+    try {
+      const match = /^data:([a-zA-Z0-9+.-]+\/[a-zA-Z0-9+.-]+);base64,(.+)$/.exec(
+        payload.mediaDataUrl
+      );
+      if (!match) {
+        return null;
+      }
+      const mimetype = match[1];
+      const base64Data = match[2];
+      const defaultFilename = mimetype.startsWith('video/')
+        ? 'video.mp4'
+        : mimetype.includes('png')
+        ? 'image.png'
+        : mimetype.includes('webp')
+        ? 'image.webp'
+        : 'image.jpg';
+      const filename = payload.filename || defaultFilename;
+      const media = new MessageMedia(mimetype, base64Data, filename);
+
+      const options: {
+        caption?: string;
+        quotedMessageId?: string;
+      } = {};
+      if (payload.caption) {
+        options.caption = payload.caption;
+      }
+      if (payload.quotedMessageId) {
+        options.quotedMessageId = payload.quotedMessageId;
+      }
+
+      const sent = await this.client.sendMessage(payload.chatId, media, options);
+      const sentId = (sent as unknown as { id?: { _serialized?: string } })?.id?._serialized;
+      if (sentId) {
+        this.mediaCache.set(sentId, payload.mediaDataUrl);
+      }
+
+      const recent = await this.getMessages(payload.chatId, 5);
+      const latest = recent[recent.length - 1] || null;
+      if (latest && (latest.type === 'image' || latest.type === 'video')) {
+        if (latest.type === 'image' && !latest.imageUrl) {
+          latest.imageUrl = payload.mediaDataUrl;
+          latest.isHdLoaded = true;
+        } else if (latest.type === 'video' && !latest.videoUrl) {
+          latest.videoUrl = payload.mediaDataUrl;
+          latest.isHdLoaded = true;
+        }
+      }
+      return latest;
+    } catch (err) {
+      console.error('[WhatsAppService] Error sending media:', err);
+      return null;
+    }
+  }
+
   public async getWhatsAppStickers(): Promise<
     Array<{ id: string; dataUrl: string; source: 'whatsapp' }>
   > {

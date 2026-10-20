@@ -3,9 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Minus,
   X,
-  Paperclip,
+
   Smile,
-  Sticker,
+
   AtSign,
   Mic,
   SendHorizontal,
@@ -47,6 +47,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     fetchGroupParticipants,
     sendMessage,
     sendSticker,
+    sendMedia,
     sendVoiceNote,
   } = useBubbleStore();
 
@@ -246,7 +247,22 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     await sendSticker(stickerDataUrl);
   };
 
-  const handleTogglePicker = (tab: PickerTab) => {
+  const handleSendMedia = async (media: {
+    mediaDataUrl: string;
+    mediaType?: 'image' | 'video';
+    filename?: string;
+    caption?: string;
+  }) => {
+    userHasScrolledUpRef.current = false;
+    setPickerOpen(false);
+    await sendMedia(media);
+  };
+
+  const handleTogglePicker = (tab?: PickerTab) => {
+    if (!tab) {
+      setPickerOpen((prev) => !prev);
+      return;
+    }
     if (pickerOpen && pickerTab === tab) {
       setPickerOpen(false);
     } else {
@@ -603,6 +619,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             initialTab={pickerTab}
             onSelectEmoji={handleInsertEmoji}
             onSelectSticker={handleSendSticker}
+            onSelectMedia={handleSendMedia}
             onClose={() => setPickerOpen(false)}
           />
         )}
@@ -694,42 +711,18 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       {/* Barra de Digitação Inferior (Idêntica à conversando.jpg) */}
       <form onSubmit={handleSubmit} className="relative z-20 px-2 pb-2 pt-1">
         <div className="h-[42px] bg-[#202C33] rounded-[8px] px-3 flex items-center gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.45)]">
-          {/* Ícone Clipe de Papel (Anexo / Importar Figurinha) */}
+          {/* Botão Único para Painel de Emojis, Figurinhas e Anexos */}
           <button
             type="button"
-            onClick={() => handleTogglePicker('sticker')}
-            title="Adicionar figurinha da biblioteca"
-            className="text-[#8696A0] hover:text-[#D1D7DB] transition-colors shrink-0 focus:outline-none"
-          >
-            <Paperclip className="w-[18px] h-[18px] -rotate-45 stroke-[1.9]" />
-          </button>
-
-          {/* Ícone Emoji */}
-          <button
-            type="button"
-            onClick={() => handleTogglePicker('emoji')}
-            title="Abrir painel de Emojis"
+            onClick={() => handleTogglePicker()}
+            title="Emojis, figurinhas e anexos"
             className={`transition-colors shrink-0 focus:outline-none ${
-              pickerOpen && pickerTab === 'emoji'
+              pickerOpen
                 ? 'text-[#00A884]'
                 : 'text-[#8696A0] hover:text-[#D1D7DB]'
             }`}
           >
-            <Smile className="w-[19px] h-[19px] stroke-[1.9]" />
-          </button>
-
-          {/* Ícone Figurinhas (Stickers) */}
-          <button
-            type="button"
-            onClick={() => handleTogglePicker('sticker')}
-            title="Abrir biblioteca de Figurinhas"
-            className={`transition-colors shrink-0 focus:outline-none ${
-              pickerOpen && pickerTab === 'sticker'
-                ? 'text-[#00A884]'
-                : 'text-[#8696A0] hover:text-[#D1D7DB]'
-            }`}
-          >
-            <Sticker className="w-[18px] h-[18px] stroke-[1.9]" />
+            <Smile className="w-[20px] h-[20px] stroke-[1.9]" />
           </button>
 
           {/* Campo de Texto */}

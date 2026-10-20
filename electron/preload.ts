@@ -30,6 +30,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:send-sticker', payload);
   },
 
+  sendMedia: (payload: {
+    chatId: string;
+    mediaDataUrl: string;
+    caption?: string;
+    filename?: string;
+    quotedMessageId?: string;
+  }) => {
+    return ipcRenderer.invoke('wa:send-media', payload);
+  },
+
+  selectMediaFile: () => {
+    return ipcRenderer.invoke('wa:select-media-file');
+  },
+
   getWhatsAppStickers: () => {
     return ipcRenderer.invoke('wa:get-whatsapp-stickers');
   },

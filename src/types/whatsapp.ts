@@ -150,6 +150,14 @@ export interface SendStickerPayload {
   quotedMessageId?: string;
 }
 
+export interface SendMediaPayload {
+  chatId: string;
+  mediaDataUrl: string;
+  caption?: string;
+  filename?: string;
+  quotedMessageId?: string;
+}
+
 export interface StickerItem {
   id: string;
   dataUrl: string;
@@ -167,6 +175,12 @@ export interface ElectronAPI {
   ) => Promise<GroupParticipant[]>;
   sendMessage: (payload: SendMessagePayload) => Promise<FormattedMessage | null>;
   sendSticker?: (payload: SendStickerPayload) => Promise<FormattedMessage | null>;
+  sendMedia?: (payload: SendMediaPayload) => Promise<FormattedMessage | null>;
+  selectMediaFile?: () => Promise<{
+    dataUrl: string;
+    mediaType: 'image' | 'video';
+    filename: string;
+  } | null>;
   getWhatsAppStickers?: () => Promise<StickerItem[]>;
   getUserStickers?: () => Promise<StickerItem[]>;
   importStickersFromDisk?: () => Promise<StickerItem[]>;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   Smile,
@@ -17,16 +17,24 @@ import {
   Lightbulb,
   X,
   Loader2,
+  Paperclip,
+  Send,
 } from 'lucide-react';
 import { StickerItem } from '../types/whatsapp';
 import { useBubbleStore } from '../store/useBubbleStore';
 
-export type PickerTab = 'emoji' | 'sticker';
+export type PickerTab = 'emoji' | 'sticker' | 'attachment';
 
 interface EmojiStickerPickerProps {
   initialTab?: PickerTab;
   onSelectEmoji: (emoji: string) => void;
   onSelectSticker: (stickerDataUrl: string) => void;
+  onSelectMedia?: (media: {
+    mediaDataUrl: string;
+    mediaType?: 'image' | 'video';
+    filename?: string;
+    caption?: string;
+  }) => void;
   onClose: () => void;
 }
 
@@ -455,10 +463,27 @@ export async function normalizeImageToStickerWebp(dataUrl: string): Promise<stri
   });
 }
 
+async function ensureDataUrl(url: string): Promise<string> {
+  if (url.startsWith('data:')) return url;
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string) || url);
+      reader.onerror = () => resolve(url);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return url;
+  }
+}
+
 export const EmojiStickerPicker: React.FC<EmojiStickerPickerProps> = ({
   initialTab = 'emoji',
   onSelectEmoji,
   onSelectSticker,
+  onSelectMedia,
   onClose,
 }) => {
   const [activeTab, setActiveTab] = useState<PickerTab>(initialTab);
@@ -470,8 +495,11 @@ export const EmojiStickerPicker: React.FC<EmojiStickerPickerProps> = ({
   const [libraryStickers, setLibraryStickers] = useState<StickerItem[]>([]);
   const [whatsappStickers, setWhatsappStickers] = useState<StickerItem[]>([]);
   const [isLoadingStickers, setIsLoadingStickers] = useState(false);
+  const [isProcessingMedia, setIsProcessingMedia] = useState(false);
 
+  const chats = useBubbleStore((s) => s.chats);
   const messagesByChat = useBubbleStore((s) => s.messagesByChat);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -496,6 +524,107 @@ export const EmojiStickerPicker: React.FC<EmojiStickerPickerProps> = ({
     }
     return items;
   }, [messagesByChat]);
+
+  // Extrai no máximo as últimas 20 fotos recebidas em conversas e grupos
+  const recentPhotos = useMemo<Array<{ id: string; url: string; caption?: string }>>(() => {
+    const seen = new Set<string>();
+    const items: Array<{ id: string; url: string; caption?: string }> = [];
+
+    // Prioriza varrer a partir das conversas ordenadas por atividade recente
+    for (const chat of chats) {
+      const msgs = messagesByChat[chat.id] || [];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (m.type === 'image' && m.imageUrl && !seen.has(m.imageUrl)) {
+          seen.add(m.imageUrl);
+          items.push({
+            id: m.id,
+            url: m.imageUrl,
+            caption: m.text,
+          });
+          if (items.length >= 20) return items;
+        }
+      }
+    }
+
+    // Varre conversas restantes em messagesByChat que possam não estar na lista principal
+    if (items.length < 20) {
+      for (const [chatId, msgs] of Object.entries(messagesByChat)) {
+        if (chats.some((c) => c.id === chatId)) continue;
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i];
+          if (m.type === 'image' && m.imageUrl && !seen.has(m.imageUrl)) {
+            seen.add(m.imageUrl);
+            items.push({
+              id: m.id,
+              url: m.imageUrl,
+              caption: m.text,
+            });
+            if (items.length >= 20) return items;
+          }
+        }
+      }
+    }
+
+    return items;
+  }, [chats, messagesByChat]);
+
+  const handlePhotoClick = async (url: string, caption?: string) => {
+    if (isProcessingMedia) return;
+    setIsProcessingMedia(true);
+    try {
+      const dataUrl = await ensureDataUrl(url);
+      onSelectMedia?.({
+        mediaDataUrl: dataUrl,
+        mediaType: 'image',
+        filename: 'foto.jpg',
+        caption,
+      });
+    } finally {
+      setIsProcessingMedia(false);
+    }
+  };
+
+  const handlePickComputerFile = async () => {
+    if (isProcessingMedia) return;
+    if (window.electronAPI?.selectMediaFile) {
+      setIsProcessingMedia(true);
+      try {
+        const res = await window.electronAPI.selectMediaFile();
+        if (res && res.dataUrl) {
+          onSelectMedia?.({
+            mediaDataUrl: res.dataUrl,
+            mediaType: res.mediaType,
+            filename: res.filename,
+          });
+        }
+      } finally {
+        setIsProcessingMedia(false);
+      }
+    } else {
+      fileInputRef.current?.click();
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsProcessingMedia(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const isVideo = file.type.startsWith('video/');
+      onSelectMedia?.({
+        mediaDataUrl: dataUrl,
+        mediaType: isVideo ? 'video' : 'image',
+        filename: file.name,
+      });
+      setIsProcessingMedia(false);
+    };
+    reader.onerror = () => setIsProcessingMedia(false);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
   const loadAllStickers = useCallback(async () => {
     setIsLoadingStickers(true);
@@ -674,6 +803,30 @@ export const EmojiStickerPicker: React.FC<EmojiStickerPickerProps> = ({
                 }`}
               >
                 {libraryStickers.length + whatsappStickers.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('attachment')}
+            className={`px-3 py-1 rounded-[6px] text-[12px] font-medium flex items-center gap-1.5 transition-colors ${
+              activeTab === 'attachment'
+                ? 'bg-[#00A884] text-[#111B21] font-semibold'
+                : 'text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/5'
+            }`}
+          >
+            <Paperclip className="w-3.5 h-3.5 -rotate-45" />
+            <span>Anexos</span>
+            {recentPhotos.length > 0 && (
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                  activeTab === 'attachment'
+                    ? 'bg-[#111B21]/25 text-[#111B21]'
+                    : 'bg-[#2A3942] text-[#E9EDEF]'
+                }`}
+              >
+                {recentPhotos.length}
               </span>
             )}
           </button>
@@ -899,6 +1052,78 @@ export const EmojiStickerPicker: React.FC<EmojiStickerPickerProps> = ({
                 })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* CONTEÚDO ABA 3: ANEXOS (ENVIAR FOTO DO COMPUTADOR OU REENVIAR RECENTES) */}
+      {activeTab === 'attachment' && (
+        <div className="flex-1 flex flex-col min-h-0">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*"
+            className="hidden"
+            onChange={handleFileInputChange}
+          />
+
+          {/* Barra de Subtítulo / Info */}
+          <div className="px-3 py-1.5 bg-[#182229]/60 border-b border-white/[0.06] flex items-center justify-between text-[11px] text-[#8696A0]">
+            <span>Reenvio rápido das últimas fotos ou carregue do PC</span>
+            {isProcessingMedia && (
+              <div className="flex items-center gap-1 text-[#00A884]">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span>Enviando...</span>
+              </div>
+            )}
+          </div>
+
+          {/* Grade de Anexos */}
+          <div className="flex-1 overflow-y-auto p-2 wa-scrollbar">
+            <div className="grid grid-cols-4 gap-2">
+              {/* Primeiro Card: Botão (+) para carregar do computador */}
+              <button
+                type="button"
+                onClick={handlePickComputerFile}
+                disabled={isProcessingMedia}
+                title="Carregar imagem ou vídeo do seu computador"
+                className="group/add aspect-square rounded-[8px] bg-[#111B21]/70 hover:bg-[#202C33] border-2 border-dashed border-[#00A884]/60 hover:border-[#25D366] flex flex-col items-center justify-center gap-1 p-1 text-center cursor-pointer transition-all disabled:opacity-50"
+              >
+                <div className="w-7 h-7 rounded-full bg-[#00A884]/20 group-hover/add:bg-[#00A884]/35 flex items-center justify-center transition-colors">
+                  <Plus className="w-4 h-4 text-[#00A884] group-hover/add:text-[#25D366] stroke-[2.5]" />
+                </div>
+                <span className="text-[11px] font-semibold text-[#E9EDEF] leading-tight">
+                  Do computador
+                </span>
+                <span className="text-[9px] text-[#8696A0] leading-none">
+                  Foto ou vídeo
+                </span>
+              </button>
+
+              {/* Cards das últimas até 20 fotos recebidas */}
+              {recentPhotos.map((photo, idx) => (
+                <button
+                  key={photo.id || `photo-${idx}`}
+                  type="button"
+                  onClick={() => handlePhotoClick(photo.url, photo.caption)}
+                  disabled={isProcessingMedia}
+                  title={photo.caption ? `Clique para reenviar: ${photo.caption}` : 'Clique para reenviar foto'}
+                  className="group/photo relative aspect-square rounded-[8px] bg-[#111B21]/60 hover:bg-[#2A3942] border border-white/[0.08] hover:border-[#00A884] overflow-hidden cursor-pointer transition-all flex items-center justify-center p-0.5 focus:outline-none disabled:opacity-50"
+                >
+                  <img
+                    src={photo.url}
+                    alt={photo.caption || 'Foto recente'}
+                    className="w-full h-full object-cover rounded-[6px] group-hover/photo:scale-105 transition-transform"
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 bg-black/0 group-hover/photo:bg-black/35 transition-colors flex items-center justify-center rounded-[6px]">
+                    <div className="opacity-0 group-hover/photo:opacity-100 transition-opacity bg-[#111B21]/90 rounded-full p-1 text-[#00A884] shadow-md flex items-center justify-center">
+                      <Send className="w-3.5 h-3.5" />
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}

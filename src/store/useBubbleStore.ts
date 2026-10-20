@@ -251,10 +251,12 @@ export const INITIAL_MOCK_MESSAGES: Record<string, FormattedMessage[]> = {
       id: 'uq-2',
       chatId: 'unidev-qam',
       senderName: '~Hllink',
-      text: '📷 Foto: Screenshot do painel atualizado',
+      text: 'Screenshot do painel atualizado',
       timestamp: '13:51',
       fromMe: false,
-      type: 'text',
+      type: 'image',
+      imageUrl: '/avatars/unidev-qam.png',
+      isHdLoaded: true,
     },
   ],
   'cacadores-rewards': [
@@ -626,6 +628,12 @@ interface BubbleStoreState {
   setChatBubbleSize: (chatId: string, size: ChatBubbleSize) => void;
   sendMessage: (text: string, mentions?: string[]) => Promise<void>;
   sendSticker: (stickerDataUrl: string) => Promise<void>;
+  sendMedia: (payload: {
+    mediaDataUrl: string;
+    mediaType?: 'image' | 'video';
+    caption?: string;
+    filename?: string;
+  }) => Promise<void>;
   sendVoiceNote: (durationSeconds?: number) => Promise<void>;
   receiveIncomingMessage: (payload: IncomingMessagePayload) => void;
   simulateIncomingMessage: () => void;
@@ -1701,6 +1709,101 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
             (idx === freshMsgs.length - 1 && m.fromMe && m.type === 'sticker' && !m.imageUrl)
           ) {
             return { ...m, imageUrl: m.imageUrl || stickerDataUrl, isHdLoaded: true };
+          }
+          return m;
+        });
+        get().setMessagesForChat(activeChatId, enriched);
+      }
+    }
+  },
+
+  // Envio de mídia (foto / vídeo / anexo)
+  sendMedia: async (payload) => {
+    const { activeChatId, replyingTo, mode, messagesByChat, chats, unreadBannerByChat } =
+      get();
+    if (!payload.mediaDataUrl || !activeChatId) return;
+
+    const mediaType = payload.mediaType || 'image';
+    const timestamp = getCurrentTimeStr();
+    const optimisticMedia: FormattedMessage = {
+      id: `media-${Date.now()}`,
+      chatId: activeChatId,
+      text: payload.caption || '',
+      timestamp,
+      fromMe: true,
+      type: mediaType,
+      imageUrl: mediaType === 'image' ? payload.mediaDataUrl : undefined,
+      videoUrl: mediaType === 'video' ? payload.mediaDataUrl : undefined,
+      isHdLoaded: true,
+      ack: 'read',
+      quotedMessage: replyingTo || undefined,
+    };
+
+    const currentMsgs = messagesByChat[activeChatId] || [];
+    const updatedChats = chats.map((c) =>
+      c.id === activeChatId
+        ? {
+            ...c,
+            lastMessage: {
+              text: payload.caption || (mediaType === 'image' ? 'Foto' : 'Vídeo'),
+              mediaType: mediaType === 'image' ? ('photo' as const) : ('video' as const),
+              fromMe: true,
+              ack: 'read' as const,
+              timestamp,
+            },
+          }
+        : c
+    );
+
+    const now = Date.now();
+    const updatedActiveBubbles = get().activeBubbles.map((b) =>
+      b.chatId === activeChatId ? { ...b, lastActivity: now } : b
+    );
+
+    set({
+      messagesByChat: {
+        ...messagesByChat,
+        [activeChatId]: [...currentMsgs, optimisticMedia],
+      },
+      unreadBannerByChat: {
+        ...unreadBannerByChat,
+        [activeChatId]: undefined,
+      },
+      activeBubbles: updatedActiveBubbles,
+      chats: updatedChats,
+      replyingTo: null,
+    });
+
+    if (mode === 'whatsapp' && window.electronAPI?.sendMedia) {
+      const sentMsg = await window.electronAPI.sendMedia({
+        chatId: activeChatId,
+        mediaDataUrl: payload.mediaDataUrl,
+        caption: payload.caption,
+        filename: payload.filename,
+        quotedMessageId: replyingTo?.id,
+      });
+      const freshMsgs = await window.electronAPI.getMessages(
+        activeChatId,
+        Math.max(100, currentMsgs.length + 5)
+      );
+      if (freshMsgs && freshMsgs.length > 0) {
+        const enriched = freshMsgs.map((m, idx) => {
+          if (
+            (sentMsg && m.id === sentMsg.id) ||
+            (idx === freshMsgs.length - 1 &&
+              m.fromMe &&
+              (m.type === 'image' || m.type === 'video') &&
+              !m.imageUrl &&
+              !m.videoUrl)
+          ) {
+            return {
+              ...m,
+              imageUrl:
+                mediaType === 'image' ? m.imageUrl || payload.mediaDataUrl : m.imageUrl,
+              videoUrl:
+                mediaType === 'video' ? m.videoUrl || payload.mediaDataUrl : m.videoUrl,
+              isHdLoaded: true,
+            };
           }
           return m;
         });
