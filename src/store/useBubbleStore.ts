@@ -518,6 +518,40 @@ export function organizeBubbles(
   return [...trimmedUnpinned, ...pinned];
 }
 
+export function moveBubbleToMostRecent(
+  bubbles: BubbleItem[],
+  chatId: string,
+  maxBubbles: number,
+  pinnedChatIds: string[]
+): BubbleItem[] {
+  const bubble = bubbles.find((b) => b.chatId === chatId);
+  if (!bubble) return bubbles;
+
+  const withoutBubble = bubbles.filter((b) => b.chatId !== chatId);
+  const isPinned = bubble.isPinned ?? pinnedChatIds.includes(chatId);
+
+  const unpinned = withoutBubble.filter(
+    (b) => !(b.isPinned ?? pinnedChatIds.includes(b.chatId))
+  );
+  const pinned = withoutBubble.filter(
+    (b) => (b.isPinned ?? pinnedChatIds.includes(b.chatId))
+  );
+
+  if (isPinned) {
+    return organizeBubbles(
+      [...unpinned, ...pinned, { ...bubble, isPinned: true }],
+      maxBubbles,
+      pinnedChatIds
+    );
+  } else {
+    return organizeBubbles(
+      [...unpinned, { ...bubble, isPinned: false }, ...pinned],
+      maxBubbles,
+      pinnedChatIds
+    );
+  }
+}
+
 const initialSettings = loadUserSettings();
 const initialPinnedChatIds = loadPinnedChatIds();
 const initialChatSizes = loadChatSizes();
@@ -1121,7 +1155,14 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       window.electronAPI.openSettingsWindow();
       return;
     }
+    const { activePopover, activeChatId, activeBubbles, maxBubbles, pinnedChatIds } = get();
+    const nextBubbles =
+      activePopover === 'chat-window' && activeChatId
+        ? moveBubbleToMostRecent(activeBubbles, activeChatId, maxBubbles, pinnedChatIds)
+        : activeBubbles;
+
     set({
+      activeBubbles: nextBubbles,
       activePopover: 'settings',
       activeChatId: null,
       replyingTo: null,
@@ -1233,7 +1274,14 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     if (activePopover === 'chat-list') {
       set({ activePopover: 'none', activeChatId: null, viewingImage: null });
     } else {
+      const { activeChatId, activeBubbles, maxBubbles, pinnedChatIds } = get();
+      const nextBubbles =
+        activePopover === 'chat-window' && activeChatId
+          ? moveBubbleToMostRecent(activeBubbles, activeChatId, maxBubbles, pinnedChatIds)
+          : activeBubbles;
+
       set({
+        activeBubbles: nextBubbles,
         activePopover: 'chat-list',
         activeChatId: null,
         replyingTo: null,
@@ -1347,10 +1395,19 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       mode,
       messagesByChat,
       unreadBannerByChat,
+      maxBubbles,
+      pinnedChatIds,
     } = get();
 
     if (activePopover === 'chat-window' && activeChatId === chatId) {
+      const updatedBubbles = moveBubbleToMostRecent(
+        activeBubbles,
+        chatId,
+        maxBubbles,
+        pinnedChatIds
+      );
       set({
+        activeBubbles: updatedBubbles,
         activePopover: 'none',
         activeChatId: null,
         replyingTo: null,
@@ -1359,7 +1416,17 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       return;
     }
 
-    const existingBubble = activeBubbles.find((b) => b.chatId === chatId);
+    let baseBubbles = activeBubbles;
+    if (activePopover === 'chat-window' && activeChatId && activeChatId !== chatId) {
+      baseBubbles = moveBubbleToMostRecent(
+        activeBubbles,
+        activeChatId,
+        maxBubbles,
+        pinnedChatIds
+      );
+    }
+
+    const existingBubble = baseBubbles.find((b) => b.chatId === chatId);
     const targetChat = chats.find((c) => c.id === chatId);
     const unreadAtOpen = Math.max(
       existingBubble?.unreadCount || 0,
@@ -1376,7 +1443,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           }
         : undefined;
 
-    const updatedBubbles = activeBubbles.map((b) =>
+    const updatedBubbles = baseBubbles.map((b) =>
       b.chatId === chatId ? { ...b, unreadCount: 0 } : b
     );
     const updatedChats = chats.map((c) =>
@@ -1412,7 +1479,13 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   },
 
   minimizeActiveChat: () => {
+    const { activeChatId, activeBubbles, maxBubbles, pinnedChatIds } = get();
+    const updatedBubbles = activeChatId
+      ? moveBubbleToMostRecent(activeBubbles, activeChatId, maxBubbles, pinnedChatIds)
+      : activeBubbles;
+
     set({
+      activeBubbles: updatedBubbles,
       activePopover: 'none',
       activeChatId: null,
       replyingTo: null,
@@ -1739,23 +1812,32 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         unreadCount: isChatCurrentlyOpen ? 0 : currentBubble.unreadCount + 1,
         isPinned: currentBubble.isPinned ?? isPinned,
       };
-      const withoutCurrent = activeBubbles.filter((b) => b.chatId !== chat.id);
-      if (refreshedBubble.isPinned) {
-        const unpinned = withoutCurrent.filter((b) => !b.isPinned);
-        const pinned = withoutCurrent.filter((b) => b.isPinned);
-        updatedBubbles = organizeBubbles(
-          [...unpinned, ...pinned, refreshedBubble],
-          maxBubbles,
-          pinnedChatIds
+      if (isChatCurrentlyOpen) {
+        // Enquanto o usuário estiver com esta conversa aberta, atualiza a bolha na mesma posição
+        // para que a seta e a janela não percam o alinhamento com a bolha durante a conversa ativa.
+        // A bolha só será movida para o topo dos recentes quando a conversa for fechada.
+        updatedBubbles = activeBubbles.map((b) =>
+          b.chatId === chat.id ? refreshedBubble : b
         );
       } else {
-        const unpinned = withoutCurrent.filter((b) => !b.isPinned);
-        const pinned = withoutCurrent.filter((b) => b.isPinned);
-        updatedBubbles = organizeBubbles(
-          [...unpinned, refreshedBubble, ...pinned],
-          maxBubbles,
-          pinnedChatIds
-        );
+        const withoutCurrent = activeBubbles.filter((b) => b.chatId !== chat.id);
+        if (refreshedBubble.isPinned) {
+          const unpinned = withoutCurrent.filter((b) => !b.isPinned);
+          const pinned = withoutCurrent.filter((b) => b.isPinned);
+          updatedBubbles = organizeBubbles(
+            [...unpinned, ...pinned, refreshedBubble],
+            maxBubbles,
+            pinnedChatIds
+          );
+        } else {
+          const unpinned = withoutCurrent.filter((b) => !b.isPinned);
+          const pinned = withoutCurrent.filter((b) => b.isPinned);
+          updatedBubbles = organizeBubbles(
+            [...unpinned, refreshedBubble, ...pinned],
+            maxBubbles,
+            pinnedChatIds
+          );
+        }
       }
     }
 

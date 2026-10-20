@@ -101,15 +101,38 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const currentSizeKey: ChatBubbleSize = (activeChatId && chatSizes[activeChatId]) || 'pequeno';
   const currentSize = CHAT_SIZE_CONFIG[currentSizeKey] || CHAT_SIZE_CONFIG.pequeno;
 
-  // Calcula a posição horizontal exata da seta para apontar para o centro da bolha ativa no dock inferior,
+  // Calcula a posição horizontal exata da seta e o deslocamento do balão da conversa
+  // para acompanhar bolhas afastadas à esquerda no dock inferior,
   // considerando o nível de zoom atual (bubbleScale) e o tamanho da janela
   const activeBubbleIndex = activeBubbles.findIndex((b) => b.chatId === activeChatId);
   const stepsFromRight =
     activeBubbleIndex >= 0 ? activeBubbles.length - activeBubbleIndex : 1;
-  const arrowRightPx = Math.min(
-    currentSize.width - 28,
-    Math.max(12, Math.round(24 * bubbleScale + stepsFromRight * 60 * bubbleScale - 7))
-  );
+
+  // Centro da bolha ativa em relação à borda direita do dock:
+  // O botão do WhatsApp tem 48px (centro = 24px) e cada bolha dista 60px (48px + 12px gap),
+  // tudo multiplicado pela escala atual de zoom (bubbleScale)
+  const bubbleCenterFromRight = Math.round((24 + stepsFromRight * 60) * bubbleScale);
+  const idealArrowRight = bubbleCenterFromRight - 7;
+  const minArrowRight = 16;
+  const maxArrowRightInWindow = currentSize.width - 28;
+
+  let popoverShiftX = 0;
+  let arrowRightPx = idealArrowRight;
+
+  if (idealArrowRight > maxArrowRightInWindow) {
+    // Quando a bolha está mais afastada à esquerda do que a largura do balão comporta,
+    // o balão se desloca para a esquerda (popoverShiftX) e a seta permanece na extremidade esquerda do balão
+    const unconstrainedShift = idealArrowRight - maxArrowRightInWindow;
+    const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    // Margem de segurança de 32px para não vazar a borda esquerda do overlay
+    const maxAllowedShift = Math.max(0, screenWidth - currentSize.width - 32);
+    popoverShiftX = Math.min(maxAllowedShift, unconstrainedShift);
+    arrowRightPx = idealArrowRight - popoverShiftX;
+  } else if (idealArrowRight < minArrowRight) {
+    arrowRightPx = minArrowRight;
+  }
+
+  arrowRightPx = Math.max(minArrowRight, Math.min(maxArrowRightInWindow, arrowRightPx));
 
   const scrollToTarget = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -382,9 +405,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       data-interactive="true"
       onMouseEnter={onInteractiveEnter}
       onMouseLeave={onInteractiveLeave}
-      initial={{ opacity: 0, y: 14, scale: 0.96 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 12, scale: 0.96 }}
+      initial={{ opacity: 0, y: 14, scale: 0.96, x: -popoverShiftX }}
+      animate={{ opacity: 1, y: 0, scale: 1, x: -popoverShiftX }}
+      exit={{ opacity: 0, y: 12, scale: 0.96, x: -popoverShiftX }}
       transition={{ type: 'spring', stiffness: 420, damping: 28 }}
       className={`relative ${currentSize.widthClass} ${currentSize.heightClass} max-h-[calc(100vh-84px)] bg-[#0B141A] rounded-[8px] shadow-[0_16px_44px_rgba(0,0,0,0.88)] border border-white/[0.06] flex flex-col pointer-events-auto group/chat transition-[width,height] duration-200`}
     >
