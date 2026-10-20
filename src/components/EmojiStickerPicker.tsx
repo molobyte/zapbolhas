@@ -590,7 +590,6 @@ export const EmojiStickerPicker: React.FC<EmojiStickerPickerProps> = ({
         mediaDataUrl: finalDataUrl,
         mediaType: 'image',
         filename: 'foto.jpg',
-        caption: photo.caption,
       });
     } finally {
       setIsProcessingMedia(false);
@@ -1119,12 +1118,12 @@ export const EmojiStickerPicker: React.FC<EmojiStickerPickerProps> = ({
                   type="button"
                   onClick={() => handlePhotoClick(photo)}
                   disabled={isProcessingMedia}
-                  title={photo.caption ? `Clique para reenviar: ${photo.caption}` : 'Clique para reenviar foto'}
+                  title="Clique para reenviar foto"
                   className="group/photo relative aspect-square rounded-[8px] bg-[#111B21]/60 hover:bg-[#2A3942] border border-white/[0.08] hover:border-[#00A884] overflow-hidden cursor-pointer transition-all flex items-center justify-center p-0.5 focus:outline-none disabled:opacity-50"
                 >
                   <img
                     src={photo.url}
-                    alt={photo.caption || 'Foto recente'}
+                    alt="Foto recente"
                     className="w-full h-full object-cover rounded-[6px] group-hover/photo:scale-105 transition-transform"
                     loading="lazy"
                   />
