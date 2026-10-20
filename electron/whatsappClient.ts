@@ -2050,11 +2050,19 @@ export class WhatsAppService {
         options.quotedMessageId = payload.quotedMessageId;
       }
       if (payload.mentions && payload.mentions.length > 0) {
-        options.mentions = payload.mentions;
+        options.mentions = payload.mentions
+          .map((m) => {
+            if (typeof m === 'string' && !m.includes('@')) {
+              return `${m.replace(/\D/g, '')}@c.us`;
+            }
+            return m;
+          })
+          .filter(Boolean);
       }
       try {
         await this.client.sendMessage(payload.chatId, payload.text, options);
       } catch (sendErr) {
+        console.error('[WhatsAppService] Falha ao enviar mensagem com opções:', sendErr);
         if (options.mentions) {
           delete options.mentions;
           await this.client.sendMessage(payload.chatId, payload.text, options);
@@ -2077,6 +2085,8 @@ export class WhatsAppService {
   ): Promise<
     Array<{
       id: string;
+      rawId?: string;
+      user?: string;
       name: string;
       pushname?: string;
       avatar?: string;
@@ -2168,6 +2178,7 @@ export class WhatsAppService {
             type Candidate = {
               id: string;
               rawId: string;
+              user: string;
               name: string;
               pushname: string;
               isAdmin: boolean;
@@ -2480,6 +2491,11 @@ export class WhatsAppService {
 
               const info = resolveSender(p.id || p, p.pushname || p.notifyName);
               const canonicalId = info.phoneNumber || rawId;
+              let validCanonical = canonicalId;
+              if (validCanonical && !validCanonical.includes('@')) {
+                validCanonical = `${validCanonical.replace(/\D/g, '')}@c.us`;
+              }
+              const userTag = (rawId || validCanonical).split('@')[0];
               const formattedPhone = formatPhone(info.cleanPhone);
 
               let displayName = '';
@@ -2499,8 +2515,9 @@ export class WhatsAppService {
 
               if (!q) {
                 candidates.push({
-                  id: canonicalId,
+                  id: validCanonical,
                   rawId,
+                  user: userTag,
                   name: displayName,
                   pushname: displayPushname,
                   isAdmin,
@@ -2547,8 +2564,9 @@ export class WhatsAppService {
               if (score > 0) {
                 if (isAdmin) score += 5;
                 candidates.push({
-                  id: canonicalId,
+                  id: validCanonical,
                   rawId,
+                  user: userTag,
                   name: displayName,
                   pushname: displayPushname,
                   isAdmin,
@@ -2611,6 +2629,8 @@ export class WhatsAppService {
         }
         return {
           id: p.id,
+          rawId: p.rawId || p.id,
+          user: p.user || (p.rawId || p.id).split('@')[0],
           name: cleanName,
           pushname: p.pushname || undefined,
           avatar,
@@ -2682,6 +2702,7 @@ export class WhatsAppService {
     caption?: string;
     filename?: string;
     quotedMessageId?: string;
+    mentions?: string[];
   }): Promise<FormattedChatMessage | null> {
     if (!this.client || this.status !== 'ready') {
       const msg = `[WhatsAppService] sendMedia abortado: cliente não está pronto (status: ${this.status})`;
@@ -2736,12 +2757,23 @@ export class WhatsAppService {
       const options: {
         caption?: string;
         quotedMessageId?: string;
+        mentions?: string[];
       } = {};
       if (payload.caption) {
         options.caption = payload.caption;
       }
       if (payload.quotedMessageId) {
         options.quotedMessageId = payload.quotedMessageId;
+      }
+      if (payload.mentions && payload.mentions.length > 0) {
+        options.mentions = payload.mentions
+          .map((m) => {
+            if (typeof m === 'string' && !m.includes('@')) {
+              return `${m.replace(/\D/g, '')}@c.us`;
+            }
+            return m;
+          })
+          .filter(Boolean);
       }
 
       const infoMsg = `Iniciando envio de mídia (${mimetype}, ${filename}, ${base64Data.length} chars) para ${payload.chatId}`;

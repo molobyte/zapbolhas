@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     caption?: string;
     filename?: string;
     quotedMessageId?: string;
+    mentions?: string[];
   }) => {
     return ipcRenderer.invoke('wa:send-media', payload);
   },

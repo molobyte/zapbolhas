@@ -129,6 +129,8 @@ export interface IncomingMessagePayload {
 
 export interface GroupParticipant {
   id: string;
+  rawId?: string;
+  user?: string;
   name: string;
   pushname?: string;
   avatar?: string;
@@ -157,6 +159,7 @@ export interface SendMediaPayload {
   caption?: string;
   filename?: string;
   quotedMessageId?: string;
+  mentions?: string[];
 }
 
 export interface StickerItem {

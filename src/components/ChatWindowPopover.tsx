@@ -25,6 +25,13 @@ interface ChatWindowPopoverProps {
   onInteractiveLeave: () => void;
 }
 
+interface TrackedMentionData {
+  id: string;
+  rawId: string;
+  user: string;
+  name: string;
+}
+
 export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   onInteractiveEnter,
   onInteractiveLeave,
@@ -66,7 +73,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionAtIndex, setMentionAtIndex] = useState(-1);
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
-  const [trackedMentions, setTrackedMentions] = useState<Map<string, string>>(new Map());
+  const [trackedMentions, setTrackedMentions] = useState<Map<string, TrackedMentionData>>(new Map());
   const [zoom, setZoom] = useState(1);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesContentRef = useRef<HTMLDivElement | null>(null);
@@ -279,18 +286,58 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
   const handleConfirmPendingMedia = useCallback(async () => {
     if (!pendingMedia) return;
+    const rawCaption = pendingCaption.trim();
+    let captionForWhatsApp = rawCaption;
+    const mentionJids = new Set<string>();
+
+    if (rawCaption) {
+      for (const [name, data] of trackedMentions.entries()) {
+        const mentionTag = `@${name}`;
+        if (rawCaption.includes(mentionTag)) {
+          if (data.rawId) mentionJids.add(data.rawId);
+          if (data.id && data.id !== data.rawId) {
+            const formattedId = data.id.includes('@') ? data.id : `${data.id.replace(/\D/g, '')}@c.us`;
+            mentionJids.add(formattedId);
+          }
+          captionForWhatsApp = captionForWhatsApp.split(mentionTag).join(`@${data.user}`);
+        }
+      }
+
+      if (isGroupChat && groupParticipants.length > 0) {
+        const sorted = [...groupParticipants].sort(
+          (a, b) => (b.name || '').length - (a.name || '').length
+        );
+        for (const p of sorted) {
+          const cleanName = (p.name || '').replace(/^~/, '').trim();
+          if (!cleanName) continue;
+          const mentionTag = `@${cleanName}`;
+          if (captionForWhatsApp.includes(mentionTag)) {
+            const userTag = p.user || (p.rawId || p.id).split('@')[0];
+            const rawJid = p.rawId || p.id;
+            if (rawJid) mentionJids.add(rawJid);
+            if (p.id && p.id !== rawJid) {
+              const formattedId = p.id.includes('@') ? p.id : `${p.id.replace(/\D/g, '')}@c.us`;
+              mentionJids.add(formattedId);
+            }
+            captionForWhatsApp = captionForWhatsApp.split(mentionTag).join(`@${userTag}`);
+          }
+        }
+      }
+    }
+
     const toSend = {
       mediaDataUrl: pendingMedia.mediaDataUrl,
       mediaType: pendingMedia.mediaType || 'image',
       filename: pendingMedia.filename || 'foto.jpg',
-      caption: pendingCaption.trim() ? pendingCaption.trim() : undefined,
+      caption: captionForWhatsApp ? captionForWhatsApp : undefined,
+      mentions: mentionJids.size > 0 ? Array.from(mentionJids) : undefined,
     };
     setPendingMedia(null);
     setPendingCaption('');
     setInputText('');
     userHasScrolledUpRef.current = false;
     await sendMedia(toSend);
-  }, [pendingMedia, pendingCaption, sendMedia]);
+  }, [pendingMedia, pendingCaption, trackedMentions, isGroupChat, groupParticipants, sendMedia]);
 
   const processImageFileForPreview = useCallback(
     (file: File | Blob, fallbackName = 'imagem.png') => {
@@ -442,9 +489,17 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     setInputText(nextText);
     setShowMentionPopover(false);
 
+    const userTag = participant.user || (participant.rawId || participant.id).split('@')[0];
+    const mentionData: TrackedMentionData = {
+      id: participant.id,
+      rawId: participant.rawId || participant.id,
+      user: userTag,
+      name: cleanSelectName,
+    };
+
     setTrackedMentions((prev) => {
       const next = new Map(prev);
-      next.set(cleanSelectName, participant.id);
+      next.set(cleanSelectName, mentionData);
       return next;
     });
 
@@ -515,13 +570,51 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim()) return;
-    const textToSend = inputText;
+    if (!inputText.trim() || !activeChatId) return;
 
-    const mentionIds: string[] = [];
-    for (const [name, id] of trackedMentions.entries()) {
-      if (textToSend.includes(`@${name}`)) {
-        mentionIds.push(id);
+    const textToSend = inputText;
+    let textForWhatsApp = textToSend;
+    const mentionJids = new Set<string>();
+    const mentionedNames: string[] = [];
+
+    // 1. Processa menções selecionadas no popover (@Nome -> @userId)
+    for (const [name, data] of trackedMentions.entries()) {
+      const mentionTag = `@${name}`;
+      if (textToSend.includes(mentionTag)) {
+        if (data.rawId) {
+          mentionJids.add(data.rawId);
+        }
+        if (data.id && data.id !== data.rawId) {
+          const formattedId = data.id.includes('@') ? data.id : `${data.id.replace(/\D/g, '')}@c.us`;
+          mentionJids.add(formattedId);
+        }
+        mentionedNames.push(name);
+        textForWhatsApp = textForWhatsApp.split(mentionTag).join(`@${data.user}`);
+      }
+    }
+
+    // 2. Também verifica menções digitadas manualmente para membros do grupo
+    if (isGroupChat && groupParticipants.length > 0) {
+      const sorted = [...groupParticipants].sort(
+        (a, b) => (b.name || '').length - (a.name || '').length
+      );
+      for (const p of sorted) {
+        const cleanName = (p.name || '').replace(/^~/, '').trim();
+        if (!cleanName) continue;
+        const mentionTag = `@${cleanName}`;
+        if (textForWhatsApp.includes(mentionTag)) {
+          const userTag = p.user || (p.rawId || p.id).split('@')[0];
+          const rawJid = p.rawId || p.id;
+          if (rawJid) mentionJids.add(rawJid);
+          if (p.id && p.id !== rawJid) {
+            const formattedId = p.id.includes('@') ? p.id : `${p.id.replace(/\D/g, '')}@c.us`;
+            mentionJids.add(formattedId);
+          }
+          if (!mentionedNames.includes(cleanName)) {
+            mentionedNames.push(cleanName);
+          }
+          textForWhatsApp = textForWhatsApp.split(mentionTag).join(`@${userTag}`);
+        }
       }
     }
 
@@ -530,7 +623,14 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     setShowMentionPopover(false);
     setTrackedMentions(new Map());
     userHasScrolledUpRef.current = false;
-    await sendMessage(textToSend, mentionIds.length > 0 ? mentionIds : undefined);
+
+    const mentionList = Array.from(mentionJids);
+    await sendMessage(
+      textToSend,
+      mentionList.length > 0 ? mentionList : undefined,
+      textForWhatsApp !== textToSend ? textForWhatsApp : undefined,
+      mentionedNames.length > 0 ? mentionedNames : undefined
+    );
   };
 
   const handleMicClick = async () => {

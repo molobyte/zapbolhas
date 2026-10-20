@@ -626,13 +626,19 @@ interface BubbleStoreState {
   closeBubble: (chatId: string) => void;
   togglePinBubble: (chatId: string) => void;
   setChatBubbleSize: (chatId: string, size: ChatBubbleSize) => void;
-  sendMessage: (text: string, mentions?: string[]) => Promise<void>;
+  sendMessage: (
+    text: string,
+    mentions?: string[],
+    textForWhatsApp?: string,
+    mentionedDisplayNames?: string[]
+  ) => Promise<void>;
   sendSticker: (stickerDataUrl: string) => Promise<void>;
   sendMedia: (payload: {
     mediaDataUrl: string;
     mediaType?: 'image' | 'video';
     caption?: string;
     filename?: string;
+    mentions?: string[];
   }) => Promise<void>;
   sendVoiceNote: (durationSeconds?: number) => Promise<void>;
   receiveIncomingMessage: (payload: IncomingMessagePayload) => void;
@@ -1567,7 +1573,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   },
 
   // Envio de mensagem de texto
-  sendMessage: async (text, mentions) => {
+  sendMessage: async (text, mentions, textForWhatsApp, mentionedDisplayNames) => {
     const trimmed = text.trim();
     const { activeChatId, replyingTo, mode, messagesByChat, chats, unreadBannerByChat } =
       get();
@@ -1583,6 +1589,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       type: 'text',
       ack: 'read',
       quotedMessage: replyingTo || undefined,
+      mentions: mentionedDisplayNames && mentionedDisplayNames.length > 0 ? mentionedDisplayNames : undefined,
     };
 
     const currentMsgs = messagesByChat[activeChatId] || [];
@@ -1623,7 +1630,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     if (mode === 'whatsapp' && window.electronAPI) {
       await window.electronAPI.sendMessage({
         chatId: activeChatId,
-        text: trimmed,
+        text: (textForWhatsApp && textForWhatsApp.trim()) || trimmed,
         quotedMessageId: replyingTo?.id,
         mentions: mentions && mentions.length > 0 ? mentions : undefined,
       });
@@ -1782,6 +1789,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           caption: payload.caption,
           filename: payload.filename,
           quotedMessageId: replyingTo?.id,
+          mentions: payload.mentions,
         });
 
         if (!sentMsg) {
