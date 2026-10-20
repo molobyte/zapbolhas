@@ -49,7 +49,7 @@ function positionWindowBottomRight(win: BrowserWindow) {
   const targetDisplay = getTargetDisplay();
   const { x, y, width, height } = targetDisplay.workArea;
   const overlayWidth = Math.min(width, MAX_OVERLAY_WIDTH);
-  const overlayHeight = Math.min(height, OVERLAY_HEIGHT);
+  const overlayHeight = height;
   const targetX = x + width - overlayWidth;
   const targetY = y + height - overlayHeight;
   win.setBounds({
@@ -65,7 +65,7 @@ function createOverlayWindow() {
   const targetDisplay = getTargetDisplay();
   const { x, y, width, height } = targetDisplay.workArea;
   const overlayWidth = Math.min(width, MAX_OVERLAY_WIDTH);
-  const overlayHeight = Math.min(height, OVERLAY_HEIGHT);
+  const overlayHeight = height;
 
   mainWindow = new BrowserWindow({
     width: overlayWidth,

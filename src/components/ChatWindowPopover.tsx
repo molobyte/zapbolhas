@@ -386,7 +386,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 12, scale: 0.96 }}
       transition={{ type: 'spring', stiffness: 420, damping: 28 }}
-      className={`relative ${currentSize.widthClass} ${currentSize.heightClass} bg-[#0B141A] rounded-[8px] shadow-[0_16px_44px_rgba(0,0,0,0.88)] border border-white/[0.06] flex flex-col pointer-events-auto group/chat transition-[width,height] duration-200`}
+      className={`relative ${currentSize.widthClass} ${currentSize.heightClass} max-h-[calc(100vh-84px)] bg-[#0B141A] rounded-[8px] shadow-[0_16px_44px_rgba(0,0,0,0.88)] border border-white/[0.06] flex flex-col pointer-events-auto group/chat transition-[width,height] duration-200`}
     >
       <div className="relative w-full h-full rounded-[8px] overflow-hidden flex flex-col">
         {/* Textura de Fundo Oficial WhatsApp Dark Doodles */}
@@ -753,10 +753,10 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-50 bg-[#0B141A]/95 backdrop-blur-md flex flex-col justify-between"
+            className="absolute inset-0 z-50 bg-[#0B141A]/95 backdrop-blur-md flex flex-col justify-between overflow-hidden"
           >
             {/* Barra Superior do Visualizador */}
-            <div className="px-3 py-2 bg-[#111B21] border-b border-white/10 flex items-center justify-between">
+            <div className="px-3 py-2 bg-[#111B21] border-b border-white/10 flex items-center justify-between shrink-0 z-10">
               <div className="min-w-0">
                 <div className="text-[12.5px] font-medium text-[#E9EDEF] truncate">
                   {viewingImage.senderName || activeChat.name}
@@ -815,7 +815,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             {/* Área Central com Imagem ou Vídeo e Zoom */}
             <div
               onClick={() => setViewingImage(null)}
-              className="flex-1 overflow-auto flex items-center justify-center p-2 cursor-zoom-out wa-scrollbar"
+              className="flex-1 min-h-0 overflow-auto flex items-center justify-center p-2 cursor-zoom-out wa-scrollbar"
             >
               {viewingImage.mediaType === 'video' && viewingImage.videoUrl ? (
                 <video
@@ -850,7 +850,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
             {/* Legenda Inferior */}
             {viewingImage.caption && (
-              <div className="px-3 py-2 bg-[#111B21]/95 border-t border-white/10 text-[12.5px] text-[#E9EDEF] text-center max-h-[80px] overflow-y-auto wa-scrollbar">
+              <div className="px-3 py-2 bg-[#111B21]/95 border-t border-white/10 text-[12.5px] text-[#E9EDEF] text-center max-h-[80px] overflow-y-auto wa-scrollbar shrink-0">
                 <FormattedText text={viewingImage.caption} />
               </div>
             )}

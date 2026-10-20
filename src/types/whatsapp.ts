@@ -73,16 +73,16 @@ export const CHAT_SIZE_CONFIG: Record<
   },
   medio: {
     width: 460,
-    height: 580,
+    height: 560,
     widthClass: 'w-[460px]',
-    heightClass: 'h-[580px]',
+    heightClass: 'h-[560px]',
     label: 'Médio',
   },
   grande: {
-    width: 560,
-    height: 680,
-    widthClass: 'w-[560px]',
-    heightClass: 'h-[680px]',
+    width: 550,
+    height: 600,
+    widthClass: 'w-[550px]',
+    heightClass: 'h-[600px]',
     label: 'Grande',
   },
 };
