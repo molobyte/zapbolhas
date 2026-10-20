@@ -93,6 +93,7 @@ export interface BubbleItem {
   avatar: string;
   unreadCount: number;
   isPinned?: boolean;
+  lastActivity?: number;
 }
 
 export interface ViewingImageState {

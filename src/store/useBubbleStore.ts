@@ -118,12 +118,14 @@ export const INITIAL_MOCK_BUBBLES: BubbleItem[] = [
     name: 'Danilo Neves Xbox',
     avatar: '/avatars/danilo-neves.png',
     unreadCount: 4,
+    lastActivity: 1000,
   },
   {
     chatId: 'unidev-qam',
     name: 'Unidev QAM',
     avatar: '/avatars/unidev-qam.png',
     unreadCount: 2,
+    lastActivity: 2000,
   },
 ];
 
@@ -496,26 +498,37 @@ export function organizeBubbles(
   maxBubbles: number,
   pinnedChatIds: string[]
 ): BubbleItem[] {
-  const isPinned = (chatId: string, itemPinned?: boolean) =>
-    itemPinned ?? pinnedChatIds.includes(chatId);
+  const isPinned = (chatId: string) => pinnedChatIds.includes(chatId);
 
-  const unpinned: BubbleItem[] = [];
-  const pinned: BubbleItem[] = [];
+  const unpinned: { item: BubbleItem; originalIndex: number }[] = [];
+  const pinned: { item: BubbleItem; originalIndex: number }[] = [];
 
-  for (const b of bubbles) {
-    if (isPinned(b.chatId, b.isPinned)) {
-      pinned.push({ ...b, isPinned: true });
+  bubbles.forEach((b, idx) => {
+    if (isPinned(b.chatId)) {
+      pinned.push({ item: { ...b, isPinned: true }, originalIndex: idx });
     } else {
-      unpinned.push({ ...b, isPinned: false });
+      unpinned.push({ item: { ...b, isPinned: false }, originalIndex: idx });
     }
-  }
+  });
 
-  // Available slots for unpinned bubbles (pinned are always kept)
+  const getSortKey = (entry: { item: BubbleItem; originalIndex: number }) => {
+    if (typeof entry.item.lastActivity === 'number' && entry.item.lastActivity > 0) {
+      return entry.item.lastActivity;
+    }
+    return entry.originalIndex;
+  };
+
+  // Ordena por recência/atividade: mais antigas à esquerda, mais recentes à direita
+  unpinned.sort((a, b) => getSortKey(a) - getSortKey(b));
+  pinned.sort((a, b) => getSortKey(a) - getSortKey(b));
+
+  // Conversas fixadas são sempre mantidas; não-fixadas ocupam as vagas restantes
   const availableSlots = Math.max(0, maxBubbles - pinned.length);
-  const trimmedUnpinned = unpinned.slice(-availableSlots);
+  const trimmedUnpinned = unpinned.slice(-availableSlots).map((e) => e.item);
+  const finalPinned = pinned.map((e) => e.item);
 
-  // Unpinned on left (0..k), pinned on right (closer to WhatsApp button)
-  return [...trimmedUnpinned, ...pinned];
+  // Não-fixadas à esquerda (0..k), fixadas à direita (junto ao botão do WhatsApp)
+  return [...trimmedUnpinned, ...finalPinned];
 }
 
 export function moveBubbleToMostRecent(
@@ -525,31 +538,15 @@ export function moveBubbleToMostRecent(
   pinnedChatIds: string[]
 ): BubbleItem[] {
   const bubble = bubbles.find((b) => b.chatId === chatId);
-  if (!bubble) return bubbles;
-
-  const withoutBubble = bubbles.filter((b) => b.chatId !== chatId);
-  const isPinned = bubble.isPinned ?? pinnedChatIds.includes(chatId);
-
-  const unpinned = withoutBubble.filter(
-    (b) => !(b.isPinned ?? pinnedChatIds.includes(b.chatId))
-  );
-  const pinned = withoutBubble.filter(
-    (b) => (b.isPinned ?? pinnedChatIds.includes(b.chatId))
-  );
-
-  if (isPinned) {
-    return organizeBubbles(
-      [...unpinned, ...pinned, { ...bubble, isPinned: true }],
-      maxBubbles,
-      pinnedChatIds
-    );
-  } else {
-    return organizeBubbles(
-      [...unpinned, { ...bubble, isPinned: false }, ...pinned],
-      maxBubbles,
-      pinnedChatIds
-    );
+  if (!bubble) {
+    return organizeBubbles(bubbles, maxBubbles, pinnedChatIds);
   }
+
+  const now = Date.now();
+  const updated = bubbles.map((b) =>
+    b.chatId === chatId ? { ...b, lastActivity: now } : b
+  );
+  return organizeBubbles(updated, maxBubbles, pinnedChatIds);
 }
 
 const initialSettings = loadUserSettings();
@@ -762,12 +759,13 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         .filter((c) => c.unreadCount > 0 && !c.isMuted)
         .slice(0, maxBubbles)
         .reverse()
-        .map((c) => ({
+        .map((c, idx) => ({
           chatId: c.id,
           name: c.name,
           avatar: c.avatar,
           unreadCount: c.unreadCount,
           isPinned: pinnedChatIds.includes(c.id),
+          lastActivity: Date.now() - (maxBubbles - idx) * 1000,
         }));
 
       const organizedInitial = organizeBubbles(initialRealBubbles, maxBubbles, pinnedChatIds);
@@ -786,13 +784,14 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     }
 
     const { maxBubbles, pinnedChatIds } = get();
+    const isAnyChatOpen = activePopover === 'chat-window' && Boolean(activeChatId);
+
     // Sincronizações subsequentes em segundo plano: atualiza lista e mantém bolhas sincronizadas
     const chatMap = new Map(realChats.map((c) => [c.id, c]));
     let updatedBubbles = activeBubbles.map((b) => {
       const fresh = chatMap.get(b.chatId);
       if (!fresh) return b;
-      const isCurrentlyOpen =
-        activePopover === 'chat-window' && activeChatId === b.chatId;
+      const isCurrentlyOpen = isAnyChatOpen && activeChatId === b.chatId;
       return {
         ...b,
         name: fresh.name,
@@ -807,19 +806,27 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       if (
         c.unreadCount > 0 &&
         !c.isMuted &&
-        !updatedBubbles.some((b) => b.chatId === c.id) &&
-        updatedBubbles.length < maxBubbles
+        !updatedBubbles.some((b) => b.chatId === c.id)
       ) {
-        updatedBubbles.push({
+        const newB: BubbleItem = {
           chatId: c.id,
           name: c.name,
           avatar: c.avatar,
           unreadCount: c.unreadCount,
           isPinned: pinnedChatIds.includes(c.id),
-        });
+          lastActivity: Date.now(),
+        };
+        if (isAnyChatOpen) {
+          // Insere na última esquerda para não movimentar as bolhas existentes
+          updatedBubbles = [newB, ...updatedBubbles];
+        } else {
+          updatedBubbles = [...updatedBubbles, newB];
+        }
       }
     }
-    const organizedBubbles = organizeBubbles(updatedBubbles, maxBubbles, pinnedChatIds);
+    const finalBubbles = isAnyChatOpen
+      ? updatedBubbles
+      : organizeBubbles(updatedBubbles, maxBubbles, pinnedChatIds);
 
     const normalizedChats = realChats.map((c) => {
       const isCurrentlyOpen =
@@ -834,7 +841,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     set({
       mode: 'whatsapp',
       chats: normalizedChats,
-      activeBubbles: organizedBubbles,
+      activeBubbles: finalBubbles,
     });
   },
 
@@ -1324,6 +1331,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const isPinned = pinnedChatIds.includes(chatId);
     let updatedBubbles: BubbleItem[];
 
+    const now = Date.now();
     if (!exists) {
       const newBubble: BubbleItem = {
         chatId: targetChat.id,
@@ -1331,26 +1339,18 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         avatar: targetChat.avatar,
         unreadCount: 0,
         isPinned,
+        lastActivity: now,
       };
-      const unpinned = activeBubbles.filter((b) => !b.isPinned);
-      const pinned = activeBubbles.filter((b) => b.isPinned);
-      if (isPinned) {
-        updatedBubbles = organizeBubbles(
-          [...unpinned, ...pinned, newBubble],
-          maxBubbles,
-          pinnedChatIds
-        );
-      } else {
-        updatedBubbles = organizeBubbles(
-          [...unpinned, newBubble, ...pinned],
-          maxBubbles,
-          pinnedChatIds
-        );
-      }
-    } else {
-      updatedBubbles = activeBubbles.map((b) =>
-        b.chatId === chatId ? { ...b, unreadCount: 0 } : b
+      updatedBubbles = organizeBubbles(
+        [...activeBubbles, newBubble],
+        maxBubbles,
+        pinnedChatIds
       );
+    } else {
+      const refreshed = activeBubbles.map((b) =>
+        b.chatId === chatId ? { ...b, unreadCount: 0, lastActivity: now } : b
+      );
+      updatedBubbles = organizeBubbles(refreshed, maxBubbles, pinnedChatIds);
     }
 
     const updatedChats = chats.map((c) =>
@@ -1495,7 +1495,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   // 5.4 Fechar a conversa definitivamente (remove a bolha da barra inferior)
   closeBubble: (chatId) => {
-    const { activeBubbles, activeChatId, activePopover } = get();
+    const { activeBubbles, activeChatId, activePopover, maxBubbles, pinnedChatIds } = get();
     const bubble = activeBubbles.find((b) => b.chatId === chatId);
     if (bubble?.isPinned) {
       // Bloqueado: bolhas fixadas não podem ser fechadas até serem desfixadas
@@ -1505,8 +1505,13 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const isClosingActiveChat =
       activePopover === 'chat-window' && activeChatId === chatId;
 
+    // Se estava fechando o chat ativo, organiza as bolhas restantes; caso contrário, mantém posições
+    const finalBubbles = isClosingActiveChat
+      ? organizeBubbles(updatedBubbles, maxBubbles, pinnedChatIds)
+      : updatedBubbles;
+
     set({
-      activeBubbles: updatedBubbles,
+      activeBubbles: finalBubbles,
       activePopover: isClosingActiveChat ? 'none' : activePopover,
       activeChatId: isClosingActiveChat ? null : activeChatId,
       replyingTo: isClosingActiveChat ? null : get().replyingTo,
@@ -1516,7 +1521,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   // Fixar ou Desfixar conversa
   togglePinBubble: (chatId: string) => {
-    const { activeBubbles, pinnedChatIds, maxBubbles } = get();
+    const { activeBubbles, pinnedChatIds, maxBubbles, activePopover, activeChatId } = get();
     const isCurrentlyPinned = pinnedChatIds.includes(chatId);
     const nextPinned = !isCurrentlyPinned;
 
@@ -1532,7 +1537,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const updated = activeBubbles.map((b) =>
       b.chatId === chatId ? { ...b, isPinned: nextPinned } : b
     );
-    const reordered = organizeBubbles(updated, maxBubbles, nextPinnedIds);
+    const isAnyChatOpen = activePopover === 'chat-window' && Boolean(activeChatId);
+    const reordered = isAnyChatOpen
+      ? updated
+      : organizeBubbles(updated, maxBubbles, nextPinnedIds);
 
     set({
       activeBubbles: reordered,
@@ -1586,6 +1594,11 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         : c
     );
 
+    const now = Date.now();
+    const updatedActiveBubbles = get().activeBubbles.map((b) =>
+      b.chatId === activeChatId ? { ...b, lastActivity: now } : b
+    );
+
     set({
       messagesByChat: {
         ...messagesByChat,
@@ -1595,6 +1608,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         ...unreadBannerByChat,
         [activeChatId]: undefined,
       },
+      activeBubbles: updatedActiveBubbles,
       chats: updatedChats,
       replyingTo: null,
     });
@@ -1652,6 +1666,11 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         : c
     );
 
+    const now = Date.now();
+    const updatedActiveBubbles = get().activeBubbles.map((b) =>
+      b.chatId === activeChatId ? { ...b, lastActivity: now } : b
+    );
+
     set({
       messagesByChat: {
         ...messagesByChat,
@@ -1661,6 +1680,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         ...unreadBannerByChat,
         [activeChatId]: undefined,
       },
+      activeBubbles: updatedActiveBubbles,
       chats: updatedChats,
       replyingTo: null,
     });
@@ -1733,11 +1753,17 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         : c
     );
 
+    const now = Date.now();
+    const updatedActiveBubbles = get().activeBubbles.map((b) =>
+      b.chatId === activeChatId ? { ...b, lastActivity: now } : b
+    );
+
     set({
       messagesByChat: {
         ...messagesByChat,
         [activeChatId]: [...currentMsgs, voiceMsg],
       },
+      activeBubbles: updatedActiveBubbles,
       chats: updatedChats,
     });
   },
@@ -1753,12 +1779,15 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       messagesByChat,
       chats,
       maxBubbles,
+      pinnedChatIds,
       soundMuted,
       userSoundPreset,
       groupSoundPreset,
     } = get();
-    const isChatCurrentlyOpen =
-      activePopover === 'chat-window' && activeChatId === chat.id;
+
+    // Uma conversa está aberta no momento se activePopover === 'chat-window' e há activeChatId
+    const isAnyChatOpen = activePopover === 'chat-window' && Boolean(activeChatId);
+    const isThisChatCurrentlyOpen = isAnyChatOpen && activeChatId === chat.id;
 
     const existingMsgs = messagesByChat[chat.id] || [];
     const alreadyExists = existingMsgs.some((m) => m.id === message.id);
@@ -1775,69 +1804,74 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       ? existingMsgs
       : [...existingMsgs, message];
 
-    const bubbleExists = activeBubbles.some((b) => b.chatId === chat.id);
-    const { pinnedChatIds } = get();
+    const bubbleIndex = activeBubbles.findIndex((b) => b.chatId === chat.id);
+    const bubbleExists = bubbleIndex >= 0;
     const isPinned = pinnedChatIds.includes(chat.id);
+    const now = Date.now();
     let updatedBubbles: BubbleItem[];
 
-    if (!bubbleExists) {
-      const newBubble: BubbleItem = {
-        chatId: chat.id,
-        name: chat.name,
-        avatar: chat.avatar,
-        unreadCount: isChatCurrentlyOpen ? 0 : 1,
-        isPinned,
-      };
-      const unpinned = activeBubbles.filter((b) => !b.isPinned);
-      const pinned = activeBubbles.filter((b) => b.isPinned);
-      if (isPinned) {
-        updatedBubbles = organizeBubbles(
-          [...unpinned, ...pinned, newBubble],
-          maxBubbles,
-          pinnedChatIds
-        );
-      } else {
-        updatedBubbles = organizeBubbles(
-          [...unpinned, newBubble, ...pinned],
-          maxBubbles,
-          pinnedChatIds
-        );
-      }
-    } else {
-      const currentBubble = activeBubbles.find((b) => b.chatId === chat.id)!;
-      const refreshedBubble: BubbleItem = {
-        ...currentBubble,
-        name: chat.name,
-        avatar: chat.avatar,
-        unreadCount: isChatCurrentlyOpen ? 0 : currentBubble.unreadCount + 1,
-        isPinned: currentBubble.isPinned ?? isPinned,
-      };
-      if (isChatCurrentlyOpen) {
-        // Enquanto o usuário estiver com esta conversa aberta, atualiza a bolha na mesma posição
-        // para que a seta e a janela não percam o alinhamento com a bolha durante a conversa ativa.
-        // A bolha só será movida para o topo dos recentes quando a conversa for fechada.
+    if (isAnyChatOpen) {
+      // REGRA 1 & 2: Enquanto uma conversa estiver aberta, a movimentação de bolhas deve ficar fixa.
+      // Se a bolha já está sendo exibida, exibe as notificações normalmente, mas NÃO se move para a mais recente.
+      if (bubbleExists) {
+        const currentBubble = activeBubbles[bubbleIndex];
+        const refreshedBubble: BubbleItem = {
+          ...currentBubble,
+          name: chat.name,
+          avatar: chat.avatar,
+          unreadCount: isThisChatCurrentlyOpen ? 0 : currentBubble.unreadCount + 1,
+          isPinned: currentBubble.isPinned ?? isPinned,
+          lastActivity: now,
+        };
         updatedBubbles = activeBubbles.map((b) =>
           b.chatId === chat.id ? refreshedBubble : b
         );
       } else {
+        // REGRA 3: Se a bolha não estava sendo exibida (conversa nova), ela é gerada na ÚLTIMA ESQUERDA
+        // (índice 0 do array) para não mover as bolhas existentes de lugar e não atrapalhar o usuário.
+        const newBubble: BubbleItem = {
+          chatId: chat.id,
+          name: chat.name,
+          avatar: chat.avatar,
+          unreadCount: isThisChatCurrentlyOpen ? 0 : 1,
+          isPinned,
+          lastActivity: now,
+        };
+        updatedBubbles = [newBubble, ...activeBubbles];
+      }
+    } else {
+      // REGRA 5: Quando o usuário NÃO está com nenhum chat ativo, as bolhas se ordenam
+      // na ordem correta sempre, aparecendo da mais recente para a direita.
+      if (bubbleExists) {
+        const currentBubble = activeBubbles[bubbleIndex];
+        const refreshedBubble: BubbleItem = {
+          ...currentBubble,
+          name: chat.name,
+          avatar: chat.avatar,
+          unreadCount: currentBubble.unreadCount + 1,
+          isPinned: currentBubble.isPinned ?? isPinned,
+          lastActivity: now,
+        };
         const withoutCurrent = activeBubbles.filter((b) => b.chatId !== chat.id);
-        if (refreshedBubble.isPinned) {
-          const unpinned = withoutCurrent.filter((b) => !b.isPinned);
-          const pinned = withoutCurrent.filter((b) => b.isPinned);
-          updatedBubbles = organizeBubbles(
-            [...unpinned, ...pinned, refreshedBubble],
-            maxBubbles,
-            pinnedChatIds
-          );
-        } else {
-          const unpinned = withoutCurrent.filter((b) => !b.isPinned);
-          const pinned = withoutCurrent.filter((b) => b.isPinned);
-          updatedBubbles = organizeBubbles(
-            [...unpinned, refreshedBubble, ...pinned],
-            maxBubbles,
-            pinnedChatIds
-          );
-        }
+        updatedBubbles = organizeBubbles(
+          [...withoutCurrent, refreshedBubble],
+          maxBubbles,
+          pinnedChatIds
+        );
+      } else {
+        const newBubble: BubbleItem = {
+          chatId: chat.id,
+          name: chat.name,
+          avatar: chat.avatar,
+          unreadCount: 1,
+          isPinned,
+          lastActivity: now,
+        };
+        updatedBubbles = organizeBubbles(
+          [...activeBubbles, newBubble],
+          maxBubbles,
+          pinnedChatIds
+        );
       }
     }
 
@@ -1851,13 +1885,13 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
             ? {
                 ...c,
                 lastMessage: chat.lastMessage,
-                unreadCount: isChatCurrentlyOpen ? 0 : (c.unreadCount || 0) + 1,
+                unreadCount: isThisChatCurrentlyOpen ? 0 : (c.unreadCount || 0) + 1,
               }
             : c
         )
       : [chat, ...chats];
 
-    if (isChatCurrentlyOpen && !message.fromMe) {
+    if (isThisChatCurrentlyOpen && !message.fromMe) {
       window.electronAPI?.markAsRead(chat.id);
     }
 
