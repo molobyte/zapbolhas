@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Production build artifacts
+dist/
+dist-electron/
+
+# WhatsApp Web cache & session
+.wwebjs_cache/
+.wwebjs_auth/
+wwebjs_auth/
+
+# Local preferences & environment
+*.local
+.env
+display-pref.json
+
+# OS and temporary files
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.log
