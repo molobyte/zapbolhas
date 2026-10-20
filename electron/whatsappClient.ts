@@ -54,6 +54,7 @@ export interface FormattedChatMessage {
     senderAvatar: string;
     waveform: number[];
   };
+  mentions?: string[];
 }
 
 function findBrowserExecutable(): string | undefined {
@@ -850,6 +851,150 @@ export class WhatsAppService {
           };
         };
 
+        const myIds = new Set<string>();
+        try {
+          const mePrefs = (typeof w.require === 'function' ? w.require('WAWebUserPrefsMeUser') : null) || {};
+          const connMod = (typeof w.require === 'function' ? w.require('WAWebConnModel') : null) || {};
+          const addMe = (val: any) => {
+            if (!val) return;
+            const sid = serializeId(val);
+            if (sid) {
+              myIds.add(sid);
+              const u = sid.split('@')[0];
+              if (u) myIds.add(u);
+            }
+          };
+          addMe(mePrefs.getMaybeMePnUser?.());
+          addMe(mePrefs.getMaybeMeLidUser?.());
+          addMe(mePrefs.getMeUser?.());
+          addMe(connMod.Conn?.wid);
+        } catch (_) {}
+
+        const formatMentionsInText = (
+          rawText: string,
+          rawMsg?: any
+        ): { text: string; mentions: string[] } => {
+          if (!rawText || typeof rawText !== 'string' || !rawText.includes('@')) {
+            return { text: rawText || '', mentions: [] };
+          }
+
+          let formatted = rawText;
+          const collectedMentions: string[] = [];
+
+          const mentionedJids: any[] = Array.isArray(rawMsg?.mentionedJidList)
+            ? rawMsg.mentionedJidList
+            : [];
+
+          for (const item of mentionedJids) {
+            if (!item) continue;
+            const sid = serializeId(item);
+            const user = sid ? sid.split('@')[0] : (typeof item === 'string' ? item : item.user);
+            if (!user) continue;
+
+            let displayName = '';
+            if (myIds.has(user) || myIds.has(sid)) {
+              displayName = 'Você';
+            } else {
+              const senderInfo = resolveSender(item);
+              const name =
+                senderInfo.savedName ||
+                senderInfo.pushname ||
+                senderInfo.senderName;
+              displayName = name ? name.replace(/^~/, '').trim() : '';
+            }
+
+            if (displayName) {
+              if (!collectedMentions.includes(displayName)) {
+                collectedMentions.push(displayName);
+              }
+              const escapedUser = user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const regWithServer = new RegExp(`@${escapedUser}@(lid|c\\.us)(?=[^a-zA-Z0-9_]|$)`, 'g');
+              const regUserOnly = new RegExp(`@${escapedUser}(?=[^a-zA-Z0-9_]|$)`, 'g');
+              formatted = formatted.replace(regWithServer, `@${displayName}`);
+              formatted = formatted.replace(regUserOnly, `@${displayName}`);
+            }
+          }
+
+          const groupMentions: any[] = Array.isArray(rawMsg?.groupMentions) ? rawMsg.groupMentions : [];
+          for (const gm of groupMentions) {
+            if (!gm) continue;
+            const gJid = serializeId(gm.groupJid);
+            const gUser = gJid ? gJid.split('@')[0] : '';
+            const subject = gm.groupSubject || '';
+            if (gUser && subject) {
+              if (!collectedMentions.includes(subject)) {
+                collectedMentions.push(subject);
+              }
+              const escaped = gUser.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const reg = new RegExp(`@${escaped}(?=[^a-zA-Z0-9_]|$)`, 'g');
+              formatted = formatted.replace(reg, `@${subject}`);
+            }
+          }
+
+          formatted = formatted.replace(/@(\d{7,20})(?=[^a-zA-Z0-9_]|$)/g, (match, digits) => {
+            if (myIds.has(digits)) {
+              if (!collectedMentions.includes('Você')) {
+                collectedMentions.push('Você');
+              }
+              return '@Você';
+            }
+
+            const contact = contactIndex.get(digits) || idbMap.get(digits);
+            if (contact) {
+              const senderInfo = resolveSender(contact);
+              const name = senderInfo.savedName || senderInfo.pushname || senderInfo.senderName;
+              if (name) {
+                const cleanName = name.replace(/^~/, '').trim();
+                if (cleanName && cleanName !== digits && !cleanName.startsWith('+')) {
+                  if (!collectedMentions.includes(cleanName)) {
+                    collectedMentions.push(cleanName);
+                  }
+                  return `@${cleanName}`;
+                }
+              }
+            }
+
+            try {
+              if (widFactory?.createWid) {
+                const widLid = widFactory.createWid(`${digits}@lid`);
+                const senderLid = resolveSender(widLid);
+                const nameLid = senderLid.savedName || senderLid.pushname || senderLid.senderName;
+                if (nameLid) {
+                  const clean = nameLid.replace(/^~/, '').trim();
+                  if (clean && clean !== digits && !clean.startsWith('+')) {
+                    if (!collectedMentions.includes(clean)) {
+                      collectedMentions.push(clean);
+                    }
+                    return `@${clean}`;
+                  }
+                }
+
+                const widPn = widFactory.createWid(`${digits}@c.us`);
+                const senderPn = resolveSender(widPn);
+                const namePn = senderPn.savedName || senderPn.pushname || senderPn.senderName;
+                if (namePn) {
+                  const clean = namePn.replace(/^~/, '').trim();
+                  if (clean && clean !== digits && !clean.startsWith('+')) {
+                    if (!collectedMentions.includes(clean)) {
+                      collectedMentions.push(clean);
+                    }
+                    return `@${clean}`;
+                  }
+                }
+              }
+            } catch {}
+
+            const formattedDigits = formatPhone(digits);
+            if (formattedDigits && formattedDigits !== digits) {
+              return `@${formattedDigits}`;
+            }
+
+            return match;
+          });
+
+          return { text: formatted, mentions: collectedMentions };
+        };
+
         const allChats: any[] = ChatCol.getModelsArray()
           .filter((c: any) => {
             const cid = serializeId(c.id);
@@ -919,6 +1064,7 @@ export class WhatsAppService {
             rawType === 'chat'
               ? String(lastMsg?.body || '')
               : String(lastMsg?.caption || '');
+          const formattedLastMsg = formatMentionsInText(rawBody, lastMsg);
 
           results.push({
             id,
@@ -929,7 +1075,7 @@ export class WhatsAppService {
             isMuted,
             timestamp: Number(lastMsg?.t || c.t || 0),
             lastMsgType: rawType,
-            lastMsgBody: rawBody,
+            lastMsgBody: formattedLastMsg.text,
             lastMsgFromMe: Boolean(lastMsg?.id?.fromMe),
             lastMsgAck: Number(lastMsg?.ack || 0),
             lastMsgDuration: Number(lastMsg?.duration || 0),
@@ -1336,6 +1482,150 @@ export class WhatsAppService {
               cleanPhone,
             };
           };
+
+          const myIds = new Set<string>();
+          try {
+            const mePrefs = (typeof w.require === 'function' ? w.require('WAWebUserPrefsMeUser') : null) || {};
+            const connMod = (typeof w.require === 'function' ? w.require('WAWebConnModel') : null) || {};
+            const addMe = (val: any) => {
+              if (!val) return;
+              const sid = serializeId(val);
+              if (sid) {
+                myIds.add(sid);
+                const u = sid.split('@')[0];
+                if (u) myIds.add(u);
+              }
+            };
+            addMe(mePrefs.getMaybeMePnUser?.());
+            addMe(mePrefs.getMaybeMeLidUser?.());
+            addMe(mePrefs.getMeUser?.());
+            addMe(connMod.Conn?.wid);
+          } catch (_) {}
+
+          const formatMentionsInText = (
+            rawText: string,
+            rawMsg?: any
+          ): { text: string; mentions: string[] } => {
+            if (!rawText || typeof rawText !== 'string' || !rawText.includes('@')) {
+              return { text: rawText || '', mentions: [] };
+            }
+
+            let formatted = rawText;
+            const collectedMentions: string[] = [];
+
+            const mentionedJids: any[] = Array.isArray(rawMsg?.mentionedJidList)
+              ? rawMsg.mentionedJidList
+              : [];
+
+            for (const item of mentionedJids) {
+              if (!item) continue;
+              const sid = serializeId(item);
+              const user = sid ? sid.split('@')[0] : (typeof item === 'string' ? item : item.user);
+              if (!user) continue;
+
+              let displayName = '';
+              if (myIds.has(user) || myIds.has(sid)) {
+                displayName = 'Você';
+              } else {
+                const senderInfo = resolveSender(item);
+                const name =
+                  senderInfo.savedName ||
+                  senderInfo.pushname ||
+                  senderInfo.senderName;
+                displayName = name ? name.replace(/^~/, '').trim() : '';
+              }
+
+              if (displayName) {
+                if (!collectedMentions.includes(displayName)) {
+                  collectedMentions.push(displayName);
+                }
+                const escapedUser = user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regWithServer = new RegExp(`@${escapedUser}@(lid|c\\.us)(?=[^a-zA-Z0-9_]|$)`, 'g');
+                const regUserOnly = new RegExp(`@${escapedUser}(?=[^a-zA-Z0-9_]|$)`, 'g');
+                formatted = formatted.replace(regWithServer, `@${displayName}`);
+                formatted = formatted.replace(regUserOnly, `@${displayName}`);
+              }
+            }
+
+            const groupMentions: any[] = Array.isArray(rawMsg?.groupMentions) ? rawMsg.groupMentions : [];
+            for (const gm of groupMentions) {
+              if (!gm) continue;
+              const gJid = serializeId(gm.groupJid);
+              const gUser = gJid ? gJid.split('@')[0] : '';
+              const subject = gm.groupSubject || '';
+              if (gUser && subject) {
+                if (!collectedMentions.includes(subject)) {
+                  collectedMentions.push(subject);
+                }
+                const escaped = gUser.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const reg = new RegExp(`@${escaped}(?=[^a-zA-Z0-9_]|$)`, 'g');
+                formatted = formatted.replace(reg, `@${subject}`);
+              }
+            }
+
+            formatted = formatted.replace(/@(\d{7,20})(?=[^a-zA-Z0-9_]|$)/g, (match, digits) => {
+              if (myIds.has(digits)) {
+                if (!collectedMentions.includes('Você')) {
+                  collectedMentions.push('Você');
+                }
+                return '@Você';
+              }
+
+              const contact = contactIndex.get(digits) || idbMap.get(digits);
+              if (contact) {
+                const senderInfo = resolveSender(contact);
+                const name = senderInfo.savedName || senderInfo.pushname || senderInfo.senderName;
+                if (name) {
+                  const cleanName = name.replace(/^~/, '').trim();
+                  if (cleanName && cleanName !== digits && !cleanName.startsWith('+')) {
+                    if (!collectedMentions.includes(cleanName)) {
+                      collectedMentions.push(cleanName);
+                    }
+                    return `@${cleanName}`;
+                  }
+                }
+              }
+
+              try {
+                if (widFactory?.createWid) {
+                  const widLid = widFactory.createWid(`${digits}@lid`);
+                  const senderLid = resolveSender(widLid);
+                  const nameLid = senderLid.savedName || senderLid.pushname || senderLid.senderName;
+                  if (nameLid) {
+                    const clean = nameLid.replace(/^~/, '').trim();
+                    if (clean && clean !== digits && !clean.startsWith('+')) {
+                      if (!collectedMentions.includes(clean)) {
+                        collectedMentions.push(clean);
+                      }
+                      return `@${clean}`;
+                    }
+                  }
+
+                  const widPn = widFactory.createWid(`${digits}@c.us`);
+                  const senderPn = resolveSender(widPn);
+                  const namePn = senderPn.savedName || senderPn.pushname || senderPn.senderName;
+                  if (namePn) {
+                    const clean = namePn.replace(/^~/, '').trim();
+                    if (clean && clean !== digits && !clean.startsWith('+')) {
+                      if (!collectedMentions.includes(clean)) {
+                        collectedMentions.push(clean);
+                      }
+                      return `@${clean}`;
+                    }
+                  }
+                }
+              } catch {}
+
+              const formattedDigits = formatPhone(digits);
+              if (formattedDigits && formattedDigits !== digits) {
+                return `@${formattedDigits}`;
+              }
+
+              return match;
+            });
+
+            return { text: formatted, mentions: collectedMentions };
+          };
           const chat =
             ChatCol.get(targetChatId) ||
             ChatCol.getModelsArray().find((c: any) => serializeId(c.id) === targetChatId);
@@ -1457,11 +1747,12 @@ export class WhatsAppService {
                   : qType === 'sticker'
                   ? '💟 Figurinha'
                   : String(m.quotedMsg.caption || '📷 Foto');
+              const qFormatted = formatMentionsInText(qText, m.quotedMsg);
 
               quoted = {
                 id: String(m.quotedStanzaID || id),
                 author: qAuthor,
-                text: qText,
+                text: qFormatted.text,
               };
             }
 
@@ -1489,17 +1780,20 @@ export class WhatsAppService {
               }
             }
 
-            const text =
+            const rawBodyText =
               rawType === 'chat'
                 ? String(m.body || '')
                 : rawType === 'revoked'
                 ? '🚫 Mensagem apagada'
                 : String(m.caption || '');
 
+            const { text, mentions } = formatMentionsInText(rawBodyText, m);
+
             return {
               id,
               rawType,
               text,
+              mentions,
               t: Number(m.t || 0),
               fromMe,
               isGroup,
@@ -1588,6 +1882,7 @@ export class WhatsAppService {
           id: m.id,
           chatId,
           text: m.text,
+          mentions: m.mentions,
           timestamp: formatTime(m.t),
           dateLabel,
           fromMe: m.fromMe,

@@ -56,6 +56,7 @@ export interface FormattedMessage {
   quotedMessage?: QuotedMessage;
   reaction?: string;
   audioData?: AudioData;
+  mentions?: string[];
 }
 
 export type ChatBubbleSize = 'pequeno' | 'medio' | 'grande';

@@ -2,6 +2,7 @@ import React from 'react';
 
 interface FormattedTextProps {
   text: string;
+  mentions?: string[];
   className?: string;
 }
 
@@ -10,14 +11,33 @@ interface FormattedTextProps {
 const URL_REGEX =
   /(https?:\/\/[^\s<]+[^<.,:;"')\]\s]|www\.[^\s<]+[^<.,:;"')\]\s]|[a-zA-Z0-9][-a-zA-Z0-9]{0,62}\.(?:com\.br|com|org|net|edu|gov|io|ai|app|dev|br|me|co|tv|gl|gg|link|info)(?:\/[^\s<]*[^<.,:;"')\]\s])?)/gi;
 
-const MENTION_REGEX = /(^|\s)(@[a-zA-Z0-9_\u00C0-\u00FF]+)/g;
+const DEFAULT_MENTION_BASE = '[a-zA-Z0-9_\\u00C0-\\u00FF]+';
 
-function renderTextWithMentions(str: string, keyPrefix: string): React.ReactNode[] {
+function buildMentionRegex(mentions?: string[]): RegExp {
+  if (!mentions || mentions.length === 0) {
+    return new RegExp(`(^|\\s)(@${DEFAULT_MENTION_BASE})`, 'g');
+  }
+
+  const escaped = mentions
+    .filter(Boolean)
+    .map((m) => m.replace(/^@/, '').trim())
+    .filter(Boolean)
+    .map((m) => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .sort((a, b) => b.length - a.length);
+
+  if (escaped.length === 0) {
+    return new RegExp(`(^|\\s)(@${DEFAULT_MENTION_BASE})`, 'g');
+  }
+
+  return new RegExp(`(^|\\s)(@(?:${escaped.join('|')}|${DEFAULT_MENTION_BASE}))`, 'g');
+}
+
+function renderTextWithMentions(str: string, keyPrefix: string, mentions?: string[]): React.ReactNode[] {
   if (!str) return [];
   const nodes: React.ReactNode[] = [];
   let last = 0;
   let match: RegExpExecArray | null;
-  const regex = new RegExp(MENTION_REGEX);
+  const regex = buildMentionRegex(mentions);
 
   while ((match = regex.exec(str)) !== null) {
     const fullMatch = match[0];
@@ -61,7 +81,7 @@ export const openBrowserUrl = (rawUrl: string) => {
   }
 };
 
-export const FormattedText: React.FC<FormattedTextProps> = ({ text, className }) => {
+export const FormattedText: React.FC<FormattedTextProps> = ({ text, mentions, className }) => {
   if (!text) return null;
 
   const parts: React.ReactNode[] = [];
@@ -74,7 +94,7 @@ export const FormattedText: React.FC<FormattedTextProps> = ({ text, className })
     const matchedUrl = match[0];
 
     if (matchIndex > lastIndex) {
-      parts.push(...renderTextWithMentions(text.slice(lastIndex, matchIndex), `t-${lastIndex}`));
+      parts.push(...renderTextWithMentions(text.slice(lastIndex, matchIndex), `t-${lastIndex}`, mentions));
     }
 
     let targetHref = matchedUrl;
@@ -104,7 +124,7 @@ export const FormattedText: React.FC<FormattedTextProps> = ({ text, className })
   }
 
   if (lastIndex < text.length) {
-    parts.push(...renderTextWithMentions(text.slice(lastIndex), `t-${lastIndex}`));
+    parts.push(...renderTextWithMentions(text.slice(lastIndex), `t-${lastIndex}`, mentions));
   }
 
   return (

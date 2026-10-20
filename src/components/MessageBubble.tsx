@@ -491,7 +491,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </div>
               )}
 
-              {text && <FormattedText text={text} />}
+              {text && <FormattedText text={text} mentions={message.mentions} />}
 
               <span className="inline-flex items-center float-right ml-2.5 mt-1.5 -mb-0.5 text-[10.5px] text-[#8696A0] select-none leading-none">
                 <span>{timestamp}</span>
