@@ -1,7 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Settings, LogOut, Power, RotateCw } from 'lucide-react';
+import {
+  Settings,
+  LogOut,
+  Power,
+  RotateCw,
+  Pin,
+  PinOff,
+  Maximize2,
+  ChevronLeft,
+  Check,
+  X,
+} from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
+import { BubbleItem, CHAT_SIZE_CONFIG } from '../types/whatsapp';
 import { ContactBubble } from './ContactBubble';
 
 interface BubbleDockProps {
@@ -23,21 +35,32 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
     toggleMainButton,
     toggleBubbleChat,
     closeBubble,
+    togglePinBubble,
+    chatSizes,
+    setChatBubbleSize,
     openSettings,
     logoutWhatsApp,
     refreshApp,
   } = useBubbleStore();
 
   const [showContextMenu, setShowContextMenu] = useState(false);
-  const [activeBubbleMenuId, setActiveBubbleMenuId] = useState<string | null>(null);
+  const [bubbleMenu, setBubbleMenu] = useState<{
+    bubble: BubbleItem;
+    rightPx: number;
+  } | null>(null);
+  const [showSizeSubmenu, setShowSizeSubmenu] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const dockContainerRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const bubbleMenuRef = useRef<HTMLDivElement | null>(null);
 
   const isSyncing =
     waStatus === 'initializing' ||
     waStatus === 'authenticated' ||
     (waStatus === 'ready' && !hasSyncedRealChats);
 
+  // Fecha menu do WhatsApp ao clicar fora
   useEffect(() => {
     if (!showContextMenu) return;
     const handleOutsideClick = (e: MouseEvent) => {
@@ -49,16 +72,56 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
     return () => window.removeEventListener('mousedown', handleOutsideClick);
   }, [showContextMenu]);
 
+  // Fecha menu da bolha ao clicar fora ou ao pressionar Escape
+  useEffect(() => {
+    if (!bubbleMenu) {
+      setShowSizeSubmenu(false);
+      return;
+    }
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (bubbleMenuRef.current && !bubbleMenuRef.current.contains(e.target as Node)) {
+        setBubbleMenu(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setBubbleMenu(null);
+      }
+    };
+    window.addEventListener('mousedown', handleOutsideClick);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', handleOutsideClick);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [bubbleMenu]);
+
+  // Se a bolha for fechada ou removida, fecha o menu correspondente
+  useEffect(() => {
+    if (bubbleMenu && !activeBubbles.some((b) => b.chatId === bubbleMenu.bubble.chatId)) {
+      setBubbleMenu(null);
+    }
+  }, [activeBubbles, bubbleMenu]);
+
   const handleRightClickLogo = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setActiveBubbleMenuId(null);
+    setBubbleMenu(null);
     setShowContextMenu((prev) => !prev);
   };
 
+  const handleOpenBubbleMenu = (bubble: BubbleItem, e: React.MouseEvent) => {
+    setShowContextMenu(false);
+    if (!dockContainerRef.current) return;
+    const dockRect = dockContainerRef.current.getBoundingClientRect();
+    const targetRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const rightPx = Math.max(0, dockRect.right - targetRect.right);
+    setBubbleMenu({ bubble, rightPx });
+  };
+
   return (
-    <div className="relative flex flex-col items-end">
-      {/* Menu de Contexto Flutuante (Botão Direito no Logo do WhatsApp) — Sobreposto sem empurrar menus */}
+    <div ref={dockContainerRef} className="relative flex flex-col items-end">
+      {/* Menu de Contexto Flutuante (Botão Direito no Logo do WhatsApp) */}
       <AnimatePresence>
         {showContextMenu && (
           <motion.div
@@ -110,15 +173,16 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
               <span>{isRefreshing ? 'Recarregando...' : 'Recarregar'}</span>
             </button>
 
+            {/* Deslogar no padrão das opções de cima: texto branco e ícone sutil */}
             <button
               type="button"
               onClick={async () => {
                 setShowContextMenu(false);
                 await logoutWhatsApp();
               }}
-              className="w-full px-3.5 py-2 text-left text-[13px] text-[#FBBF24] hover:bg-[#202C33] flex items-center gap-2.5 transition-colors"
+              className="w-full px-3.5 py-2 text-left text-[13px] text-[#E9EDEF] hover:bg-[#202C33] flex items-center gap-2.5 transition-colors"
             >
-              <LogOut className="w-4 h-4 text-[#FBBF24]" />
+              <LogOut className="w-4 h-4 text-[#8696A0]" />
               <span>Deslogar do WhatsApp</span>
             </button>
 
@@ -139,6 +203,141 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
         )}
       </AnimatePresence>
 
+      {/* Menu de Contexto Flutuante das Bolhas de Contato (Visualmente idêntico ao de 10.png) */}
+      <AnimatePresence>
+        {bubbleMenu && (
+          <motion.div
+            ref={bubbleMenuRef}
+            data-interactive="true"
+            onMouseEnter={onInteractiveEnter}
+            onMouseLeave={onInteractiveLeave}
+            style={{ right: `${bubbleMenu.rightPx}px` }}
+            initial={{ opacity: 0, y: 8, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.95 }}
+            transition={{ duration: 0.14 }}
+            className="absolute bottom-full mb-2.5 w-[215px] bg-[#182229]/95 backdrop-blur-md rounded-[10px] shadow-[0_14px_38px_rgba(0,0,0,0.92)] border border-white/15 py-1.5 z-[100] pointer-events-auto select-none"
+          >
+            {/* Opção 1: Fixar / Desfixar conversa */}
+            <button
+              type="button"
+              onClick={() => {
+                togglePinBubble(bubbleMenu.bubble.chatId);
+                setBubbleMenu(null);
+              }}
+              className="w-full px-3.5 py-2 text-left text-[13px] text-[#E9EDEF] hover:bg-[#202C33] flex items-center justify-between transition-colors"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                {bubbleMenu.bubble.isPinned ? (
+                  <PinOff className="w-4 h-4 text-[#25D366] shrink-0" />
+                ) : (
+                  <Pin className="w-4 h-4 text-[#8696A0] shrink-0" />
+                )}
+                <span className="truncate">
+                  {bubbleMenu.bubble.isPinned ? 'Desfixar conversa' : 'Fixar conversa'}
+                </span>
+              </div>
+              {bubbleMenu.bubble.isPinned && (
+                <span className="text-[10px] uppercase font-semibold text-[#25D366] bg-[#25D366]/15 px-1.5 py-0.5 rounded shrink-0">
+                  Fixada
+                </span>
+              )}
+            </button>
+
+            {/* Opção 2: Tamanho da conversa (com submenu Pequeno, Médio, Grande) */}
+            <div
+              className="relative"
+              onMouseEnter={() => setShowSizeSubmenu(true)}
+              onMouseLeave={() => setShowSizeSubmenu(false)}
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowSizeSubmenu((v) => !v);
+                }}
+                className="w-full px-3.5 py-2 text-left text-[13px] text-[#E9EDEF] hover:bg-[#202C33] flex items-center justify-between transition-colors"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Maximize2 className="w-4 h-4 text-[#8696A0] shrink-0" />
+                  <span className="whitespace-nowrap">Tamanho da conversa</span>
+                </div>
+                <ChevronLeft className="w-4 h-4 text-[#8696A0] shrink-0" />
+              </button>
+
+              {/* Submenu de Tamanhos (expande para a esquerda) */}
+              <AnimatePresence>
+                {showSizeSubmenu && (
+                  <div className="absolute right-full top-0 pr-1.5 z-[130]">
+                    <motion.div
+                      initial={{ opacity: 0, x: 6, scale: 0.95 }}
+                      animate={{ opacity: 1, x: 0, scale: 1 }}
+                      exit={{ opacity: 0, x: 6, scale: 0.95 }}
+                      transition={{ duration: 0.12 }}
+                      className="w-[160px] bg-[#182229]/95 backdrop-blur-md rounded-[10px] shadow-[0_14px_38px_rgba(0,0,0,0.92)] border border-white/15 py-1.5 overflow-hidden"
+                    >
+                      {(['pequeno', 'medio', 'grande'] as const).map((sizeKey) => {
+                        const isSelected =
+                          (chatSizes[bubbleMenu.bubble.chatId] || 'pequeno') === sizeKey;
+                        const label = CHAT_SIZE_CONFIG[sizeKey].label;
+
+                        return (
+                          <button
+                            key={sizeKey}
+                            type="button"
+                            onClick={() => {
+                              setChatBubbleSize(bubbleMenu.bubble.chatId, sizeKey);
+                              setBubbleMenu(null);
+                            }}
+                            className="w-full px-3 py-1.5 text-left text-[12.5px] text-[#E9EDEF] hover:bg-[#202C33] flex items-center justify-between transition-colors"
+                          >
+                            <span className={isSelected ? 'text-[#25D366] font-medium' : ''}>
+                              {label}
+                            </span>
+                            {isSelected && <Check className="w-3.5 h-3.5 text-[#25D366]" />}
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  </div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            <div className="my-1 border-t border-white/[0.08]" />
+
+            {/* Opção 3: Fechar */}
+            <button
+              type="button"
+              disabled={bubbleMenu.bubble.isPinned}
+              onClick={() => {
+                if (bubbleMenu.bubble.isPinned) return;
+                closeBubble(bubbleMenu.bubble.chatId);
+                setBubbleMenu(null);
+              }}
+              title={
+                bubbleMenu.bubble.isPinned
+                  ? 'Desfixe a conversa para poder fechar'
+                  : 'Fechar conversa'
+              }
+              className={`w-full px-3.5 py-2 text-left text-[13px] flex items-center justify-between transition-colors ${
+                bubbleMenu.bubble.isPinned
+                  ? 'text-[#8696A0]/40 cursor-not-allowed'
+                  : 'text-[#EF4444] hover:bg-[#202C33]'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <X className="w-4 h-4 shrink-0" />
+                <span>Fechar</span>
+              </div>
+              {bubbleMenu.bubble.isPinned && (
+                <span className="text-[10px] text-[#8696A0]/60">Desfixe antes</span>
+              )}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Dock Principal de Bolhas (Escalável em Tempo Real pelo Slider de Zoom) */}
       <div
         data-interactive="true"
@@ -153,19 +352,12 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
               key={bubble.chatId}
               bubble={bubble}
               isActive={activePopover === 'chat-window' && activeChatId === bubble.chatId}
-              isContextMenuOpen={activeBubbleMenuId === bubble.chatId}
               onSelect={(chatId) => {
-                setActiveBubbleMenuId(null);
+                setBubbleMenu(null);
                 toggleBubbleChat(chatId);
               }}
               onClose={closeBubble}
-              onOpenContextMenu={(chatId) => {
-                setShowContextMenu(false);
-                setActiveBubbleMenuId((prev) => (prev === chatId ? null : chatId));
-              }}
-              onCloseContextMenu={() => setActiveBubbleMenuId(null)}
-              onInteractiveEnter={onInteractiveEnter}
-              onInteractiveLeave={onInteractiveLeave}
+              onOpenContextMenu={handleOpenBubbleMenu}
             />
           ))}
         </AnimatePresence>
@@ -175,6 +367,7 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
           type="button"
           onClick={() => {
             setShowContextMenu(false);
+            setBubbleMenu(null);
             toggleMainButton();
           }}
           onContextMenu={handleRightClickLogo}
