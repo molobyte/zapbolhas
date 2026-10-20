@@ -569,16 +569,28 @@ export const EmojiStickerPicker: React.FC<EmojiStickerPickerProps> = ({
     return items;
   }, [chats, messagesByChat]);
 
-  const handlePhotoClick = async (url: string, caption?: string) => {
+  const handlePhotoClick = async (photo: { id: string; url: string; caption?: string }) => {
     if (isProcessingMedia) return;
     setIsProcessingMedia(true);
     try {
-      const dataUrl = await ensureDataUrl(url);
+      let finalDataUrl = photo.url;
+      // Se for mensagem do WhatsApp, tenta baixar a mídia original em alta resolução
+      if (photo.id && window.electronAPI?.downloadMedia) {
+        try {
+          const hd = await window.electronAPI.downloadMedia(photo.id);
+          if (hd) {
+            finalDataUrl = hd;
+          }
+        } catch {
+          // Mantém url atual como fallback
+        }
+      }
+      finalDataUrl = await ensureDataUrl(finalDataUrl);
       onSelectMedia?.({
-        mediaDataUrl: dataUrl,
+        mediaDataUrl: finalDataUrl,
         mediaType: 'image',
         filename: 'foto.jpg',
-        caption,
+        caption: photo.caption,
       });
     } finally {
       setIsProcessingMedia(false);
@@ -1105,7 +1117,7 @@ export const EmojiStickerPicker: React.FC<EmojiStickerPickerProps> = ({
                 <button
                   key={photo.id || `photo-${idx}`}
                   type="button"
-                  onClick={() => handlePhotoClick(photo.url, photo.caption)}
+                  onClick={() => handlePhotoClick(photo)}
                   disabled={isProcessingMedia}
                   title={photo.caption ? `Clique para reenviar: ${photo.caption}` : 'Clique para reenviar foto'}
                   className="group/photo relative aspect-square rounded-[8px] bg-[#111B21]/60 hover:bg-[#2A3942] border border-white/[0.08] hover:border-[#00A884] overflow-hidden cursor-pointer transition-all flex items-center justify-center p-0.5 focus:outline-none disabled:opacity-50"

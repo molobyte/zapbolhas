@@ -1775,39 +1775,63 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     });
 
     if (mode === 'whatsapp' && window.electronAPI?.sendMedia) {
-      const sentMsg = await window.electronAPI.sendMedia({
-        chatId: activeChatId,
-        mediaDataUrl: payload.mediaDataUrl,
-        caption: payload.caption,
-        filename: payload.filename,
-        quotedMessageId: replyingTo?.id,
-      });
-      const freshMsgs = await window.electronAPI.getMessages(
-        activeChatId,
-        Math.max(100, currentMsgs.length + 5)
-      );
-      if (freshMsgs && freshMsgs.length > 0) {
-        const enriched = freshMsgs.map((m, idx) => {
-          if (
-            (sentMsg && m.id === sentMsg.id) ||
-            (idx === freshMsgs.length - 1 &&
-              m.fromMe &&
-              (m.type === 'image' || m.type === 'video') &&
-              !m.imageUrl &&
-              !m.videoUrl)
-          ) {
-            return {
-              ...m,
-              imageUrl:
-                mediaType === 'image' ? m.imageUrl || payload.mediaDataUrl : m.imageUrl,
-              videoUrl:
-                mediaType === 'video' ? m.videoUrl || payload.mediaDataUrl : m.videoUrl,
-              isHdLoaded: true,
-            };
-          }
-          return m;
+      try {
+        const sentMsg = await window.electronAPI.sendMedia({
+          chatId: activeChatId,
+          mediaDataUrl: payload.mediaDataUrl,
+          caption: payload.caption,
+          filename: payload.filename,
+          quotedMessageId: replyingTo?.id,
         });
-        get().setMessagesForChat(activeChatId, enriched);
+
+        if (!sentMsg) {
+          console.error('[WhatsApp] Falha ao enviar mídia (serviço retornou null)');
+          const latestMessages = get().messagesByChat[activeChatId] || [];
+          set({
+            messagesByChat: {
+              ...get().messagesByChat,
+              [activeChatId]: latestMessages.filter((m) => m.id !== optimisticMedia.id),
+            },
+          });
+          return;
+        }
+
+        const freshMsgs = await window.electronAPI.getMessages(
+          activeChatId,
+          Math.max(100, currentMsgs.length + 5)
+        );
+        if (freshMsgs && freshMsgs.length > 0) {
+          const enriched = freshMsgs.map((m, idx) => {
+            if (
+              (sentMsg && m.id === sentMsg.id) ||
+              (idx === freshMsgs.length - 1 &&
+                m.fromMe &&
+                (m.type === 'image' || m.type === 'video') &&
+                !m.imageUrl &&
+                !m.videoUrl)
+            ) {
+              return {
+                ...m,
+                imageUrl:
+                  mediaType === 'image' ? m.imageUrl || payload.mediaDataUrl : m.imageUrl,
+                videoUrl:
+                  mediaType === 'video' ? m.videoUrl || payload.mediaDataUrl : m.videoUrl,
+                isHdLoaded: true,
+              };
+            }
+            return m;
+          });
+          get().setMessagesForChat(activeChatId, enriched);
+        }
+      } catch (err) {
+        console.error('[WhatsApp] Exceção ao enviar mídia:', err);
+        const latestMessages = get().messagesByChat[activeChatId] || [];
+        set({
+          messagesByChat: {
+            ...get().messagesByChat,
+            [activeChatId]: latestMessages.filter((m) => m.id !== optimisticMedia.id),
+          },
+        });
       }
     }
   },

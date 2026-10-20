@@ -160,6 +160,13 @@ function mapAck(ack?: number): 'sent' | 'delivered' | 'read' {
   return 'sent';
 }
 
+function logMediaDebug(msg: string) {
+  try {
+    const p = path.join(process.cwd(), 'media_debug.log');
+    fs.appendFileSync(p, `[${new Date().toISOString()}] ${msg}\n`, 'utf8');
+  } catch {}
+}
+
 export class WhatsAppService {
   private client: Client | null = null;
   private mainWindow: BrowserWindow | null = null;
@@ -2287,17 +2294,45 @@ export class WhatsAppService {
     quotedMessageId?: string;
   }): Promise<FormattedChatMessage | null> {
     if (!this.client || this.status !== 'ready') {
+      const msg = `[WhatsAppService] sendMedia abortado: cliente não está pronto (status: ${this.status})`;
+      console.warn(msg);
+      logMediaDebug(msg);
       return null;
     }
     try {
-      const match = /^data:([a-zA-Z0-9+.-]+\/[a-zA-Z0-9+.-]+);base64,(.+)$/.exec(
-        payload.mediaDataUrl
-      );
-      if (!match) {
+      let mimetype = 'image/jpeg';
+      let base64Data = payload.mediaDataUrl;
+
+      if (payload.mediaDataUrl.startsWith('data:')) {
+        const commaIdx = payload.mediaDataUrl.indexOf(',');
+        if (commaIdx !== -1) {
+          const header = payload.mediaDataUrl.slice(0, commaIdx);
+          base64Data = payload.mediaDataUrl.slice(commaIdx + 1);
+          const mimeMatch = /^data:([^;]+)/i.exec(header);
+          if (mimeMatch) {
+            mimetype = mimeMatch[1].trim();
+          }
+        }
+      } else if (fs.existsSync(payload.mediaDataUrl)) {
+        const ext = (path.extname(payload.mediaDataUrl) || '').toLowerCase();
+        if (ext === '.png') mimetype = 'image/png';
+        else if (ext === '.webp') mimetype = 'image/webp';
+        else if (ext === '.gif') mimetype = 'image/gif';
+        else if (ext === '.mp4') mimetype = 'video/mp4';
+        else if (ext === '.mov') mimetype = 'video/quicktime';
+        else mimetype = 'image/jpeg';
+        const buf = fs.readFileSync(payload.mediaDataUrl);
+        base64Data = buf.toString('base64');
+      }
+      base64Data = base64Data.replace(/[\r\n\s]/g, '');
+
+      if (!base64Data) {
+        const msg = '[WhatsAppService] sendMedia: base64Data está vazio após extração';
+        console.error(msg);
+        logMediaDebug(msg);
         return null;
       }
-      const mimetype = match[1];
-      const base64Data = match[2];
+
       const defaultFilename = mimetype.startsWith('video/')
         ? 'video.mp4'
         : mimetype.includes('png')
@@ -2319,7 +2354,28 @@ export class WhatsAppService {
         options.quotedMessageId = payload.quotedMessageId;
       }
 
-      const sent = await this.client.sendMessage(payload.chatId, media, options);
+      const infoMsg = `Iniciando envio de mídia (${mimetype}, ${filename}, ${base64Data.length} chars) para ${payload.chatId}`;
+      console.log(`[WhatsAppService] ${infoMsg}`);
+      logMediaDebug(infoMsg);
+
+      let sent: any;
+      try {
+        sent = await this.client.sendMessage(payload.chatId, media, options);
+      } catch (sendErr) {
+        console.error('[WhatsAppService] Falha ao enviar mídia com opções:', sendErr);
+        logMediaDebug(`Falha sendMessage com opções: ${String(sendErr)}`);
+        if (options.quotedMessageId) {
+          console.log('[WhatsAppService] Tentando reenviar sem quotedMessageId...');
+          logMediaDebug('Tentando reenviar sem quotedMessageId...');
+          delete options.quotedMessageId;
+          sent = await this.client.sendMessage(payload.chatId, media, options);
+        } else {
+          throw sendErr;
+        }
+      }
+
+      console.log('[WhatsAppService] Mídia enviada com sucesso no WhatsApp!');
+      logMediaDebug('Mídia enviada com sucesso no WhatsApp!');
       const sentId = (sent as unknown as { id?: { _serialized?: string } })?.id?._serialized;
       if (sentId) {
         this.mediaCache.set(sentId, payload.mediaDataUrl);
@@ -2337,8 +2393,10 @@ export class WhatsAppService {
         }
       }
       return latest;
-    } catch (err) {
-      console.error('[WhatsAppService] Error sending media:', err);
+    } catch (err: any) {
+      const errDetail = err?.stack || String(err);
+      console.error('[WhatsAppService] Error sending media:', errDetail);
+      logMediaDebug(`Error sending media: ${errDetail}`);
       return null;
     }
   }
