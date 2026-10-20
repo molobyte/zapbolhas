@@ -272,21 +272,89 @@ export class WhatsAppService {
   private async patchWWebJSGetChatModel() {
     if (!this.client?.pupPage) return;
     try {
+      // 1. Re-evaluate LoadUtils from whatsapp-web.js to guarantee our patched Utils.js is active
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils');
+        if (typeof LoadUtils === 'function') {
+          await this.client.pupPage.evaluate(LoadUtils);
+        }
+      } catch (loadErr) {
+        console.warn('[WhatsAppService] LoadUtils evaluation warning:', loadErr);
+      }
+
+      // 2. Wrap all memoized getters and model helpers so they never crash
       await this.client.pupPage.evaluate(() => {
-        const w = window as unknown as {
-          WWebJS?: {
-            getChatModel?: (chat: Record<string, unknown>, opts?: unknown) => Promise<unknown>;
-            processStickerData?: (mediaInfo: unknown) => Promise<unknown>;
-            processMediaData?: (
-              mediaInfo: unknown,
-              opts: Record<string, unknown>
-            ) => Promise<unknown>;
-            _patchedSafeGetChatModel?: boolean;
-          };
-        };
-        if (!w.WWebJS || w.WWebJS._patchedSafeGetChatModel) return;
+        const w = window as any;
+        if (!w.WWebJS) return;
+
+        // Wrap WhatsApp Web internal getters to prevent "Data passed to getter must include an id property (it's how we memoize) but got undefined"
+        const getterModules = [
+          'WAWebContactGetters',
+          'WAWebChatGetters',
+          'WAWebFrontendContactGetters',
+          'WAWebMsgGetters',
+        ];
+
+        for (const modName of getterModules) {
+          try {
+            const mod = typeof w.require === 'function' ? w.require(modName) : null;
+            if (mod) {
+              for (const fnName of Object.keys(mod)) {
+                const origFn = mod[fnName];
+                if (typeof origFn === 'function' && !origFn._safePatched) {
+                  const safeFn = function (this: any, target: any, ...args: any[]) {
+                    if (!target || (!target.id && !target._serialized && typeof target !== 'string')) {
+                      return false;
+                    }
+                    try {
+                      return origFn.call(this, target, ...args);
+                    } catch (err: any) {
+                      if (err && String(err).includes("it's how we memoize")) {
+                        return false;
+                      }
+                      throw err;
+                    }
+                  };
+                  safeFn._safePatched = true;
+                  mod[fnName] = safeFn;
+                }
+              }
+            }
+          } catch {}
+        }
+
+        // 2. Wrap addAndSendMsgToChat to sanitize outgoing message objects
+        try {
+          const sendChatAction = typeof w.require === 'function' ? w.require('WAWebSendMsgChatAction') : null;
+          if (sendChatAction && typeof sendChatAction.addAndSendMsgToChat === 'function' && !sendChatAction.addAndSendMsgToChat._safePatched) {
+            const origAddAndSend = sendChatAction.addAndSendMsgToChat;
+            sendChatAction.addAndSendMsgToChat = function (this: any, chat: any, message: any, ...rest: any[]) {
+              if (message) {
+                delete message.__x_id;
+                // If message.id was wiped by spread, recover from newMsgKey or id
+                if (!message.id && message.__x_id) {
+                  message.id = message.__x_id;
+                }
+                // Ensure from is not undefined (critical for @lid and memoize getters)
+                if (!message.from) {
+                  try {
+                    const mePrefs = typeof w.require === 'function' ? w.require('WAWebUserPrefsMeUser') : {};
+                    message.from = (typeof mePrefs?.getMaybeMePnUser === 'function' ? mePrefs.getMaybeMePnUser() : null) ||
+                                   (typeof mePrefs?.getMeUser === 'function' ? mePrefs.getMeUser() : null) ||
+                                   (typeof w.require === 'function' ? w.require('WAWebConnModel')?.Conn?.wid : null);
+                  } catch {}
+                }
+              }
+              return origAddAndSend.call(this, chat, message, ...rest);
+            };
+            sendChatAction.addAndSendMsgToChat._safePatched = true;
+          }
+        } catch {}
+
+        // Safe WWebJS.getChatModel
         const origGetChatModel = w.WWebJS.getChatModel;
-        if (typeof origGetChatModel === 'function') {
+        if (typeof origGetChatModel === 'function' && !w.WWebJS._patchedSafeGetChatModel) {
           w.WWebJS.getChatModel = async function (chat: Record<string, unknown>, opts?: unknown) {
             try {
               return await origGetChatModel.call(this, chat, opts);
@@ -299,9 +367,12 @@ export class WhatsAppService {
               return model;
             }
           };
+          w.WWebJS._patchedSafeGetChatModel = true;
         }
+
+        // Safe WWebJS.processStickerData
         const origProcessStickerData = w.WWebJS.processStickerData;
-        if (typeof origProcessStickerData === 'function') {
+        if (typeof origProcessStickerData === 'function' && !w.WWebJS._patchedSafeProcessSticker) {
           w.WWebJS.processStickerData = async function (mediaInfo: unknown) {
             try {
               return await origProcessStickerData.call(this, mediaInfo);
@@ -320,8 +391,30 @@ export class WhatsAppService {
               throw new Error('Failed to process sticker media');
             }
           };
+          w.WWebJS._patchedSafeProcessSticker = true;
         }
-        w.WWebJS._patchedSafeGetChatModel = true;
+
+        // Safe WWebJS.getMessageModel
+        const origGetMessageModel = w.WWebJS.getMessageModel;
+        if (typeof origGetMessageModel === 'function' && !w.WWebJS._patchedSafeGetMsgModel) {
+          w.WWebJS.getMessageModel = function (message: any) {
+            if (!message) return null;
+            try {
+              return origGetMessageModel.call(this, message);
+            } catch {
+              return {
+                id: message.id || { _serialized: message.id?._serialized || String(message.id) },
+                ack: message.ack,
+                body: message.body,
+                type: message.type || 'chat',
+                t: message.t,
+                from: message.from,
+                to: message.to,
+              };
+            }
+          };
+          w.WWebJS._patchedSafeGetMsgModel = true;
+        }
       });
     } catch {
       // Ignore patch error
@@ -1656,6 +1749,7 @@ export class WhatsAppService {
       return null;
     }
     try {
+      await this.patchWWebJSGetChatModel();
       const options: { quotedMessageId?: string; mentions?: string[] } = {};
       if (payload.quotedMessageId) {
         options.quotedMessageId = payload.quotedMessageId;
@@ -2267,6 +2361,7 @@ export class WhatsAppService {
         options.quotedMessageId = payload.quotedMessageId;
       }
 
+      await this.patchWWebJSGetChatModel();
       const sent = await this.client.sendMessage(payload.chatId, media, options);
       const sentId = (sent as unknown as { id?: { _serialized?: string } })?.id?._serialized;
       if (sentId) {
@@ -2357,6 +2452,8 @@ export class WhatsAppService {
       const infoMsg = `Iniciando envio de mídia (${mimetype}, ${filename}, ${base64Data.length} chars) para ${payload.chatId}`;
       console.log(`[WhatsAppService] ${infoMsg}`);
       logMediaDebug(infoMsg);
+
+      await this.patchWWebJSGetChatModel();
 
       let sent: any;
       try {
