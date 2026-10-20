@@ -6,6 +6,7 @@ import { ChatListPopover } from './components/ChatListPopover';
 import { ChatWindowPopover } from './components/ChatWindowPopover';
 import { QRCodePopover } from './components/QRCodePopover';
 import { SettingsPopover } from './components/SettingsPopover';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export const App: React.FC = () => {
   const {
@@ -60,7 +61,12 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (isSettingsWindow) return;
     if (activePopover === 'none') {
-      setIgnoreMouse(true);
+      const isOverInteractive = Boolean(
+        document.querySelector(':hover')?.closest('[data-interactive="true"]')
+      );
+      if (!isOverInteractive) {
+        setIgnoreMouse(true);
+      }
     }
   }, [activePopover, setIgnoreMouse, isSettingsWindow]);
 
@@ -143,39 +149,41 @@ export const App: React.FC = () => {
     <div className="w-screen h-screen bg-transparent pointer-events-none flex flex-col justify-end items-end pb-[12px] pr-[16px] overflow-hidden select-none">
       {/* Área Superior de Popovers Flutuantes (apenas um aberto por vez) */}
       <div className="mb-[12px] flex flex-col items-end pointer-events-none">
-        <AnimatePresence mode="wait">
-          {activePopover === 'chat-list' && (
-            <ChatListPopover
-              key="chat-list"
-              onInteractiveEnter={handleInteractiveEnter}
-              onInteractiveLeave={handleInteractiveLeave}
-            />
-          )}
+        <ErrorBoundary name="Popovers">
+          <AnimatePresence mode="wait">
+            {activePopover === 'chat-list' && (
+              <ChatListPopover
+                key="chat-list"
+                onInteractiveEnter={handleInteractiveEnter}
+                onInteractiveLeave={handleInteractiveLeave}
+              />
+            )}
 
-          {activePopover === 'chat-window' && (
-            <ChatWindowPopover
-              key="chat-window"
-              onInteractiveEnter={handleInteractiveEnter}
-              onInteractiveLeave={handleInteractiveLeave}
-            />
-          )}
+            {activePopover === 'chat-window' && (
+              <ChatWindowPopover
+                key="chat-window"
+                onInteractiveEnter={handleInteractiveEnter}
+                onInteractiveLeave={handleInteractiveLeave}
+              />
+            )}
 
-          {activePopover === 'qr-code' && (
-            <QRCodePopover
-              key="qr-code"
-              onInteractiveEnter={handleInteractiveEnter}
-              onInteractiveLeave={handleInteractiveLeave}
-            />
-          )}
+            {activePopover === 'qr-code' && (
+              <QRCodePopover
+                key="qr-code"
+                onInteractiveEnter={handleInteractiveEnter}
+                onInteractiveLeave={handleInteractiveLeave}
+              />
+            )}
 
-          {activePopover === 'settings' && (
-            <SettingsPopover
-              key="settings"
-              onInteractiveEnter={handleInteractiveEnter}
-              onInteractiveLeave={handleInteractiveLeave}
-            />
-          )}
-        </AnimatePresence>
+            {activePopover === 'settings' && (
+              <SettingsPopover
+                key="settings"
+                onInteractiveEnter={handleInteractiveEnter}
+                onInteractiveLeave={handleInteractiveLeave}
+              />
+            )}
+          </AnimatePresence>
+        </ErrorBoundary>
       </div>
 
       {/* Dock Inferior Direito com as Bolhas de Contatos e o Botão Fixo do WhatsApp */}

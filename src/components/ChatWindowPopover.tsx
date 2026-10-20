@@ -15,7 +15,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
-import { GroupParticipant, CHAT_SIZE_CONFIG, ChatBubbleSize } from '../types/whatsapp';
+import { GroupParticipant, CHAT_SIZE_CONFIG, ChatBubbleSize, ChatSummary } from '../types/whatsapp';
 import { MessageBubble } from './MessageBubble';
 import { EmojiStickerPicker, PickerTab } from './EmojiStickerPicker';
 import { FormattedText } from './FormattedText';
@@ -82,9 +82,21 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const userHasScrolledUpRef = useRef<boolean>(false);
   const isLoadingOlderRef = useRef<boolean>(false);
 
-  const activeChat = chats.find((c) => c.id === activeChatId);
-  const isGroupChat = Boolean(activeChat?.isGroup);
-  const groupParticipants = (activeChatId && groupParticipantsByChat[activeChatId]) || [];
+  const lastActiveChatIdRef = useRef<string | null>(activeChatId);
+  if (activeChatId) {
+    lastActiveChatIdRef.current = activeChatId;
+  }
+  const currentChatId = activeChatId || lastActiveChatIdRef.current;
+
+  const lastActiveChatRef = useRef<ChatSummary | undefined>(undefined);
+  const activeChat = chats.find((c) => c.id === currentChatId);
+  if (activeChat) {
+    lastActiveChatRef.current = activeChat;
+  }
+  const currentChat = activeChat || lastActiveChatRef.current;
+
+  const isGroupChat = Boolean(currentChat?.isGroup);
+  const groupParticipants = (currentChatId && groupParticipantsByChat[currentChatId]) || [];
 
   const normalizeQuery = (str: string): string =>
     (str || '')
@@ -108,19 +120,19 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       })
       .slice(0, 10);
   }, [showMentionPopover, isGroupChat, groupParticipants, mentionQuery]);
-  const messages = activeChatId ? messagesByChat[activeChatId] || [] : [];
-  const unreadBanner = activeChatId ? unreadBannerByChat[activeChatId] : undefined;
+  const messages = currentChatId ? messagesByChat[currentChatId] || [] : [];
+  const unreadBanner = currentChatId ? unreadBannerByChat[currentChatId] : undefined;
 
-  const activeBubble = activeBubbles.find((b) => b.chatId === activeChatId);
+  const activeBubble = activeBubbles.find((b) => b.chatId === currentChatId);
   const isPinned = Boolean(activeBubble?.isPinned);
 
-  const currentSizeKey: ChatBubbleSize = (activeChatId && chatSizes[activeChatId]) || 'pequeno';
+  const currentSizeKey: ChatBubbleSize = (currentChatId && chatSizes[currentChatId]) || 'pequeno';
   const currentSize = CHAT_SIZE_CONFIG[currentSizeKey] || CHAT_SIZE_CONFIG.pequeno;
 
   // Calcula a posição horizontal exata da seta e o deslocamento do balão da conversa
   // para acompanhar bolhas afastadas à esquerda no dock inferior,
   // considerando o nível de zoom atual (bubbleScale) e o tamanho da janela
-  const activeBubbleIndex = activeBubbles.findIndex((b) => b.chatId === activeChatId);
+  const activeBubbleIndex = activeBubbles.findIndex((b) => b.chatId === currentChatId);
   const stepsFromRight =
     activeBubbleIndex >= 0 ? activeBubbles.length - activeBubbleIndex : 1;
 
@@ -167,7 +179,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   useLayoutEffect(() => {
     userHasScrolledUpRef.current = false;
     isLoadingOlderRef.current = false;
-  }, [activeChatId]);
+  }, [currentChatId]);
 
   // Sincroniza o scroll imediatamente antes da pintura e no próximo frame quando mensagens ou banner mudam
   useLayoutEffect(() => {
@@ -179,7 +191,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       }
     });
     return () => cancelAnimationFrame(rafId);
-  }, [activeChatId, messages, unreadBanner?.firstUnreadMsgId, unreadBanner?.count, scrollToTarget]);
+  }, [currentChatId, messages, unreadBanner?.firstUnreadMsgId, unreadBanner?.count, scrollToTarget]);
 
   // Observa mudanças de altura do conteúdo (ex: decodificação assíncrona de <img> base64 ou download HD)
   // para impedir que o scroll fique perdido no meio do chat após o carregamento das imagens
@@ -195,7 +207,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
     observer.observe(contentEl);
     return () => observer.disconnect();
-  }, [activeChatId, scrollToTarget]);
+  }, [currentChatId, scrollToTarget]);
 
   useEffect(() => {
     if (replyingTo && inputRef.current) {
@@ -216,19 +228,19 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
   // Carrega os 10 primeiros colaboradores ao abrir o grupo
   useEffect(() => {
-    if (activeChatId && isGroupChat) {
-      fetchGroupParticipants(activeChatId, '', 10);
+    if (currentChatId && isGroupChat) {
+      fetchGroupParticipants(currentChatId, '', 10);
     }
-  }, [activeChatId, isGroupChat, fetchGroupParticipants]);
+  }, [currentChatId, isGroupChat, fetchGroupParticipants]);
 
   // Busca dinamicamente os colaboradores conforme o usuário digita letras após o '@' (máximo 10)
   useEffect(() => {
-    if (!activeChatId || !isGroupChat || !showMentionPopover) return;
+    if (!currentChatId || !isGroupChat || !showMentionPopover) return;
     const timer = setTimeout(() => {
-      fetchGroupParticipants(activeChatId, mentionQuery, 10);
+      fetchGroupParticipants(currentChatId, mentionQuery, 10);
     }, 60);
     return () => clearTimeout(timer);
-  }, [activeChatId, isGroupChat, showMentionPopover, mentionQuery, fetchGroupParticipants]);
+  }, [currentChatId, isGroupChat, showMentionPopover, mentionQuery, fetchGroupParticipants]);
 
   // Mantém o índice selecionado dentro dos limites da lista
   useEffect(() => {
@@ -236,8 +248,6 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       setSelectedMentionIndex(0);
     }
   }, [filteredParticipants.length, selectedMentionIndex]);
-
-  if (!activeChatId || !activeChat) return null;
 
   const handleInsertEmoji = (emoji: string) => {
     const input = inputRef.current;
@@ -675,6 +685,8 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     window.electronAPI?.openExternalImage(urlToOpen);
   };
 
+  if (!currentChat) return null;
+
   return (
     <motion.div
       data-interactive="true"
@@ -703,12 +715,12 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       <div className="absolute top-0 left-0 right-0 z-30 px-3 py-1.5 bg-gradient-to-b from-[#111B21]/95 via-[#111B21]/75 to-transparent flex items-center justify-between opacity-0 group-hover/chat:opacity-100 transition-opacity duration-150">
         <div className="flex items-center gap-2 min-w-0">
           <img
-            src={activeChat.avatar}
-            alt={activeChat.name}
+            src={currentChat.avatar}
+            alt={currentChat.name}
             className="w-6 h-6 rounded-full object-cover border border-white/15"
           />
           <span className="text-[12.5px] font-medium text-[#E9EDEF] truncate">
-            {activeChat.name}
+            {currentChat.name}
           </span>
         </div>
 
@@ -725,8 +737,8 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             type="button"
             disabled={isPinned}
             onClick={() => {
-              if (isPinned) return;
-              closeBubble(activeChatId);
+              if (isPinned || !currentChatId) return;
+              closeBubble(currentChatId);
             }}
             title={
               isPinned
@@ -767,26 +779,30 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             ) {
               isLoadingOlderRef.current = true;
               const prevHeight = container.scrollHeight;
-              const targetChatId = activeChatId;
-              window.electronAPI
-                .getMessages(targetChatId, Math.min(500, messages.length + 80))
-                .then((olderMsgs) => {
-                  if (olderMsgs && olderMsgs.length > messages.length) {
-                    useBubbleStore.getState().setMessagesForChat(targetChatId, olderMsgs);
-                    requestAnimationFrame(() => {
-                      if (scrollContainerRef.current) {
-                        const newHeight = scrollContainerRef.current.scrollHeight;
-                        scrollContainerRef.current.scrollTop = Math.max(
-                          0,
-                          newHeight - prevHeight
-                        );
-                      }
-                    });
-                  }
-                })
-                .finally(() => {
-                  isLoadingOlderRef.current = false;
-                });
+              const targetChatId = currentChatId;
+              if (targetChatId) {
+                window.electronAPI
+                  .getMessages(targetChatId, Math.min(500, messages.length + 80))
+                  .then((olderMsgs) => {
+                    if (olderMsgs && olderMsgs.length > messages.length) {
+                      useBubbleStore.getState().setMessagesForChat(targetChatId, olderMsgs);
+                      requestAnimationFrame(() => {
+                        if (scrollContainerRef.current) {
+                          const newHeight = scrollContainerRef.current.scrollHeight;
+                          scrollContainerRef.current.scrollTop = Math.max(
+                            0,
+                            newHeight - prevHeight
+                          );
+                        }
+                      });
+                    }
+                  })
+                  .finally(() => {
+                    isLoadingOlderRef.current = false;
+                  });
+              } else {
+                isLoadingOlderRef.current = false;
+              }
             }
           } else if (
             !unreadBanner &&
@@ -837,7 +853,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                 <MessageBubble
                   message={msg}
                   isFirstInGroup={isFirstInGroup}
-                  isGroupChat={activeChat.isGroup}
+                  isGroupChat={currentChat.isGroup}
                   onReply={(quote) => setReplyingTo(quote)}
                 />
               </React.Fragment>
@@ -1038,7 +1054,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             <div className="px-3 py-2 bg-[#111B21] border-b border-white/10 flex items-center justify-between shrink-0 z-10">
               <div className="min-w-0">
                 <div className="text-[12.5px] font-medium text-[#E9EDEF] truncate">
-                  {viewingImage.senderName || activeChat.name}
+                  {viewingImage.senderName || currentChat.name}
                 </div>
                 {viewingImage.timestamp && (
                   <div className="text-[10.5px] text-[#8696A0]">
