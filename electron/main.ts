@@ -12,13 +12,19 @@ let selectedDisplayId: number | null = null;
 const MAX_OVERLAY_WIDTH = 1200;
 const OVERLAY_HEIGHT = 740;
 
-function loadSavedDisplayId(): number | null {
+interface SavedDisplayPref {
+  displayId: number;
+  label?: string;
+  bounds?: { x: number; y: number; width: number; height: number };
+}
+
+function loadSavedDisplayPref(): SavedDisplayPref | null {
   try {
     const prefFile = path.join(app.getPath('userData'), 'display-pref.json');
     if (fs.existsSync(prefFile)) {
       const parsed = JSON.parse(fs.readFileSync(prefFile, 'utf-8'));
       if (typeof parsed.displayId === 'number') {
-        return parsed.displayId;
+        return parsed;
       }
     }
   } catch {
@@ -27,51 +33,87 @@ function loadSavedDisplayId(): number | null {
   return null;
 }
 
-function saveDisplayId(displayId: number) {
+function saveDisplayPreference(target: Electron.Display) {
   try {
     const prefFile = path.join(app.getPath('userData'), 'display-pref.json');
-    fs.writeFileSync(prefFile, JSON.stringify({ displayId }), 'utf-8');
+    fs.writeFileSync(
+      prefFile,
+      JSON.stringify({
+        displayId: target.id,
+        label: target.label || '',
+        bounds: target.bounds,
+      }),
+      'utf-8'
+    );
   } catch {
     // Ignore write error
   }
 }
 
-function getTargetDisplay() {
+function getTargetDisplay(): Electron.Display {
   const allDisplays = screen.getAllDisplays();
-  if (selectedDisplayId !== null) {
-    const found = allDisplays.find((d) => d.id === selectedDisplayId);
+  if (allDisplays.length === 0) {
+    return screen.getPrimaryDisplay();
+  }
+
+  const pref = loadSavedDisplayPref();
+  const searchId = selectedDisplayId ?? pref?.displayId;
+
+  if (searchId !== null && searchId !== undefined) {
+    const found = allDisplays.find((d) => d.id === searchId);
     if (found) return found;
   }
+
+  if (pref?.label) {
+    const foundByLabel = allDisplays.find((d) => d.label === pref.label);
+    if (foundByLabel) return foundByLabel;
+  }
+
+  if (pref?.bounds) {
+    const foundByBounds = allDisplays.find(
+      (d) =>
+        d.bounds.width === pref.bounds?.width &&
+        d.bounds.height === pref.bounds?.height &&
+        d.bounds.x === pref.bounds?.x &&
+        d.bounds.y === pref.bounds?.y
+    );
+    if (foundByBounds) return foundByBounds;
+  }
+
   return screen.getPrimaryDisplay();
 }
 
 function positionWindowBottomRight(win: BrowserWindow) {
+  if (!win || win.isDestroyed()) return;
   const targetDisplay = getTargetDisplay();
   const { x, y, width, height } = targetDisplay.workArea;
   const overlayWidth = Math.min(width, MAX_OVERLAY_WIDTH);
   const overlayHeight = height;
-  const targetX = x + width - overlayWidth;
-  const targetY = y + height - overlayHeight;
+  const targetX = Math.round(x + width - overlayWidth);
+  const targetY = Math.round(y + height - overlayHeight);
+
   win.setBounds({
     x: targetX,
     y: targetY,
-    width: overlayWidth,
-    height: overlayHeight,
+    width: Math.round(overlayWidth),
+    height: Math.round(overlayHeight),
   });
 }
 
 function createOverlayWindow() {
-  selectedDisplayId = loadSavedDisplayId();
   const targetDisplay = getTargetDisplay();
+  selectedDisplayId = targetDisplay.id;
   const { x, y, width, height } = targetDisplay.workArea;
   const overlayWidth = Math.min(width, MAX_OVERLAY_WIDTH);
   const overlayHeight = height;
+  const targetX = Math.round(x + width - overlayWidth);
+  const targetY = Math.round(y + height - overlayHeight);
 
   mainWindow = new BrowserWindow({
     width: overlayWidth,
     height: overlayHeight,
-    x: x + width - overlayWidth,
-    y: y + height - overlayHeight,
+    x: targetX,
+    y: targetY,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
@@ -85,6 +127,33 @@ function createOverlayWindow() {
       nodeIntegration: false,
     },
   });
+
+  // Corrige imediatamente a limitação de altura que o Windows impõe na criação inicial do BrowserWindow
+  positionWindowBottomRight(mainWindow);
+
+  mainWindow.once('ready-to-show', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      positionWindowBottomRight(mainWindow);
+    }
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      positionWindowBottomRight(mainWindow);
+    }
+  });
+
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      positionWindowBottomRight(mainWindow);
+    }
+  }, 350);
+
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      positionWindowBottomRight(mainWindow);
+    }
+  }, 1000);
 
   // Always on top above regular windows and popups
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
@@ -264,7 +333,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('window:set-display', async (_event, displayId: number) => {
     selectedDisplayId = displayId;
-    saveDisplayId(displayId);
+    const targetDisplay = getTargetDisplay();
+    saveDisplayPreference(targetDisplay);
     if (mainWindow && !mainWindow.isDestroyed()) {
       positionWindowBottomRight(mainWindow);
     }
