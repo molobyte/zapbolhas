@@ -23,7 +23,7 @@ async function convertAudioToWhatsAppVoiceOgg(
 
   const tempInput = path.join(
     os.tmpdir(),
-    `wa_voice_in_${Date.now()}_${Math.random().toString(36).slice(2)}.tmp`
+    `wa_voice_in_${Date.now()}_${Math.random().toString(36).slice(2)}.webm`
   );
   const tempOutput = path.join(
     os.tmpdir(),
@@ -38,23 +38,36 @@ async function convertAudioToWhatsAppVoiceOgg(
   }
 
   return new Promise<{ buffer: Buffer; isOgg: boolean }>((resolve) => {
-    // Transcodifica para Opus mono 16kHz em container Ogg (o formato padrão PTT do WhatsApp)
+    // Transcodifica para Opus mono 48kHz em container OGG limpo.
+    // O WhatsApp no iOS (iPhone) exige estritamente áudio Opus em 48.000 Hz (48kHz) mono
+    // com timestamps limpos (-avoid_negative_ts make_zero) e sem metadados (-map_metadata -1).
+    // Taxas diferentes como 16kHz quebram o decodificador CoreAudio/AVFoundation no iOS,
+    // disparando o erro "Este áudio não está mais disponível. Peça para reenviá-lo".
     execFile(
       ffmpegExecutablePath!,
       [
         '-y',
         '-i',
         tempInput,
+        '-vn',
         '-c:a',
         'libopus',
-        '-ac',
-        '1',
-        '-ar',
-        '16000',
         '-b:a',
         '32k',
+        '-vbr',
+        'on',
+        '-ar',
+        '48000',
+        '-ac',
+        '1',
         '-application',
         'voip',
+        '-avoid_negative_ts',
+        'make_zero',
+        '-map_metadata',
+        '-1',
+        '-f',
+        'ogg',
         tempOutput,
       ],
       { timeout: 15000 },
