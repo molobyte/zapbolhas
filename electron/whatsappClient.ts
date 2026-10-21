@@ -1153,8 +1153,8 @@ export class WhatsAppService {
           const isMuted = Boolean(c.mute?.expiration && c.mute.expiration !== 0);
           const unreadCount = Number(c.unreadCount || 0);
 
-          const unreadMentionCount = Number(c.unreadMentionCount || 0);
-          let hasMention = Boolean(isGroup && (c.hasUnreadMention || unreadMentionCount > 0));
+          const unreadMentionCount = unreadCount > 0 ? Number(c.unreadMentionCount || 0) : 0;
+          let hasMention = Boolean(isGroup && unreadCount > 0 && (c.hasUnreadMention || unreadMentionCount > 0));
 
           if (!hasMention && isGroup && unreadCount > 0) {
             const unreadMsgs = msgs.slice(-Math.min(unreadCount, 15));
@@ -3145,6 +3145,10 @@ export class WhatsAppService {
 
           // Garante atualização local após o envio da confirmação ao servidor
           chat.unreadCount = 0;
+          try {
+            chat.unreadMentionCount = 0;
+            chat.hasUnreadMention = false;
+          } catch (_) {}
         } catch (err) {
           console.error('[WhatsApp Web] sendSeen internal error:', err);
         }

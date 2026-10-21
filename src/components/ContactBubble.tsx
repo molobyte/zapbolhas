@@ -105,7 +105,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
 
       {/* Bolinha de Notificação de Menção no Canto Inferior Esquerdo (@ em #32CAED) */}
       <AnimatePresence>
-        {bubble.hasMention && (
+        {bubble.hasMention && bubble.unreadCount > 0 && !isActive && (
           <motion.span
             key="mention-badge"
             initial={{ scale: 0.5, opacity: 0 }}

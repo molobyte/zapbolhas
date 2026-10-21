@@ -819,14 +819,18 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       const fresh = chatMap.get(b.chatId);
       if (!fresh) return b;
       const isCurrentlyOpen = isAnyChatOpen && activeChatId === b.chatId;
+      const unreadCount = isCurrentlyOpen ? 0 : fresh.unreadCount;
+      const hasMention = isCurrentlyOpen || unreadCount === 0
+        ? false
+        : Boolean(fresh.hasMention);
       return {
         ...b,
         name: fresh.name,
         avatar: fresh.avatar,
-        unreadCount: isCurrentlyOpen ? 0 : fresh.unreadCount,
+        unreadCount,
         isPinned: b.isPinned ?? pinnedChatIds.includes(b.chatId),
         isGroup: fresh.isGroup ?? b.isGroup,
-        hasMention: isCurrentlyOpen ? false : Boolean(fresh.hasMention ?? b.hasMention),
+        hasMention,
       };
     });
 
