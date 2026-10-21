@@ -773,6 +773,11 @@ function registerIpcHandlers() {
     if (!waService) return;
     await waService.markAsRead(chatId);
   });
+
+  ipcMain.handle('wa:mark-as-unread', async (_event, chatId: string) => {
+    if (!waService) return;
+    await waService.markAsUnread(chatId);
+  });
 }
 
 app.whenReady().then(() => {

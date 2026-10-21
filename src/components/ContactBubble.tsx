@@ -87,9 +87,21 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
         </button>
       )}
 
-      {/* Badge de Mensagens Não Lidas */}
+      {/* Badge de Mensagens Não Lidas / Marcado como Não Lido */}
       <AnimatePresence>
-        {bubble.unreadCount > 0 && (
+        {bubble.isMarkedUnread || bubble.unreadCount === -1 ? (
+          <motion.span
+            key="marked-unread-badge"
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 520, damping: 20 }}
+            title="Marcada como não lida"
+            className="pointer-events-none absolute -bottom-[3px] -right-[2px] w-[18px] h-[18px] rounded-[5px] bg-[#25D366] text-white flex items-center justify-center shadow-[0_2px_6px_rgba(0,0,0,0.55)] z-10"
+          >
+            <span className="w-2 h-2 rounded-full bg-white shadow-xs" />
+          </motion.span>
+        ) : bubble.unreadCount > 0 ? (
           <motion.span
             key={bubble.unreadCount}
             initial={{ scale: 0.5, opacity: 0 }}
@@ -100,12 +112,12 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
           >
             {bubble.unreadCount}
           </motion.span>
-        )}
+        ) : null}
       </AnimatePresence>
 
       {/* Bolinha de Notificação de Menção no Canto Inferior Esquerdo (@ em #32CAED) */}
       <AnimatePresence>
-        {bubble.hasMention && bubble.unreadCount > 0 && !isActive && (
+        {bubble.hasMention && (bubble.unreadCount > 0 || bubble.isMarkedUnread || bubble.unreadCount === -1) && !isActive && (
           <motion.span
             key="mention-badge"
             initial={{ scale: 0.5, opacity: 0 }}

@@ -346,7 +346,7 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
                   </div>
 
                   {/* Indicador de menção (@) e mensagens não lidas à direita */}
-                  {chat.unreadCount > 0 && (
+                  {((chat.unreadCount > 0) || chat.isMarkedUnread || chat.unreadCount === -1) && (
                     <div className="shrink-0 pl-1 flex items-center justify-end gap-1.5">
                       {chat.isGroup && chat.hasMention && (
                         <span
@@ -356,9 +356,16 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
                           @
                         </span>
                       )}
-                      <span className="min-w-[20px] h-[20px] px-[6px] rounded-full bg-[#25D366] text-[#111B21] text-[11.5px] font-bold leading-none flex items-center justify-center shadow-sm">
-                        {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
-                      </span>
+                      {chat.isMarkedUnread || chat.unreadCount === -1 ? (
+                        <span
+                          title="Não lida"
+                          className="w-[10px] h-[10px] rounded-full bg-[#25D366] shadow-sm shrink-0"
+                        />
+                      ) : (
+                        <span className="min-w-[20px] h-[20px] px-[6px] rounded-full bg-[#25D366] text-[#111B21] text-[11.5px] font-bold leading-none flex items-center justify-center shadow-sm">
+                          {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
+                        </span>
+                      )}
                     </div>
                   )}
                 </button>

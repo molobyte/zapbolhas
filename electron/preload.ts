@@ -78,6 +78,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:mark-as-read', chatId);
   },
 
+  markAsUnread: (chatId: string) => {
+    return ipcRenderer.invoke('wa:mark-as-unread', chatId);
+  },
+
   downloadMedia: (msgId: string) => {
     return ipcRenderer.invoke('wa:download-media', msgId);
   },

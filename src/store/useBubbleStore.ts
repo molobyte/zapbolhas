@@ -270,6 +270,8 @@ interface BubbleStoreState {
   closeBubble: (chatId: string) => void;
   togglePinBubble: (chatId: string) => void;
   setChatBubbleSize: (chatId: string, size: ChatBubbleSize) => void;
+  markChatAsUnread: (chatId: string) => Promise<void>;
+  markChatAsRead: (chatId: string) => Promise<void>;
   sendMessage: (
     text: string,
     mentions?: string[],
@@ -381,10 +383,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
     if (!hasSyncedRealChats) {
       const { maxBubbles, pinnedChatIds } = get();
-      // Primeira sincronização real: cria bolhas para as conversas reais não silenciadas que possuem mensagens não lidas.
+      // Primeira sincronização real: cria bolhas para as conversas reais não silenciadas que possuem mensagens não lidas ou marcadas como não lidas.
       // As mais recentes ficam na direita (final do array) e respeitam o limite maxBubbles.
       const initialRealBubbles: BubbleItem[] = realChats
-        .filter((c) => c.unreadCount > 0 && !c.isMuted)
+        .filter((c) => (c.unreadCount > 0 || c.isMarkedUnread || c.unreadCount === -1) && !c.isMuted)
         .slice(0, maxBubbles)
         .reverse()
         .map((c, idx) => ({
@@ -392,6 +394,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           name: c.name,
           avatar: c.avatar,
           unreadCount: c.unreadCount,
+          isMarkedUnread: Boolean(c.isMarkedUnread || c.unreadCount === -1),
           isPinned: pinnedChatIds.includes(c.id),
           isGroup: c.isGroup,
           hasMention: Boolean(c.hasMention),
@@ -422,6 +425,9 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       const fresh = chatMap.get(b.chatId);
       if (!fresh) return b;
       const isCurrentlyOpen = isAnyChatOpen && activeChatId === b.chatId;
+      const isMarkedUnread = isCurrentlyOpen
+        ? false
+        : Boolean(fresh.isMarkedUnread || fresh.unreadCount === -1 || (b.isMarkedUnread && fresh.unreadCount === 0));
       const unreadCount = isCurrentlyOpen ? 0 : fresh.unreadCount;
       const hasMention = isCurrentlyOpen || unreadCount === 0
         ? false
@@ -431,16 +437,18 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         name: fresh.name,
         avatar: fresh.avatar,
         unreadCount,
+        isMarkedUnread,
         isPinned: b.isPinned ?? pinnedChatIds.includes(b.chatId),
         isGroup: fresh.isGroup ?? b.isGroup,
         hasMention,
       };
     });
 
-    // Se surgiu alguma conversa não silenciada com unreadCount > 0 que ainda não tem bolha, cria a bolha
+    // Se surgiu alguma conversa não silenciada com unreadCount > 0 ou marcada como não lida que ainda não tem bolha, cria a bolha
     for (const c of realChats) {
+      const isUnread = Boolean(c.unreadCount > 0 || c.isMarkedUnread || c.unreadCount === -1);
       if (
-        c.unreadCount > 0 &&
+        isUnread &&
         !c.isMuted &&
         !updatedBubbles.some((b) => b.chatId === c.id)
       ) {
@@ -449,6 +457,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           name: c.name,
           avatar: c.avatar,
           unreadCount: c.unreadCount,
+          isMarkedUnread: Boolean(c.isMarkedUnread || c.unreadCount === -1),
           isPinned: pinnedChatIds.includes(c.id),
           isGroup: c.isGroup,
           hasMention: Boolean(c.hasMention),
@@ -469,9 +478,9 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const normalizedChats = realChats.map((c) => {
       const isCurrentlyOpen =
         activePopover === 'chat-window' && activeChatId === c.id;
-      if (isCurrentlyOpen && (c.unreadCount > 0 || c.hasMention)) {
+      if (isCurrentlyOpen && (c.unreadCount > 0 || c.unreadCount === -1 || c.isMarkedUnread || c.hasMention)) {
         window.electronAPI?.markAsRead(c.id);
-        return { ...c, unreadCount: 0, hasMention: false };
+        return { ...c, unreadCount: 0, isMarkedUnread: false, hasMention: false };
       }
       return c;
     });
@@ -944,6 +953,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         name: targetChat.name,
         avatar: targetChat.avatar,
         unreadCount: 0,
+        isMarkedUnread: false,
         isPinned,
         isGroup: targetChat.isGroup,
         hasMention: false,
@@ -956,12 +966,12 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       );
     } else {
       updatedBubbles = activeBubbles.map((b) =>
-        b.chatId === chatId ? { ...b, unreadCount: 0, hasMention: false } : b
+        b.chatId === chatId ? { ...b, unreadCount: 0, isMarkedUnread: false, hasMention: false } : b
       );
     }
 
     const updatedChats = chats.map((c) =>
-      c.id === chatId ? { ...c, unreadCount: 0, hasMention: false } : c
+      c.id === chatId ? { ...c, unreadCount: 0, isMarkedUnread: false, hasMention: false } : c
     );
 
     set({
@@ -1091,10 +1101,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         : undefined;
 
     const updatedBubbles = baseBubbles.map((b) =>
-      b.chatId === chatId ? { ...b, unreadCount: 0, hasMention: false } : b
+      b.chatId === chatId ? { ...b, unreadCount: 0, isMarkedUnread: false, hasMention: false } : b
     );
     const updatedChats = chats.map((c) =>
-      c.id === chatId ? { ...c, unreadCount: 0, hasMention: false } : c
+      c.id === chatId ? { ...c, unreadCount: 0, isMarkedUnread: false, hasMention: false } : c
     );
 
     set({
@@ -1202,6 +1212,72 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     };
     saveChatSizes(updated);
     set({ chatSizes: updated });
+  },
+
+  // Marcar conversa como não lida (sincroniza com celular/WhatsApp e define indicador na bolha)
+  markChatAsUnread: async (chatId: string) => {
+    const { activeBubbles, chats, activePopover, activeChatId } = get();
+    const isThisChatCurrentlyOpen = activePopover === 'chat-window' && activeChatId === chatId;
+
+    const updatedBubbles = activeBubbles.map((b) =>
+      b.chatId === chatId
+        ? { ...b, unreadCount: -1, isMarkedUnread: true, hasMention: false }
+        : b
+    );
+    const updatedChats = chats.map((c) =>
+      c.id === chatId
+        ? { ...c, unreadCount: -1, isMarkedUnread: true, hasMention: false }
+        : c
+    );
+
+    set({
+      activeBubbles: updatedBubbles,
+      chats: updatedChats,
+      ...(isThisChatCurrentlyOpen
+        ? {
+            activePopover: 'none',
+            activeChatId: null,
+            replyingTo: null,
+            viewingImage: null,
+          }
+        : {}),
+    });
+
+    try {
+      if (window.electronAPI?.markAsUnread) {
+        await window.electronAPI.markAsUnread(chatId);
+      }
+    } catch (err) {
+      console.error('[useBubbleStore] Error in markChatAsUnread:', err);
+    }
+  },
+
+  // Marcar conversa como lida
+  markChatAsRead: async (chatId: string) => {
+    const { activeBubbles, chats } = get();
+    const updatedBubbles = activeBubbles.map((b) =>
+      b.chatId === chatId
+        ? { ...b, unreadCount: 0, isMarkedUnread: false, hasMention: false }
+        : b
+    );
+    const updatedChats = chats.map((c) =>
+      c.id === chatId
+        ? { ...c, unreadCount: 0, isMarkedUnread: false, hasMention: false }
+        : c
+    );
+
+    set({
+      activeBubbles: updatedBubbles,
+      chats: updatedChats,
+    });
+
+    try {
+      if (window.electronAPI?.markAsRead) {
+        await window.electronAPI.markAsRead(chatId);
+      }
+    } catch (err) {
+      console.error('[useBubbleStore] Error in markChatAsRead:', err);
+    }
   },
 
   // Envio de mensagem de texto
@@ -1649,11 +1725,13 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       // Se a bolha já está sendo exibida, exibe as notificações normalmente, mas NÃO se move para a mais recente.
       if (bubbleExists) {
         const currentBubble = activeBubbles[bubbleIndex];
+        const prevCount = Math.max(0, currentBubble.unreadCount);
         const refreshedBubble: BubbleItem = {
           ...currentBubble,
           name: chat.name,
           avatar: chat.avatar,
-          unreadCount: isThisChatCurrentlyOpen ? 0 : currentBubble.unreadCount + 1,
+          unreadCount: isThisChatCurrentlyOpen ? 0 : prevCount + 1,
+          isMarkedUnread: false,
           isPinned: currentBubble.isPinned ?? isPinned,
           isGroup,
           hasMention: isThisChatCurrentlyOpen
@@ -1672,6 +1750,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           name: chat.name,
           avatar: chat.avatar,
           unreadCount: isThisChatCurrentlyOpen ? 0 : 1,
+          isMarkedUnread: false,
           isPinned,
           isGroup,
           hasMention: isThisChatCurrentlyOpen
@@ -1686,11 +1765,13 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       // na ordem correta sempre, aparecendo da mais recente para a direita.
       if (bubbleExists) {
         const currentBubble = activeBubbles[bubbleIndex];
+        const prevCount = Math.max(0, currentBubble.unreadCount);
         const refreshedBubble: BubbleItem = {
           ...currentBubble,
           name: chat.name,
           avatar: chat.avatar,
-          unreadCount: currentBubble.unreadCount + 1,
+          unreadCount: prevCount + 1,
+          isMarkedUnread: false,
           isPinned: currentBubble.isPinned ?? isPinned,
           isGroup,
           hasMention: messageMentionsMe
@@ -1710,6 +1791,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           name: chat.name,
           avatar: chat.avatar,
           unreadCount: 1,
+          isMarkedUnread: false,
           isPinned,
           isGroup,
           hasMention: Boolean(messageMentionsMe || chat.hasMention),
@@ -1733,7 +1815,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
             ? {
                 ...c,
                 lastMessage: chat.lastMessage,
-                unreadCount: isThisChatCurrentlyOpen ? 0 : (c.unreadCount || 0) + 1,
+                unreadCount: isThisChatCurrentlyOpen ? 0 : Math.max(0, c.unreadCount || 0) + 1,
+                isMarkedUnread: false,
                 hasMention: isThisChatCurrentlyOpen
                   ? false
                   : (messageMentionsMe ? true : Boolean(c.hasMention || chat.hasMention)),
@@ -1743,7 +1826,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       : [
           {
             ...chat,
-            unreadCount: isThisChatCurrentlyOpen ? 0 : (chat.unreadCount || 1),
+            unreadCount: isThisChatCurrentlyOpen ? 0 : Math.max(0, chat.unreadCount || 0) || 1,
+            isMarkedUnread: false,
             hasMention: isThisChatCurrentlyOpen
               ? false
               : (messageMentionsMe ? true : Boolean(chat.hasMention)),

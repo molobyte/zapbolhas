@@ -110,6 +110,7 @@ export interface FormattedChatSummary {
   avatar: string;
   parentAvatar?: string;
   unreadCount: number;
+  isMarkedUnread?: boolean;
   isGroup: boolean;
   isMuted?: boolean;
   hasMention?: boolean;
@@ -1152,7 +1153,14 @@ export class WhatsAppService {
           }
 
           const isMuted = Boolean(c.mute?.expiration && c.mute.expiration !== 0);
-          const unreadCount = Number(c.unreadCount || 0);
+          const rawUnread = Number(c.unreadCount ?? 0);
+          const isMarkedUnread = Boolean(
+            c.markedAsUnread ||
+            c.markedUnread ||
+            rawUnread === -1 ||
+            rawUnread < 0
+          );
+          const unreadCount = isMarkedUnread ? -1 : (rawUnread > 0 ? rawUnread : 0);
 
           const unreadMentionCount = unreadCount > 0 ? Number(c.unreadMentionCount || 0) : 0;
           let hasMention = Boolean(isGroup && unreadCount > 0 && (c.hasUnreadMention || unreadMentionCount > 0));
@@ -1215,6 +1223,7 @@ export class WhatsAppService {
             name,
             avatar,
             unreadCount,
+            isMarkedUnread,
             isGroup,
             isMuted,
             hasMention,
@@ -1274,6 +1283,7 @@ export class WhatsAppService {
           name: raw.name,
           avatar,
           unreadCount: raw.unreadCount,
+          isMarkedUnread: raw.isMarkedUnread || raw.unreadCount === -1,
           isGroup: raw.isGroup,
           isMuted: raw.isMuted,
           hasMention: Boolean(raw.hasMention),
@@ -3518,6 +3528,14 @@ export class WhatsAppService {
 
           if (!chat) return;
 
+          // Se estava marcado como não lido manualmente, limpa através do Cmd.markChatUnread(chat, false)
+          const Cmd = w.require?.('WAWebCmd')?.Cmd;
+          if (Cmd?.markChatUnread && (chat.unreadCount === -1 || chat.markedAsUnread)) {
+            try {
+              await Cmd.markChatUnread(chat, false);
+            } catch (_) {}
+          }
+
           // Importante: NÃO zerar chat.unreadCount antes de chamar sendSeen,
           // pois o WhatsApp Web verifica se chat.unreadCount > 0 para enviar o pacote
           // de confirmação de leitura (read receipt / app state sync) para o servidor e celular!
@@ -3536,6 +3554,7 @@ export class WhatsAppService {
           try {
             chat.unreadMentionCount = 0;
             chat.hasUnreadMention = false;
+            chat.markedAsUnread = false;
           } catch (_) {}
         } catch (err) {
           console.error('[WhatsApp Web] sendSeen internal error:', err);
@@ -3543,6 +3562,75 @@ export class WhatsAppService {
       }, chatId);
     } catch (err) {
       console.error('[WhatsAppService] Error in markAsRead:', err);
+    }
+  }
+
+  public async markAsUnread(chatId: string): Promise<void> {
+    if (!this.client?.pupPage || this.status !== 'ready') {
+      return;
+    }
+    try {
+      if (typeof (this.client as any).markChatUnread === 'function') {
+        try {
+          await (this.client as any).markChatUnread(chatId);
+          console.log('[WhatsAppService] markAsUnread called via client.markChatUnread for:', chatId);
+          return;
+        } catch (clientErr) {
+          console.warn('[WhatsAppService] this.client.markChatUnread failed, using pupPage evaluate fallback:', clientErr);
+        }
+      }
+
+      await this.client.pupPage.evaluate(async (targetChatId: string) => {
+        const w = window as any;
+
+        const serializeId = (val: any): string => {
+          if (!val) return '';
+          if (typeof val === 'string') return val;
+          if (typeof val._serialized === 'string' && val._serialized) return val._serialized;
+          if (typeof val.toString === 'function') {
+            const s = val.toString();
+            if (s && s !== '[object Object]') return s;
+          }
+          return '';
+        };
+
+        try {
+          const Stream = w.require?.('WAWebStreamModel')?.Stream;
+          Stream?.markAvailable?.();
+
+          const ChatCol = w.require?.('WAWebCollections')?.Chat;
+          let chat =
+            (await w.WWebJS?.getChat?.(targetChatId, { getAsModel: false })) ||
+            ChatCol?.get?.(targetChatId) ||
+            ChatCol?.getModelsArray?.().find((c: any) => serializeId(c.id) === targetChatId);
+
+          if (!chat && ChatCol) {
+            const wid = w.require?.('WAWebWidFactory')?.createWid?.(targetChatId);
+            if (wid) {
+              chat = ChatCol.get(wid);
+            }
+          }
+
+          if (!chat) return;
+
+          const Cmd = w.require?.('WAWebCmd')?.Cmd;
+          if (Cmd?.markChatUnread) {
+            await Cmd.markChatUnread(chat, true);
+          } else {
+            const actionMod = w.require?.('WAWebUpdateUnreadChatAction');
+            if (actionMod?.markChatUnread) {
+              await actionMod.markChatUnread(chat, true);
+            }
+          }
+
+          chat.unreadCount = -1;
+          chat.markedAsUnread = true;
+        } catch (err) {
+          console.error('[WhatsApp Web] markChatUnread internal error:', err);
+        }
+      }, chatId);
+    } catch (err) {
+      console.error('[WhatsAppService] Error in markAsUnread:', err);
     }
   }
 

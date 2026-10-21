@@ -10,6 +10,8 @@ import {
   Maximize2,
   ChevronLeft,
   Check,
+  CheckCheck,
+  CircleDot,
   X,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
@@ -38,6 +40,8 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
     togglePinBubble,
     chatSizes,
     setChatBubbleSize,
+    markChatAsUnread,
+    markChatAsRead,
     openSettings,
     logoutWhatsApp,
     refreshApp,
@@ -244,7 +248,41 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
               )}
             </button>
 
-            {/* Opção 2: Tamanho da conversa (com submenu Pequeno, Médio, Grande) */}
+            {/* Opção 2: Marcar como não lido / Marcar como lido */}
+            {(() => {
+              const isUnread = Boolean(
+                bubbleMenu.bubble.isMarkedUnread ||
+                bubbleMenu.bubble.unreadCount > 0 ||
+                bubbleMenu.bubble.unreadCount === -1
+              );
+              return (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isUnread) {
+                      markChatAsRead(bubbleMenu.bubble.chatId);
+                    } else {
+                      markChatAsUnread(bubbleMenu.bubble.chatId);
+                    }
+                    setBubbleMenu(null);
+                  }}
+                  className="w-full px-3.5 py-2 text-left text-[13px] text-[#E9EDEF] hover:bg-[#202C33] flex items-center justify-between transition-colors"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {isUnread ? (
+                      <CheckCheck className="w-4 h-4 text-[#25D366] shrink-0" />
+                    ) : (
+                      <CircleDot className="w-4 h-4 text-[#8696A0] shrink-0" />
+                    )}
+                    <span className="truncate">
+                      {isUnread ? 'Marcar como lido' : 'Marcar como não lido'}
+                    </span>
+                  </div>
+                </button>
+              );
+            })()}
+
+            {/* Opção 3: Tamanho da conversa (com submenu Pequeno, Médio, Grande) */}
             <div
               className="relative"
               onMouseEnter={() => setShowSizeSubmenu(true)}

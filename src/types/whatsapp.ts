@@ -17,6 +17,7 @@ export interface ChatSummary {
   avatar: string;
   parentAvatar?: string;
   unreadCount: number;
+  isMarkedUnread?: boolean;
   isGroup: boolean;
   isMuted?: boolean;
   hasMention?: boolean;
@@ -104,6 +105,7 @@ export interface BubbleItem {
   name: string;
   avatar: string;
   unreadCount: number;
+  isMarkedUnread?: boolean;
   isPinned?: boolean;
   lastActivity?: number;
   isGroup?: boolean;
@@ -214,6 +216,7 @@ export interface ElectronAPI {
   saveStickerToLibrary?: (dataUrl: string) => Promise<StickerItem | null>;
   deleteUserSticker?: (stickerId: string) => Promise<boolean>;
   markAsRead: (chatId: string) => Promise<void>;
+  markAsUnread?: (chatId: string) => Promise<void>;
   downloadMedia: (msgId: string) => Promise<string | null>;
   openExternalImage: (dataUrl: string) => Promise<boolean>;
   openExternalUrl?: (url: string) => Promise<boolean>;
