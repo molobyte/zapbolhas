@@ -3,9 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Minus,
   X,
-
   Smile,
-
   AtSign,
   Mic,
   SendHorizontal,
@@ -13,6 +11,8 @@ import {
   ZoomOut,
   Download,
   ExternalLink,
+  Trash2,
+  Pause,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
 import { GroupParticipant, CHAT_SIZE_CONFIG, ChatBubbleSize, ChatSummary } from '../types/whatsapp';
@@ -81,6 +81,27 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const userHasScrolledUpRef = useRef<boolean>(false);
   const isLoadingOlderRef = useRef<boolean>(false);
+
+  // Estados e Refs para Gravação de Áudio / Nota de Voz (Visual WhatsApp Web)
+  const [isRecording, setIsRecording] = useState(false);
+  const [isRecordingPaused, setIsRecordingPaused] = useState(false);
+  const [recordDuration, setRecordDuration] = useState(0);
+  const [visualizerBars, setVisualizerBars] = useState<number[]>(() => new Array(24).fill(4));
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const recordedWaveformRef = useRef<number[]>([]);
+
+  const formatRecordDuration = (sec: number): string => {
+    const mins = Math.floor(sec / 60);
+    const secs = String(sec % 60).padStart(2, '0');
+    return `${mins}:${secs}`;
+  };
 
   const lastActiveChatIdRef = useRef<string | null>(activeChatId);
   if (activeChatId) {
@@ -475,6 +496,236 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     [processImageFileForPreview]
   );
 
+  const cleanupRecording = useCallback(() => {
+    if (recordTimerRef.current) {
+      clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+    }
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    mediaRecorderRef.current = null;
+    audioChunksRef.current = [];
+    setIsRecording(false);
+    setIsRecordingPaused(false);
+    setRecordDuration(0);
+    setVisualizerBars(new Array(24).fill(4));
+  }, []);
+
+  const handleCancelRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {}
+    }
+    cleanupRecording();
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  }, [cleanupRecording]);
+
+  const handleStartRecording = useCallback(async () => {
+    if (isRecording) return;
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        alert('Seu dispositivo não possui suporte à gravação de microfone.');
+        return;
+      }
+
+      setPickerOpen(false);
+      setShowMentionPopover(false);
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      audioStreamRef.current = stream;
+
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const audioCtx = new AudioCtx();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+      audioContextRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.4;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      let mimeType = 'audio/webm;codecs=opus';
+      if (!MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+          mimeType = 'audio/ogg;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          mimeType = 'audio/webm';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4';
+        } else {
+          mimeType = '';
+        }
+      }
+
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+      recordedWaveformRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.start(100);
+      setIsRecording(true);
+      setIsRecordingPaused(false);
+      setRecordDuration(0);
+
+      recordTimerRef.current = setInterval(() => {
+        setRecordDuration((prev) => prev + 1);
+      }, 1000);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateVisualizer = () => {
+        if (analyserRef.current && mediaRecorderRef.current?.state === 'recording') {
+          analyserRef.current.getByteFrequencyData(dataArray);
+          const barCount = 24;
+          const step = Math.max(1, Math.floor(dataArray.length / barCount));
+          const newBars: number[] = [];
+          let currentPeak = 0;
+
+          for (let i = 0; i < barCount; i++) {
+            const val = dataArray[i * step] || 0;
+            const height = Math.max(4, Math.min(22, Math.round((val / 255) * 22)));
+            newBars.push(height);
+            if (height > currentPeak) currentPeak = height;
+          }
+
+          setVisualizerBars(newBars);
+
+          if (recordedWaveformRef.current.length < 64) {
+            recordedWaveformRef.current.push(Math.round((currentPeak / 22) * 100));
+          } else {
+            const idx = Math.floor(Math.random() * 64);
+            recordedWaveformRef.current[idx] = Math.round((currentPeak / 22) * 100);
+          }
+        }
+        animFrameRef.current = requestAnimationFrame(updateVisualizer);
+      };
+      animFrameRef.current = requestAnimationFrame(updateVisualizer);
+    } catch (err) {
+      console.error('[VoiceRecorder] Erro ao iniciar gravação:', err);
+      cleanupRecording();
+      alert('Não foi possível acessar o microfone. Verifique as configurações de privacidade do Windows.');
+    }
+  }, [isRecording, cleanupRecording]);
+
+  const handlePauseRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.pause();
+      setIsRecordingPaused(true);
+      if (recordTimerRef.current) {
+        clearInterval(recordTimerRef.current);
+        recordTimerRef.current = null;
+      }
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+    }
+  }, []);
+
+  const handleResumeRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+      mediaRecorderRef.current.resume();
+      setIsRecordingPaused(false);
+      recordTimerRef.current = setInterval(() => {
+        setRecordDuration((prev) => prev + 1);
+      }, 1000);
+
+      const dataArray = new Uint8Array(analyserRef.current?.frequencyBinCount || 32);
+      const updateVisualizer = () => {
+        if (analyserRef.current && mediaRecorderRef.current?.state === 'recording') {
+          analyserRef.current.getByteFrequencyData(dataArray);
+          const barCount = 24;
+          const step = Math.max(1, Math.floor(dataArray.length / barCount));
+          const newBars: number[] = [];
+          for (let i = 0; i < barCount; i++) {
+            const val = dataArray[i * step] || 0;
+            const height = Math.max(4, Math.min(22, Math.round((val / 255) * 22)));
+            newBars.push(height);
+          }
+          setVisualizerBars(newBars);
+        }
+        animFrameRef.current = requestAnimationFrame(updateVisualizer);
+      };
+      animFrameRef.current = requestAnimationFrame(updateVisualizer);
+    }
+  }, []);
+
+  const handleSendRecording = useCallback(async () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') return;
+
+    const duration = recordDuration;
+    const waveformSample = [...recordedWaveformRef.current];
+    const mimeType = recorder.mimeType || 'audio/webm;codecs=opus';
+
+    await new Promise<void>((resolve) => {
+      if (recorder.state !== 'inactive') {
+        recorder.onstop = () => resolve();
+        recorder.stop();
+      } else {
+        resolve();
+      }
+    });
+
+    const finalChunks = [...audioChunksRef.current];
+    cleanupRecording();
+
+    if (finalChunks.length === 0) return;
+
+    const audioBlob = new Blob(finalChunks, { type: mimeType });
+    const reader = new FileReader();
+    reader.onload = async () => {
+      if (typeof reader.result === 'string') {
+        const audioDataUrl = reader.result;
+        userHasScrolledUpRef.current = false;
+        await sendVoiceNote({
+          audioDataUrl,
+          durationSeconds: Math.max(1, duration),
+          waveform: waveformSample.length >= 10 ? waveformSample : undefined,
+        });
+      }
+    };
+    reader.readAsDataURL(audioBlob);
+  }, [recordDuration, cleanupRecording, sendVoiceNote]);
+
+  useEffect(() => {
+    return () => {
+      cleanupRecording();
+    };
+  }, [activeChatId, cleanupRecording]);
+
   useEffect(() => {
     const handleGlobalPaste = (e: ClipboardEvent) => {
       if (!activeChatId) return;
@@ -487,10 +738,18 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   }, [activeChatId, handleClipboardPaste]);
 
   // Atalho do teclado: Tecla ESC
-  // Fecha submenus (mídia pendente, lightbox de imagem, menção ou picker) ou minimiza a conversa
+  // Fecha submenus (mídia pendente, lightbox de imagem, gravação, menção ou picker) ou minimiza a conversa
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+
+      // 0. Se estiver gravando áudio, cancela a gravação
+      if (isRecording) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleCancelRecording();
+        return;
+      }
 
       // 1. Se estiver com preview de mídia pendente, cancela o envio
       if (pendingMedia) {
@@ -538,10 +797,12 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       window.removeEventListener('keydown', handleGlobalKeyDown);
     };
   }, [
+    isRecording,
     pendingMedia,
     viewingImage,
     showMentionPopover,
     pickerOpen,
+    handleCancelRecording,
     handleCancelPendingMedia,
     setViewingImage,
     minimizeActiveChat,
@@ -715,11 +976,6 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       textForWhatsApp !== textToSend ? textForWhatsApp : undefined,
       mentionedNames.length > 0 ? mentionedNames : undefined
     );
-  };
-
-  const handleMicClick = async () => {
-    userHasScrolledUpRef.current = false;
-    await sendVoiceNote(14);
   };
 
   const handleDownloadImage = async () => {
@@ -1060,60 +1316,131 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Barra de Digitação Inferior (Idêntica à conversando.jpg) */}
+      {/* Barra de Digitação Inferior ou Gravador de Voz (Visual WhatsApp Web) */}
       <form onSubmit={handleSubmit} className="relative z-20 px-2 pb-2 pt-1">
-        <div className="h-[42px] bg-[#202C33] rounded-[8px] px-3 flex items-center gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.45)]">
-          {/* Botão Único para Painel de Emojis, Figurinhas e Anexos */}
-          <button
-            type="button"
-            onClick={() => handleTogglePicker()}
-            title="Emojis, figurinhas e anexos"
-            className={`transition-colors shrink-0 focus:outline-none ${
-              pickerOpen
-                ? 'text-[#00A884]'
-                : 'text-[#8696A0] hover:text-[#D1D7DB]'
-            }`}
-          >
-            <Smile className="w-[20px] h-[20px] stroke-[1.9]" />
-          </button>
-
-          {/* Campo de Texto */}
-          <input
-            ref={inputRef}
-            type="text"
-            autoFocus
-            value={inputText}
-            onChange={handleInputChange}
-            onKeyDown={handleInputKeyDown}
-            onPaste={handleClipboardPaste}
-            placeholder={
-              isGroupChat
-                ? 'Digite uma mensagem ou @ para marcar...'
-                : 'Digite uma mensagem'
-            }
-            className="flex-1 bg-transparent text-[13.5px] text-[#D1D7DB] placeholder-[#8696A0] focus:outline-none"
-          />
-
-          {/* Botão Microfone ou Enviar */}
-          {inputText.trim().length > 0 ? (
-            <button
-              type="submit"
-              title="Enviar mensagem"
-              className="text-[#00A884] hover:text-[#25D366] transition-transform active:scale-90 shrink-0 focus:outline-none"
-            >
-              <SendHorizontal className="w-[19px] h-[19px]" />
-            </button>
-          ) : (
+        {isRecording ? (
+          <div className="h-[42px] bg-[#202C33] rounded-[8px] px-3 flex items-center justify-between gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.45)] select-none">
+            {/* Botão Cancelar / Lixeira (Vermelho) */}
             <button
               type="button"
-              onClick={handleMicClick}
-              title="Enviar nota de voz"
-              className="text-[#8696A0] hover:text-[#D1D7DB] transition-colors shrink-0 focus:outline-none"
+              onClick={handleCancelRecording}
+              title="Cancelar gravação (Esc)"
+              className="w-8 h-8 flex items-center justify-center text-[#8696A0] hover:text-[#EF4444] rounded-full hover:bg-white/[0.04] transition-colors shrink-0 focus:outline-none"
             >
-              <Mic className="w-[19px] h-[19px] stroke-[1.9]" />
+              <Trash2 className="w-[18px] h-[18px]" />
             </button>
-          )}
-        </div>
+
+            {/* Ponto Vermelho Pulsante + Tempo de Gravação */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span
+                className={`w-2.5 h-2.5 rounded-full ${
+                  isRecordingPaused ? 'bg-[#8696A0]' : 'bg-[#EF4444] animate-pulse'
+                }`}
+              />
+              <span className="text-[13px] font-medium text-[#E9EDEF] font-mono tabular-nums">
+                {formatRecordDuration(recordDuration)}
+              </span>
+            </div>
+
+            {/* Onda Sonora Animada Dinâmica (Waveform em tempo real) */}
+            <div className="flex-1 flex items-center justify-center gap-[3px] h-[24px] px-1 overflow-hidden">
+              {visualizerBars.map((barHeight, idx) => (
+                <div
+                  key={idx}
+                  className="w-[2.5px] rounded-full transition-all duration-75"
+                  style={{
+                    height: `${barHeight}px`,
+                    backgroundColor: isRecordingPaused ? '#8696A0' : '#00A884',
+                  }}
+                />
+              ))}
+            </div>
+
+            {/* Botão Pausar / Retomar Gravação */}
+            {isRecordingPaused ? (
+              <button
+                type="button"
+                onClick={handleResumeRecording}
+                title="Retomar gravação"
+                className="w-8 h-8 flex items-center justify-center text-[#EF4444] hover:text-[#F87171] rounded-full hover:bg-white/[0.04] transition-colors shrink-0 focus:outline-none"
+              >
+                <Mic className="w-[18px] h-[18px]" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handlePauseRecording}
+                title="Pausar gravação"
+                className="w-8 h-8 flex items-center justify-center text-[#8696A0] hover:text-[#E9EDEF] rounded-full hover:bg-white/[0.04] transition-colors shrink-0 focus:outline-none"
+              >
+                <Pause className="w-[18px] h-[18px]" />
+              </button>
+            )}
+
+            {/* Botão Enviar Áudio (Círculo Verde WhatsApp) */}
+            <button
+              type="button"
+              onClick={handleSendRecording}
+              title="Enviar nota de voz"
+              className="w-8 h-8 rounded-full bg-[#00A884] hover:bg-[#06CF9C] text-white flex items-center justify-center transition-all shadow-[0_2px_6px_rgba(0,168,132,0.4)] active:scale-95 shrink-0 focus:outline-none"
+            >
+              <SendHorizontal className="w-[16px] h-[16px] ml-0.5" />
+            </button>
+          </div>
+        ) : (
+          <div className="h-[42px] bg-[#202C33] rounded-[8px] px-3 flex items-center gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.45)]">
+            {/* Botão Único para Painel de Emojis, Figurinhas e Anexos */}
+            <button
+              type="button"
+              onClick={() => handleTogglePicker()}
+              title="Emojis, figurinhas e anexos"
+              className={`transition-colors shrink-0 focus:outline-none ${
+                pickerOpen
+                  ? 'text-[#00A884]'
+                  : 'text-[#8696A0] hover:text-[#D1D7DB]'
+              }`}
+            >
+              <Smile className="w-[20px] h-[20px] stroke-[1.9]" />
+            </button>
+
+            {/* Campo de Texto */}
+            <input
+              ref={inputRef}
+              type="text"
+              autoFocus
+              value={inputText}
+              onChange={handleInputChange}
+              onKeyDown={handleInputKeyDown}
+              onPaste={handleClipboardPaste}
+              placeholder={
+                isGroupChat
+                  ? 'Digite uma mensagem ou @ para marcar...'
+                  : 'Digite uma mensagem'
+              }
+              className="flex-1 bg-transparent text-[13.5px] text-[#D1D7DB] placeholder-[#8696A0] focus:outline-none"
+            />
+
+            {/* Botão Microfone ou Enviar */}
+            {inputText.trim().length > 0 ? (
+              <button
+                type="submit"
+                title="Enviar mensagem"
+                className="text-[#00A884] hover:text-[#25D366] transition-transform active:scale-90 shrink-0 focus:outline-none"
+              >
+                <SendHorizontal className="w-[19px] h-[19px]" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleStartRecording}
+                title="Gravar nota de voz"
+                className="text-[#8696A0] hover:text-[#D1D7DB] transition-colors shrink-0 focus:outline-none hover:scale-105 active:scale-95"
+              >
+                <Mic className="w-[19px] h-[19px] stroke-[1.9]" />
+              </button>
+            )}
+          </div>
+        )}
       </form>
 
       {/* Modal Lightbox Visualizador de Imagens */}

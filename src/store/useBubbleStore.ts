@@ -640,7 +640,11 @@ interface BubbleStoreState {
     filename?: string;
     mentions?: string[];
   }) => Promise<void>;
-  sendVoiceNote: (durationSeconds?: number) => Promise<void>;
+  sendVoiceNote: (payload: {
+    audioDataUrl: string;
+    durationSeconds: number;
+    waveform?: number[];
+  }) => Promise<void>;
   receiveIncomingMessage: (payload: IncomingMessagePayload) => void;
   simulateIncomingMessage: () => void;
   resetDemoState: () => void;
@@ -1844,29 +1848,39 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     }
   },
 
-  // Envio de nota de voz (áudio)
-  sendVoiceNote: async (durationSeconds = 12) => {
-    const { activeChatId, messagesByChat, chats } = get();
+  // Envio de nota de voz (áudio gravado pelo microfone)
+  sendVoiceNote: async ({
+    audioDataUrl,
+    durationSeconds,
+    waveform,
+  }: {
+    audioDataUrl: string;
+    durationSeconds: number;
+    waveform?: number[];
+  }) => {
+    const { activeChatId, messagesByChat, chats, mode } = get();
     if (!activeChatId) return;
 
     const mins = Math.floor(durationSeconds / 60);
     const secs = String(durationSeconds % 60).padStart(2, '0');
     const durationStr = `${mins}:${secs}`;
     const timestamp = getCurrentTimeStr();
+    const tempId = `voice-${Date.now()}`;
 
     const voiceMsg: FormattedMessage = {
-      id: `voice-${Date.now()}`,
+      id: tempId,
       chatId: activeChatId,
       text: '',
       timestamp,
       fromMe: true,
       type: 'audio',
-      ack: 'read',
+      ack: 'sent',
       audioData: {
         duration: durationStr,
         durationSeconds,
+        audioUrl: audioDataUrl,
         senderAvatar: '/avatars/me.png',
-        waveform: WAVEFORM_OUTGOING_216,
+        waveform: waveform && waveform.length > 0 ? waveform : WAVEFORM_OUTGOING_216,
       },
     };
 
@@ -1879,7 +1893,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
               text: durationStr,
               mediaType: 'audio' as const,
               fromMe: true,
-              ack: 'read' as const,
+              ack: 'sent' as const,
               duration: durationStr,
               timestamp,
             },
@@ -1900,6 +1914,43 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       activeBubbles: updatedActiveBubbles,
       chats: updatedChats,
     });
+
+    if (mode === 'whatsapp' && window.electronAPI?.sendMedia) {
+      try {
+        const realMsg = await window.electronAPI.sendMedia({
+          chatId: activeChatId,
+          mediaDataUrl: audioDataUrl,
+          filename: 'voice.ogg',
+          sendAudioAsVoice: true,
+        });
+        if (realMsg) {
+          set((state) => {
+            const list = state.messagesByChat[activeChatId] || [];
+            return {
+              messagesByChat: {
+                ...state.messagesByChat,
+                [activeChatId]: list.map((m) =>
+                  m.id === tempId
+                    ? {
+                        ...realMsg,
+                        audioData: {
+                          duration: durationStr,
+                          durationSeconds,
+                          senderAvatar: realMsg.audioData?.senderAvatar || '/avatars/me.png',
+                          waveform: waveform || realMsg.audioData?.waveform || WAVEFORM_OUTGOING_216,
+                          audioUrl: realMsg.audioData?.audioUrl || audioDataUrl,
+                        },
+                      }
+                    : m
+                ),
+              },
+            };
+          });
+        }
+      } catch (err) {
+        console.error('[Store] Falha ao enviar áudio pelo WhatsApp:', err);
+      }
+    }
   },
 
   // 5.5 Fluxo de Recebimento de Nova Mensagem (Gatilho Automático)

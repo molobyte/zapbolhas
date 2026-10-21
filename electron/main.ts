@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, screen, shell, clipboard } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, screen, shell, clipboard, session } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
@@ -542,6 +542,8 @@ function registerIpcHandlers() {
         caption?: string;
         filename?: string;
         quotedMessageId?: string;
+        mentions?: string[];
+        sendAudioAsVoice?: boolean;
       }
     ) => {
       if (!waService) return null;
@@ -770,6 +772,19 @@ function registerIpcHandlers() {
 }
 
 app.whenReady().then(() => {
+  // Concede permissão de microfone/mídia automaticamente para a gravação de áudio no Electron
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+    if (permission === 'media') return true;
+    return true;
+  });
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (permission === 'media') {
+      callback(true);
+      return;
+    }
+    callback(true);
+  });
+
   registerIpcHandlers();
   createOverlayWindow();
 

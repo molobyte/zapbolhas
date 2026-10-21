@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     filename?: string;
     quotedMessageId?: string;
     mentions?: string[];
+    sendAudioAsVoice?: boolean;
   }) => {
     return ipcRenderer.invoke('wa:send-media', payload);
   },

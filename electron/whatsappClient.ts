@@ -2703,6 +2703,7 @@ export class WhatsAppService {
     filename?: string;
     quotedMessageId?: string;
     mentions?: string[];
+    sendAudioAsVoice?: boolean;
   }): Promise<FormattedChatMessage | null> {
     if (!this.client || this.status !== 'ready') {
       const msg = `[WhatsAppService] sendMedia abortado: cliente não está pronto (status: ${this.status})`;
@@ -2719,9 +2720,14 @@ export class WhatsAppService {
         if (commaIdx !== -1) {
           const header = payload.mediaDataUrl.slice(0, commaIdx);
           base64Data = payload.mediaDataUrl.slice(commaIdx + 1);
-          const mimeMatch = /^data:([^;]+)/i.exec(header);
-          if (mimeMatch) {
-            mimetype = mimeMatch[1].trim();
+          const fullMatch = /^data:([^;,]+(?:;\s*codecs=[^;,]+)?)/i.exec(header);
+          if (fullMatch) {
+            mimetype = fullMatch[1].trim();
+          } else {
+            const mimeMatch = /^data:([^;]+)/i.exec(header);
+            if (mimeMatch) {
+              mimetype = mimeMatch[1].trim();
+            }
           }
         }
       } else if (fs.existsSync(payload.mediaDataUrl)) {
@@ -2731,6 +2737,8 @@ export class WhatsAppService {
         else if (ext === '.gif') mimetype = 'image/gif';
         else if (ext === '.mp4') mimetype = 'video/mp4';
         else if (ext === '.mov') mimetype = 'video/quicktime';
+        else if (ext === '.ogg' || ext === '.opus') mimetype = 'audio/ogg; codecs=opus';
+        else if (ext === '.mp3') mimetype = 'audio/mp3';
         else mimetype = 'image/jpeg';
         const buf = fs.readFileSync(payload.mediaDataUrl);
         base64Data = buf.toString('base64');
@@ -2744,8 +2752,18 @@ export class WhatsAppService {
         return null;
       }
 
-      const defaultFilename = mimetype.startsWith('video/')
+      if (payload.sendAudioAsVoice) {
+        if (!mimetype.startsWith('audio/')) {
+          mimetype = 'audio/ogg; codecs=opus';
+        }
+      }
+
+      const defaultFilename = payload.sendAudioAsVoice
+        ? 'voice.ogg'
+        : mimetype.startsWith('video/')
         ? 'video.mp4'
+        : mimetype.startsWith('audio/')
+        ? 'audio.mp3'
         : mimetype.includes('png')
         ? 'image.png'
         : mimetype.includes('webp')
@@ -2758,12 +2776,16 @@ export class WhatsAppService {
         caption?: string;
         quotedMessageId?: string;
         mentions?: string[];
+        sendAudioAsVoice?: boolean;
       } = {};
       if (payload.caption) {
         options.caption = payload.caption;
       }
       if (payload.quotedMessageId) {
         options.quotedMessageId = payload.quotedMessageId;
+      }
+      if (payload.sendAudioAsVoice) {
+        options.sendAudioAsVoice = true;
       }
       if (payload.mentions && payload.mentions.length > 0) {
         options.mentions = payload.mentions
@@ -2776,7 +2798,7 @@ export class WhatsAppService {
           .filter(Boolean);
       }
 
-      const infoMsg = `Iniciando envio de mídia (${mimetype}, ${filename}, ${base64Data.length} chars) para ${payload.chatId}`;
+      const infoMsg = `Iniciando envio de mídia (${mimetype}, ${filename}, ${base64Data.length} chars) para ${payload.chatId} (sendAudioAsVoice: ${Boolean(payload.sendAudioAsVoice)})`;
       console.log(`[WhatsAppService] ${infoMsg}`);
       logMediaDebug(infoMsg);
 
@@ -2807,13 +2829,25 @@ export class WhatsAppService {
 
       const recent = await this.getMessages(payload.chatId, 5);
       const latest = recent[recent.length - 1] || null;
-      if (latest && (latest.type === 'image' || latest.type === 'video')) {
+      if (latest && (latest.type === 'image' || latest.type === 'video' || latest.type === 'audio')) {
         if (latest.type === 'image' && !latest.imageUrl) {
           latest.imageUrl = payload.mediaDataUrl;
           latest.isHdLoaded = true;
         } else if (latest.type === 'video' && !latest.videoUrl) {
           latest.videoUrl = payload.mediaDataUrl;
           latest.isHdLoaded = true;
+        } else if (latest.type === 'audio') {
+          if (!latest.audioData) {
+            latest.audioData = {
+              duration: '0:05',
+              durationSeconds: 5,
+              senderAvatar: '/avatars/me.png',
+              waveform: [],
+            };
+          }
+          if (latest.audioData) {
+            latest.audioData.audioUrl = payload.mediaDataUrl;
+          }
         }
       }
       return latest;

@@ -160,6 +160,7 @@ export interface SendMediaPayload {
   filename?: string;
   quotedMessageId?: string;
   mentions?: string[];
+  sendAudioAsVoice?: boolean;
 }
 
 export interface StickerItem {
