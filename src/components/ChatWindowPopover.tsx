@@ -1160,12 +1160,23 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
               Boolean(unreadBanner && unreadBanner.count > 0) &&
               msg.id === unreadBanner?.firstUnreadMsgId;
 
+            const isSenderChanged = Boolean(
+              prevMsg && (
+                prevMsg.fromMe !== msg.fromMe ||
+                (!msg.fromMe && currentChat.isGroup && (
+                  (prevMsg.senderName || '') !== (msg.senderName || '') ||
+                  (prevMsg.senderAvatar && msg.senderAvatar && prevMsg.senderAvatar !== msg.senderAvatar)
+                ))
+              )
+            );
+
             const isFirstInGroup =
               !prevMsg ||
-              prevMsg.fromMe !== msg.fromMe ||
-              prevMsg.senderName !== msg.senderName ||
+              isSenderChanged ||
               Boolean(msg.dateLabel) ||
               isFirstUnread;
+
+            const hasSenderGap = isSenderChanged && !Boolean(msg.dateLabel) && !isFirstUnread;
 
             return (
               <React.Fragment key={msg.id}>
@@ -1184,6 +1195,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                 <MessageBubble
                   message={msg}
                   isFirstInGroup={isFirstInGroup}
+                  isSenderChanged={hasSenderGap}
                   isGroupChat={currentChat.isGroup}
                   onReply={(quote) => setReplyingTo(quote)}
                 />

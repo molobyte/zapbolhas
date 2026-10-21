@@ -19,6 +19,7 @@ interface MessageBubbleProps {
   message: FormattedMessage;
   isFirstInGroup: boolean;
   isGroupChat?: boolean;
+  isSenderChanged?: boolean;
   onReply: (quote: QuotedMessage) => void;
 }
 
@@ -38,6 +39,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
   isFirstInGroup,
   isGroupChat,
+  isSenderChanged = false,
   onReply,
 }) => {
   const {
@@ -233,7 +235,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         onDoubleClick={handleReplyTrigger}
         className={`group/msg relative flex items-center ${
           fromMe ? 'justify-end' : 'justify-start'
-        } ${reaction ? 'mb-3.5' : 'mb-[3px]'}`}
+        } ${reaction ? 'mb-3.5' : 'mb-[3px]'} ${
+          isSenderChanged ? 'mt-3' : 'mt-0'
+        }`}
       >
         {/* Foto do perfil do membro à esquerda do balão em conversas de grupo */}
         {!fromMe && isGroupChat && (
