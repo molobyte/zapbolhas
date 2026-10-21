@@ -344,7 +344,7 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
         onMouseEnter={onInteractiveEnter}
         onMouseLeave={onInteractiveLeave}
         style={{ zoom: bubbleScale }}
-        className="flex items-center justify-end gap-[12px] pointer-events-auto"
+        className="flex items-center justify-end gap-[12px] pointer-events-auto h-[48px]"
       >
         <AnimatePresence mode="popLayout">
           {activeBubbles.map((bubble) => (
@@ -377,7 +377,7 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
               ? 'Sincronizando conversas do WhatsApp... (Clique direito para opções)'
               : 'WhatsApp Bubbles (Clique esquerdo: conversas | Clique direito: opções)'
           }
-          className="relative w-[48px] h-[48px] rounded-full bg-[#25D366] hover:bg-[#22c55e] text-white shadow-[0_4px_14px_rgba(0,0,0,0.65)] flex items-center justify-center transition-transform duration-150 hover:scale-105 focus:outline-none"
+          className="relative w-[48px] h-[48px] shrink-0 rounded-full bg-[#25D366] hover:bg-[#22c55e] text-white shadow-[0_4px_14px_rgba(0,0,0,0.65)] flex items-center justify-center transition-transform duration-150 hover:scale-105 focus:outline-none"
         >
           {/* Ícone Oficial do WhatsApp */}
           <svg

@@ -37,11 +37,11 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
   return (
     <motion.div
       layout
-      initial={{ scale: 0.3, opacity: 0, y: 16 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
-      exit={{ scale: 0.2, opacity: 0, y: 12 }}
+      initial={{ scale: 0.3, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      exit={{ scale: 0.2, opacity: 0 }}
       transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-      className="relative group select-none"
+      className="relative group select-none w-[48px] h-[48px] shrink-0 flex items-center justify-center"
     >
       {/* Botão Principal da Bolha */}
       <button
@@ -50,7 +50,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
         onContextMenu={handleContextMenu}
         onAuxClick={handleAuxClick}
         title={`${bubble.name}${bubble.isPinned ? ' (Fixada)' : ''} (Clique direito para opções)`}
-        className={`relative w-[48px] h-[48px] rounded-full overflow-hidden shadow-[0_4px_14px_rgba(0,0,0,0.65)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none ${
+        className={`relative w-[48px] h-[48px] rounded-full overflow-hidden shrink-0 block shadow-[0_4px_14px_rgba(0,0,0,0.65)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none ${
           isActive
             ? 'ring-2 ring-[#25D366] border border-white/30'
             : 'border-[1.5px] border-white/15'
@@ -88,7 +88,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
       )}
 
       {/* Badge de Mensagens Não Lidas */}
-      <AnimatePresence mode="popLayout">
+      <AnimatePresence>
         {bubble.unreadCount > 0 && (
           <motion.span
             key={bubble.unreadCount}
