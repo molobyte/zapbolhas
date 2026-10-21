@@ -215,6 +215,29 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     }
   }, [replyingTo]);
 
+  // Foco automático no campo de texto ao abrir a conversa ou trocar de chat
+  useEffect(() => {
+    if (!activeChatId) return;
+
+    const focusInput = () => {
+      try {
+        window.focus();
+      } catch {}
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    };
+
+    focusInput();
+    const rafId = requestAnimationFrame(focusInput);
+    const timer = setTimeout(focusInput, 80);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(timer);
+    };
+  }, [activeChatId]);
+
   useEffect(() => {
     setViewingImage(null);
     setPickerOpen(false);
@@ -292,6 +315,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     }
     setPendingMedia(null);
     setPendingCaption('');
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
   }, [pendingMedia]);
 
   const handleConfirmPendingMedia = useCallback(async () => {
@@ -460,19 +486,66 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     };
   }, [activeChatId, handleClipboardPaste]);
 
+  // Atalho do teclado: Tecla ESC
+  // Fecha submenus (mídia pendente, lightbox de imagem, menção ou picker) ou minimiza a conversa
   useEffect(() => {
-    if (!pendingMedia) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+
+      // 1. Se estiver com preview de mídia pendente, cancela o envio
+      if (pendingMedia) {
         e.preventDefault();
+        e.stopPropagation();
         handleCancelPendingMedia();
+        return;
       }
+
+      // 2. Se estiver com visualizador fullscreen de imagem/vídeo, fecha-o
+      if (viewingImage) {
+        e.preventDefault();
+        e.stopPropagation();
+        setViewingImage(null);
+        return;
+      }
+
+      // 3. Se o popover de menções estiver aberto, fecha-o
+      if (showMentionPopover) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowMentionPopover(false);
+        return;
+      }
+
+      // 4. Se o seletor de emojis/figurinhas/anexos estiver aberto, fecha o picker
+      if (pickerOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        setPickerOpen(false);
+        requestAnimationFrame(() => {
+          inputRef.current?.focus();
+        });
+        return;
+      }
+
+      // 5. Se nenhuma sobreposição estiver aberta, minimiza a conversa atual
+      e.preventDefault();
+      e.stopPropagation();
+      minimizeActiveChat();
     };
-    window.addEventListener('keydown', handleKeyDown);
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, [pendingMedia, handleCancelPendingMedia]);
+  }, [
+    pendingMedia,
+    viewingImage,
+    showMentionPopover,
+    pickerOpen,
+    handleCancelPendingMedia,
+    setViewingImage,
+    minimizeActiveChat,
+  ]);
 
   const handleTogglePicker = (tab?: PickerTab) => {
     if (!tab) {
@@ -572,6 +645,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       }
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopPropagation();
         setShowMentionPopover(false);
         return;
       }
@@ -728,7 +802,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
           <button
             type="button"
             onClick={minimizeActiveChat}
-            title="Minimizar conversa (mantém a bolha)"
+            title="Minimizar conversa (Esc)"
             className="w-6 h-6 rounded-full bg-[#202C33]/90 hover:bg-[#2A3942] text-[#E9EDEF] flex items-center justify-center transition-colors"
           >
             <Minus className="w-3.5 h-3.5" />
@@ -1007,6 +1081,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
           <input
             ref={inputRef}
             type="text"
+            autoFocus
             value={inputText}
             onChange={handleInputChange}
             onKeyDown={handleInputKeyDown}

@@ -66,6 +66,21 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
   const { chats, selectChatFromList, hasSyncedRealChats, waStatus } =
     useBubbleStore();
 
+  // Permite fechar a lista de conversas pressionando ESC
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        useBubbleStore.setState({ activePopover: 'none' });
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   const isLoadingChats = !hasSyncedRealChats && chats.length === 0;
 
   const renderLastMessagePreview = (chat: ChatSummary) => {
