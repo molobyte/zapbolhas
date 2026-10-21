@@ -78,7 +78,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesContentRef = useRef<HTMLDivElement | null>(null);
   const unreadDividerRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const userHasScrolledUpRef = useRef<boolean>(false);
   const isLoadingOlderRef = useRef<boolean>(false);
 
@@ -258,6 +258,15 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       clearTimeout(timer);
     };
   }, [activeChatId]);
+
+  // Redimensionamento dinâmico automático do textarea conforme quebras de linha são inseridas (Shift + Enter)
+  useLayoutEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    const nextHeight = Math.min(textarea.scrollHeight, 100);
+    textarea.style.height = `${Math.max(20, nextHeight)}px`;
+  }, [inputText]);
 
   useEffect(() => {
     setViewingImage(null);
@@ -857,7 +866,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     });
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     const cursorPos = e.target.selectionStart ?? value.length;
     setInputText(value);
@@ -882,7 +891,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     setShowMentionPopover(false);
   };
 
-  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (showMentionPopover && filteredParticipants.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -912,10 +921,20 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         return;
       }
     }
+
+    // Regra: Shift + Enter insere nova linha no chat sem enviar; Enter normal envia diretamente
+    if (e.key === 'Enter') {
+      if (e.shiftKey) {
+        // Permite a quebra de linha padrão do textarea
+        return;
+      }
+      e.preventDefault();
+      handleSubmit();
+    }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!inputText.trim() || !activeChatId) return;
 
     const textToSend = inputText;
@@ -1401,13 +1420,13 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             </button>
           </div>
         ) : (
-          <div className="h-[42px] bg-[#202C33] rounded-[8px] px-3 flex items-center gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.45)]">
+          <div className="min-h-[42px] max-h-[120px] bg-[#202C33] rounded-[8px] px-3 py-1.5 flex items-end gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.45)]">
             {/* Botão Único para Painel de Emojis, Figurinhas e Anexos */}
             <button
               type="button"
               onClick={() => handleTogglePicker()}
               title="Emojis, figurinhas e anexos"
-              className={`transition-colors shrink-0 focus:outline-none ${
+              className={`transition-colors shrink-0 focus:outline-none mb-1 ${
                 pickerOpen
                   ? 'text-[#00A884]'
                   : 'text-[#8696A0] hover:text-[#D1D7DB]'
@@ -1417,9 +1436,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             </button>
 
             {/* Campo de Texto */}
-            <input
+            <textarea
               ref={inputRef}
-              type="text"
+              rows={1}
               autoFocus
               value={inputText}
               onChange={handleInputChange}
@@ -1430,7 +1449,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                   ? 'Digite uma mensagem ou @ para marcar...'
                   : 'Digite uma mensagem'
               }
-              className="flex-1 bg-transparent text-[13.5px] text-[#D1D7DB] placeholder-[#8696A0] focus:outline-none"
+              className="flex-1 bg-transparent text-[13.5px] text-[#D1D7DB] placeholder-[#8696A0] focus:outline-none resize-none overflow-y-auto max-h-[96px] py-1 leading-[20px] wa-scrollbar"
             />
 
             {/* Botão Microfone ou Enviar */}
@@ -1438,7 +1457,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
               <button
                 type="submit"
                 title="Enviar mensagem"
-                className="text-[#00A884] hover:text-[#25D366] transition-transform active:scale-90 shrink-0 focus:outline-none"
+                className="text-[#00A884] hover:text-[#25D366] transition-transform active:scale-90 shrink-0 focus:outline-none mb-1"
               >
                 <SendHorizontal className="w-[19px] h-[19px]" />
               </button>
@@ -1447,7 +1466,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                 type="button"
                 onClick={handleStartRecording}
                 title="Gravar nota de voz"
-                className="text-[#8696A0] hover:text-[#D1D7DB] transition-colors shrink-0 focus:outline-none hover:scale-105 active:scale-95"
+                className="text-[#8696A0] hover:text-[#D1D7DB] transition-colors shrink-0 focus:outline-none hover:scale-105 active:scale-95 mb-1"
               >
                 <Mic className="w-[19px] h-[19px] stroke-[1.9]" />
               </button>
