@@ -3,6 +3,92 @@ import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import * as QRCode from 'qrcode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import { execFile } from 'child_process';
+
+let ffmpegExecutablePath: string | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  ffmpegExecutablePath = require('ffmpeg-static');
+} catch (err) {
+  console.warn('[WhatsAppService] ffmpeg-static não disponível:', err);
+}
+
+async function convertAudioToWhatsAppVoiceOgg(
+  inputBuffer: Buffer
+): Promise<{ buffer: Buffer; isOgg: boolean }> {
+  if (!ffmpegExecutablePath || !fs.existsSync(ffmpegExecutablePath)) {
+    return { buffer: inputBuffer, isOgg: false };
+  }
+
+  const tempInput = path.join(
+    os.tmpdir(),
+    `wa_voice_in_${Date.now()}_${Math.random().toString(36).slice(2)}.tmp`
+  );
+  const tempOutput = path.join(
+    os.tmpdir(),
+    `wa_voice_out_${Date.now()}_${Math.random().toString(36).slice(2)}.ogg`
+  );
+
+  try {
+    fs.writeFileSync(tempInput, inputBuffer);
+  } catch (err) {
+    console.error('[WhatsAppService] Falha ao escrever tempInput para áudio:', err);
+    return { buffer: inputBuffer, isOgg: false };
+  }
+
+  return new Promise<{ buffer: Buffer; isOgg: boolean }>((resolve) => {
+    // Transcodifica para Opus mono 16kHz em container Ogg (o formato padrão PTT do WhatsApp)
+    execFile(
+      ffmpegExecutablePath!,
+      [
+        '-y',
+        '-i',
+        tempInput,
+        '-c:a',
+        'libopus',
+        '-ac',
+        '1',
+        '-ar',
+        '16000',
+        '-b:a',
+        '32k',
+        '-application',
+        'voip',
+        tempOutput,
+      ],
+      { timeout: 15000 },
+      (err, _stdout, stderr) => {
+        try {
+          if (fs.existsSync(tempInput)) fs.unlinkSync(tempInput);
+        } catch {}
+
+        if (err) {
+          console.error('[WhatsAppService] Erro ao converter áudio com ffmpeg:', err, stderr);
+          try {
+            if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
+          } catch {}
+          resolve({ buffer: inputBuffer, isOgg: false });
+          return;
+        }
+
+        try {
+          if (fs.existsSync(tempOutput)) {
+            const outBuf = fs.readFileSync(tempOutput);
+            try {
+              fs.unlinkSync(tempOutput);
+            } catch {}
+            resolve({ buffer: outBuf, isOgg: true });
+            return;
+          }
+        } catch (readErr) {
+          console.error('[WhatsAppService] Falha ao ler arquivo OGG convertido:', readErr);
+        }
+        resolve({ buffer: inputBuffer, isOgg: false });
+      }
+    );
+  });
+}
 
 export interface FormattedChatSummary {
   id: string;
@@ -2753,8 +2839,15 @@ export class WhatsAppService {
       }
 
       if (payload.sendAudioAsVoice) {
-        if (!mimetype.startsWith('audio/')) {
-          mimetype = 'audio/ogg; codecs=opus';
+        try {
+          const inputBuf = Buffer.from(base64Data, 'base64');
+          const { buffer: oggBuf, isOgg } = await convertAudioToWhatsAppVoiceOgg(inputBuf);
+          if (isOgg) {
+            base64Data = oggBuf.toString('base64');
+            mimetype = 'audio/ogg; codecs=opus';
+          }
+        } catch (convErr) {
+          console.warn('[WhatsAppService] Falha na conversão para OGG, mantendo original:', convErr);
         }
       }
 
@@ -2814,6 +2907,11 @@ export class WhatsAppService {
           console.log('[WhatsAppService] Tentando reenviar sem quotedMessageId...');
           logMediaDebug('Tentando reenviar sem quotedMessageId...');
           delete options.quotedMessageId;
+          sent = await this.client.sendMessage(payload.chatId, media, options);
+        } else if (options.sendAudioAsVoice) {
+          console.log('[WhatsAppService] Tentando reenviar áudio sem flag sendAudioAsVoice...');
+          logMediaDebug('Tentando reenviar áudio sem flag sendAudioAsVoice...');
+          delete options.sendAudioAsVoice;
           sent = await this.client.sendMessage(payload.chatId, media, options);
         } else {
           throw sendErr;

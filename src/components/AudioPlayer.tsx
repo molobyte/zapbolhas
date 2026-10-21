@@ -153,7 +153,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       {/* Barras de Onda Sonora + Bolinha Azul */}
       <div
         onClick={handleWaveformClick}
-        className="relative h-[22px] flex items-center gap-[2.5px] cursor-pointer select-none"
+        className="relative h-[22px] max-h-[22px] max-w-[170px] overflow-hidden flex items-center gap-[2.5px] cursor-pointer select-none"
       >
         {/* Bolinha Azul de Progresso */}
         <div
@@ -164,7 +164,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         {audioData.waveform.map((val, idx) => {
           const barRatio = idx / audioData.waveform.length;
           const isPlayed = barRatio <= progress;
-          const heightPx = Math.max(3, Math.round(val * 18));
+          const normalizedVal = val > 1 ? Math.min(1, val / 100) : Math.max(0, val);
+          const heightPx = Math.max(3, Math.min(20, Math.round(normalizedVal * 18)));
 
           let barColor = 'bg-[#8696A0]';
           if (isPlayed) {

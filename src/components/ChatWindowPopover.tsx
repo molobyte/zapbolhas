@@ -622,11 +622,12 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
           setVisualizerBars(newBars);
 
-          if (recordedWaveformRef.current.length < 64) {
-            recordedWaveformRef.current.push(Math.round((currentPeak / 22) * 100));
+          const normalizedPeak = Number((currentPeak / 22).toFixed(2));
+          if (recordedWaveformRef.current.length < 34) {
+            recordedWaveformRef.current.push(normalizedPeak);
           } else {
-            const idx = Math.floor(Math.random() * 64);
-            recordedWaveformRef.current[idx] = Math.round((currentPeak / 22) * 100);
+            const idx = Math.floor(Math.random() * 34);
+            recordedWaveformRef.current[idx] = normalizedPeak;
           }
         }
         animFrameRef.current = requestAnimationFrame(updateVisualizer);
