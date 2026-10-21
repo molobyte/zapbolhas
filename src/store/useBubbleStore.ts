@@ -9,6 +9,7 @@ import {
   GroupParticipant,
   IncomingMessagePayload,
   QuotedMessage,
+  SavedContact,
   SoundPreset,
   ViewingImageState,
   WaConnectionState,
@@ -25,6 +26,65 @@ const WAVEFORM_OUTGOING_216 = [
   0.25, 0.42, 0.3, 0.75, 0.52, 0.88, 0.4, 0.68, 0.94, 0.6, 0.82, 0.45,
   0.76, 0.55, 0.35, 0.7, 0.92, 0.62, 0.48, 0.85, 0.58, 0.38, 0.78, 0.9,
   0.5, 0.66, 0.84, 0.44, 0.72, 0.88, 0.54, 0.74, 0.38, 0.24,
+];
+
+export const INITIAL_MOCK_SAVED_CONTACTS: SavedContact[] = [
+  {
+    id: '5511987654321@c.us',
+    name: 'Danilo Neves Xbox',
+    pushname: 'Danilo',
+    phoneNumber: '+55 11 98765-4321',
+    avatar: '/avatars/danilo-neves.png',
+    isMyContact: true,
+  },
+  {
+    id: '5511912345678@c.us',
+    name: 'Gabriel Henrique',
+    pushname: 'Gabriel',
+    phoneNumber: '+55 11 91234-5678',
+    avatar: '',
+    isMyContact: true,
+  },
+  {
+    id: '5521998871122@c.us',
+    name: 'Matheus Developer',
+    pushname: 'Matheus',
+    phoneNumber: '+55 21 99887-1122',
+    avatar: '',
+    isMyContact: true,
+  },
+  {
+    id: '5531977663344@c.us',
+    name: 'Larissa Santos',
+    pushname: 'Lari',
+    phoneNumber: '+55 31 97766-3344',
+    avatar: '',
+    isMyContact: true,
+  },
+  {
+    id: '5541988224455@c.us',
+    name: 'Camila Tech',
+    pushname: 'Camila',
+    phoneNumber: '+55 41 98822-4455',
+    avatar: '',
+    isMyContact: true,
+  },
+  {
+    id: '5511965432109@c.us',
+    name: 'Dr. Roberto',
+    pushname: 'Roberto',
+    phoneNumber: '+55 11 96543-2109',
+    avatar: '',
+    isMyContact: true,
+  },
+  {
+    id: '5511954321098@c.us',
+    name: 'Rodrigo Marketing',
+    pushname: 'Rodrigo',
+    phoneNumber: '+55 11 95432-1098',
+    avatar: '',
+    isMyContact: true,
+  },
 ];
 
 export const INITIAL_MOCK_CHATS: ChatSummary[] = [
@@ -618,6 +678,8 @@ interface BubbleStoreState {
   replyingTo: QuotedMessage | null;
   viewingImage: ViewingImageState | null;
   showDebugControls: boolean;
+  savedContacts: SavedContact[];
+  isLoadingContacts: boolean;
 
   // Actions
   setMode: (mode: ConnectionMode) => void;
@@ -650,6 +712,8 @@ interface BubbleStoreState {
   // Core Business Logic Flows (Specs Section 5)
   toggleMainButton: () => void;
   selectChatFromList: (chatId: string) => void;
+  fetchSavedContacts: (query?: string) => Promise<void>;
+  startChatWithContact: (contact: SavedContact) => void;
   toggleBubbleChat: (chatId: string) => void;
   minimizeActiveChat: () => void;
   closeBubble: (chatId: string) => void;
@@ -713,6 +777,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   replyingTo: null,
   viewingImage: null,
   showDebugControls: false,
+  savedContacts: INITIAL_MOCK_SAVED_CONTACTS,
+  isLoadingContacts: false,
 
   setMode: (mode) => {
     if (mode === 'whatsapp') {
@@ -1445,6 +1511,60 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         window.electronAPI?.markAsRead(chatId);
       });
     }
+  },
+
+  fetchSavedContacts: async (query?: string) => {
+    const { mode } = get();
+    if (mode === 'whatsapp' && window.electronAPI?.getSavedContacts) {
+      set({ isLoadingContacts: true });
+      try {
+        const contacts = await window.electronAPI.getSavedContacts(query);
+        set({ savedContacts: contacts || [], isLoadingContacts: false });
+      } catch (err) {
+        console.error('Error fetching saved contacts:', err);
+        set({ isLoadingContacts: false });
+      }
+    } else {
+      set({ isLoadingContacts: true });
+      const q = (query || '').toLowerCase().trim();
+      const filtered = q
+        ? INITIAL_MOCK_SAVED_CONTACTS.filter(
+            (c) =>
+              c.name.toLowerCase().includes(q) ||
+              c.phoneNumber?.toLowerCase().includes(q) ||
+              c.pushname?.toLowerCase().includes(q)
+          )
+        : INITIAL_MOCK_SAVED_CONTACTS;
+      set({ savedContacts: filtered, isLoadingContacts: false });
+    }
+  },
+
+  startChatWithContact: (contact: SavedContact) => {
+    const { chats, selectChatFromList } = get();
+    const existing = chats.find((c) => c.id === contact.id);
+    if (existing) {
+      selectChatFromList(contact.id);
+      return;
+    }
+
+    const newChat: ChatSummary = {
+      id: contact.id,
+      name: contact.name || contact.pushname || contact.phoneNumber || 'Contato',
+      avatar: contact.avatar || '',
+      unreadCount: 0,
+      isGroup: false,
+      lastMessage: {
+        text: '',
+        mediaType: 'text',
+        timestamp: '',
+      },
+    };
+
+    set((state) => ({
+      chats: [newChat, ...state.chats],
+    }));
+
+    selectChatFromList(contact.id);
   },
 
   // 5.4 Fluxo de Interação com Bolha Existente

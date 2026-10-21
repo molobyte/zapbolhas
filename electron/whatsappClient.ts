@@ -2799,6 +2799,312 @@ export class WhatsAppService {
     }
   }
 
+  public async getSavedContacts(query: string = ''): Promise<
+    Array<{
+      id: string;
+      name: string;
+      pushname?: string;
+      phoneNumber?: string;
+      avatar?: string;
+      isMyContact?: boolean;
+    }>
+  > {
+    if (!this.client?.pupPage || this.status !== 'ready') {
+      return [];
+    }
+
+    try {
+      const rawList = await this.client.pupPage.evaluate(async (queryStr: string) => {
+        const w = window as any;
+        if (typeof w.require !== 'function') return [];
+        const collections = w.require('WAWebCollections');
+        if (!collections) return [];
+        const ContactCol = collections.Contact;
+        const ProfilePicThumb = collections.ProfilePicThumb;
+        const ContactGetters = w.require('WAWebContactGetters');
+        const widFactory = w.require('WAWebWidFactory');
+        const lidUtils = w.require('WAWebLidMigrationUtils');
+
+        const serializeId = (val: any): string => {
+          if (!val) return '';
+          if (typeof val === 'string') return val;
+          if (typeof val._serialized === 'string' && val._serialized) return val._serialized;
+          return '';
+        };
+
+        const loadIdbContactMap = async (): Promise<Map<string, any>> => {
+          return new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(new Map()), 800);
+            try {
+              const req = window.indexedDB.open('model-storage');
+              req.onerror = () => {
+                clearTimeout(timer);
+                resolve(new Map());
+              };
+              req.onsuccess = (e: any) => {
+                try {
+                  const db = e.target.result;
+                  let storeName = '';
+                  if (db.objectStoreNames.contains('contact')) {
+                    storeName = 'contact';
+                  } else if (db.objectStoreNames.contains('contacts')) {
+                    storeName = 'contacts';
+                  }
+                  if (!storeName) {
+                    clearTimeout(timer);
+                    resolve(new Map());
+                    return;
+                  }
+                  const tx = db.transaction(storeName, 'readonly');
+                  const store = tx.objectStore(storeName);
+                  const getAllReq = store.getAll();
+                  getAllReq.onsuccess = (ev: any) => {
+                    clearTimeout(timer);
+                    const list = ev.target.result || [];
+                    const map = new Map<string, any>();
+                    for (const item of list) {
+                      if (item && item.id) {
+                        const strId = serializeId(item.id);
+                        if (strId) map.set(strId, item);
+                        if (item.phoneNumber) {
+                          const pn = serializeId(item.phoneNumber);
+                          if (pn) {
+                            map.set(pn, item);
+                            const clean = pn.split('@')[0];
+                            if (clean) map.set(clean, item);
+                          }
+                        }
+                      }
+                    }
+                    resolve(map);
+                  };
+                  getAllReq.onerror = () => {
+                    clearTimeout(timer);
+                    resolve(new Map());
+                  };
+                } catch (_) {
+                  clearTimeout(timer);
+                  resolve(new Map());
+                }
+              };
+            } catch (_) {
+              clearTimeout(timer);
+              resolve(new Map());
+            }
+          });
+        };
+
+        const idbMap = await loadIdbContactMap();
+        const allModels = ContactCol?.getModelsArray ? ContactCol.getModelsArray() : [];
+
+        const formatPhone = (num: string) => {
+          if (!num) return '';
+          const digits = num.replace(/\D/g, '');
+          if (digits.length === 13 && digits.startsWith('55')) {
+            return `+55 ${digits.slice(2, 4)} ${digits.slice(4, 9)}-${digits.slice(9)}`;
+          }
+          if (digits.length === 12 && digits.startsWith('55')) {
+            return `+55 ${digits.slice(2, 4)} ${digits.slice(4, 8)}-${digits.slice(8)}`;
+          }
+          return digits ? `+${digits}` : num;
+        };
+
+        const normalize = (str: any) =>
+          typeof str === 'string'
+            ? str
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .trim()
+            : '';
+
+        const q = normalize(queryStr);
+        const resultMap = new Map<string, any>();
+
+        const candidateItems: any[] = [...allModels];
+        for (const [_, item] of idbMap) {
+          if (item && item.id) candidateItems.push(item);
+        }
+
+        for (const item of candidateItems) {
+          if (!item) continue;
+          const rawId = serializeId(item.id);
+          if (!rawId) continue;
+
+          const isGroup = Boolean(
+            item.isGroup ||
+            item.groupMetadata ||
+            rawId.endsWith('@g.us') ||
+            item.id?.server === 'g.us'
+          );
+          const isBroadcast = Boolean(
+            item.isBroadcast ||
+            rawId.endsWith('@broadcast') ||
+            item.id?.server === 'broadcast'
+          );
+          const isNewsletter = Boolean(
+            item.isNewsletter ||
+            rawId.endsWith('@newsletter') ||
+            item.id?.server === 'newsletter'
+          );
+          const isMe = Boolean(item.isMe);
+
+          if (isGroup || isBroadcast || isNewsletter || isMe) continue;
+
+          let targetChatId = rawId;
+          if (rawId.endsWith('@lid') && item.phoneNumber) {
+            const pn = serializeId(item.phoneNumber);
+            if (pn && pn.endsWith('@c.us')) {
+              targetChatId = pn;
+            }
+          }
+          if (rawId.endsWith('@lid') && lidUtils?.toPn && widFactory?.createWid) {
+            try {
+              const widLid = widFactory.createWid(rawId);
+              const pnWid = lidUtils.toPn(widLid);
+              const pnSid = serializeId(pnWid);
+              if (pnSid && pnSid.endsWith('@c.us')) {
+                targetChatId = pnSid;
+              }
+            } catch (_) {}
+          }
+
+          if (resultMap.has(targetChatId)) continue;
+
+          let savedName = '';
+          if (ContactGetters?.getName) {
+            try { savedName = ContactGetters.getName(item) || ''; } catch (_) {}
+          }
+          if (!savedName) {
+            savedName =
+              (typeof item.get === 'function'
+                ? item.get('name') || item.get('displayName') || item.get('formattedTitle')
+                : '') ||
+              item.name ||
+              item.displayName ||
+              item.formattedTitle ||
+              item.attributes?.name ||
+              item.attributes?.displayName ||
+              item.attributes?.formattedTitle ||
+              '';
+          }
+          if (!savedName && (item.isBusiness || item.isEnterprise)) {
+            savedName =
+              item.verifiedName ||
+              item.attributes?.verifiedName ||
+              (ContactGetters?.getVerifiedName ? ContactGetters.getVerifiedName(item) : '') ||
+              '';
+          }
+
+          const idbItem = idbMap.get(rawId) || idbMap.get(targetChatId);
+          if (!savedName && idbItem) {
+            savedName = idbItem.name || idbItem.displayName || idbItem.formattedTitle || '';
+          }
+
+          const cleanSaved = (savedName || '').replace(/^~/, '').trim();
+          const pushname = (item.pushname || item.notifyName || idbItem?.pushname || '').replace(/^~/, '').trim();
+
+          const rawPhone = targetChatId.split('@')[0];
+          const formattedPhone = formatPhone(rawPhone);
+
+          const isSavedContact = Boolean(
+            item.isMyContact ||
+            item.isAddressBookContact ||
+            idbItem?.isMyContact ||
+            idbItem?.isAddressBookContact ||
+            (cleanSaved && cleanSaved !== rawPhone && cleanSaved !== formattedPhone && cleanSaved !== pushname)
+          );
+
+          if (!q && !isSavedContact) continue;
+
+          const displayName = cleanSaved || pushname || formattedPhone || rawPhone;
+          if (!displayName) continue;
+
+          if (q) {
+            const normName = normalize(displayName);
+            const normPush = normalize(pushname);
+            const normPhone = normalize(formattedPhone);
+            const normDigits = rawPhone.replace(/\D/g, '');
+            if (
+              !normName.includes(q) &&
+              !normPush.includes(q) &&
+              !normPhone.includes(q) &&
+              !normDigits.includes(q)
+            ) {
+              continue;
+            }
+          }
+
+          resultMap.set(targetChatId, {
+            id: targetChatId,
+            name: displayName,
+            pushname,
+            phoneNumber: formattedPhone,
+            isMyContact: isSavedContact,
+            rawModel: item,
+          });
+        }
+
+        const list = Array.from(resultMap.values());
+
+        await Promise.all(
+          list.slice(0, 100).map(async (c: any) => {
+            try {
+              const pic =
+                ProfilePicThumb?.get?.(c.id) ||
+                ProfilePicThumb?.get?.(c.rawModel?.id) ||
+                c.rawModel?.profilePicThumb;
+              let url = pic?.eurl || pic?.img || pic?.imgFull || '';
+              if (!url && ProfilePicThumb?.find) {
+                const found: any = await Promise.race([
+                  ProfilePicThumb.find(c.id),
+                  new Promise((r) => setTimeout(() => r(null), 120)),
+                ]);
+                url = found?.eurl || found?.img || found?.imgFull || '';
+              }
+              c.avatar = url || '';
+            } catch (_) {
+              c.avatar = '';
+            }
+            delete c.rawModel;
+          })
+        );
+
+        for (const c of list) {
+          delete c.rawModel;
+        }
+
+        list.sort((a, b) =>
+          (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' })
+        );
+
+        return list;
+      }, query);
+
+      return (rawList || []).map((c: any) => {
+        const cleanName = (c.name || 'Contato').replace(/^~/, '').trim();
+        const avatar =
+          c.avatar ||
+          this.avatarCache.get(c.id) ||
+          createInitialsAvatarDataUrl(cleanName);
+        if (c.avatar) {
+          this.avatarCache.set(c.id, c.avatar);
+        }
+        return {
+          id: c.id,
+          name: cleanName,
+          pushname: c.pushname || undefined,
+          phoneNumber: c.phoneNumber || undefined,
+          avatar,
+          isMyContact: Boolean(c.isMyContact),
+        };
+      });
+    } catch (err) {
+      console.error('[WhatsAppService] Error getting saved contacts:', err);
+      return [];
+    }
+  }
+
   public async sendSticker(payload: {
     chatId: string;
     stickerDataUrl: string;

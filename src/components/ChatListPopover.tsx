@@ -1,8 +1,8 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Search, Plus, X, ArrowLeft, User } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
-import { ChatSummary } from '../types/whatsapp';
+import { ChatSummary, SavedContact } from '../types/whatsapp';
 
 interface ChatListPopoverProps {
   onInteractiveEnter: () => void;
@@ -63,25 +63,86 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
   onInteractiveEnter,
   onInteractiveLeave,
 }) => {
-  const { chats, selectChatFromList, hasSyncedRealChats, waStatus } =
-    useBubbleStore();
+  const {
+    chats,
+    selectChatFromList,
+    hasSyncedRealChats,
+    waStatus,
+    savedContacts,
+    isLoadingContacts,
+    fetchSavedContacts,
+    startChatWithContact,
+  } = useBubbleStore();
 
-  // Permite fechar a lista de conversas pressionando ESC
+  const [view, setView] = React.useState<'chats' | 'contacts'>('chats');
+  const [chatSearch, setChatSearch] = React.useState('');
+  const [contactSearch, setContactSearch] = React.useState('');
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Permite fechar a lista de conversas pressionando ESC ou voltar da tela de contatos
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        useBubbleStore.setState({ activePopover: 'none' });
+        if (view === 'contacts') {
+          setView('chats');
+          setContactSearch('');
+        } else if (chatSearch) {
+          setChatSearch('');
+        } else {
+          useBubbleStore.setState({ activePopover: 'none' });
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [view, chatSearch]);
 
   const isLoadingChats = !hasSyncedRealChats && chats.length === 0;
+
+  // Filtragem de conversas na tela principal
+  const filteredChats = React.useMemo(() => {
+    if (!chatSearch.trim()) return chats;
+    const q = chatSearch.toLowerCase().trim();
+    return chats.filter((chat) => {
+      const matchName = chat.name?.toLowerCase().includes(q);
+      const matchParent = chat.parentName?.toLowerCase().includes(q);
+      const matchMsg = chat.lastMessage?.text?.toLowerCase().includes(q);
+      const matchSender = chat.lastMessage?.senderName?.toLowerCase().includes(q);
+      return matchName || matchParent || matchMsg || matchSender;
+    });
+  }, [chats, chatSearch]);
+
+  // Filtragem de contatos na tela de Nova Conversa
+  const filteredContacts = React.useMemo(() => {
+    if (!contactSearch.trim()) return savedContacts;
+    const q = contactSearch.toLowerCase().trim();
+    return savedContacts.filter((contact) => {
+      const matchName = contact.name?.toLowerCase().includes(q);
+      const matchPush = contact.pushname?.toLowerCase().includes(q);
+      const matchPhone = contact.phoneNumber?.toLowerCase().includes(q);
+      const matchDigits = contact.phoneNumber?.replace(/\D/g, '').includes(q.replace(/\D/g, ''));
+      return matchName || matchPush || matchPhone || matchDigits;
+    });
+  }, [savedContacts, contactSearch]);
+
+  const handleOpenContacts = () => {
+    setView('contacts');
+    setContactSearch('');
+    fetchSavedContacts();
+  };
+
+  const handleContactSearchChange = (val: string) => {
+    setContactSearch(val);
+    fetchSavedContacts(val);
+  };
+
+  const handleSelectContact = (contact: SavedContact) => {
+    startChatWithContact(contact);
+  };
 
   const renderLastMessagePreview = (chat: ChatSummary) => {
     const { lastMessage } = chat;
@@ -143,95 +204,259 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 12, scale: 0.96 }}
       transition={{ type: 'spring', stiffness: 420, damping: 28 }}
-      className="relative w-[310px] h-[440px] bg-[#18191B] rounded-[6px] shadow-[0_14px_40px_rgba(0,0,0,0.85)] border border-white/[0.05] flex flex-col pointer-events-auto group/list"
+      className="relative w-[316px] h-[456px] bg-[#18191B] rounded-[6px] shadow-[0_14px_40px_rgba(0,0,0,0.85)] border border-white/[0.05] flex flex-col pointer-events-auto group/list"
     >
-      {isLoadingChats ? (
-        <div className="flex-1 flex flex-col justify-between py-4 px-3 overflow-hidden">
-          {/* Banner superior de status de sincronização */}
-          <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-[6px] bg-[#202C33]/90 border border-white/[0.05]">
-            <Loader2 className="w-5 h-5 text-[#25D366] animate-spin shrink-0" />
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-[#E9EDEF] leading-tight">
-                Carregando conversas...
-              </div>
-              <div className="text-[11px] text-[#8696A0] truncate mt-0.5">
-                {waStatus === 'authenticated' || waStatus === 'ready'
-                  ? 'Sincronizando mensagens recentes'
-                  : 'Conectando à sessão do WhatsApp'}
-              </div>
+      {view === 'chats' ? (
+        <>
+          {/* Topo: Título + Botão de Nova Conversa (+) e Barra de Pesquisa */}
+          <div className="px-3 pt-3 pb-2 flex flex-col gap-2 border-b border-white/[0.06] shrink-0">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[15px] font-semibold text-[#E9EDEF] tracking-tight">Conversas</h2>
+              <button
+                type="button"
+                onClick={handleOpenContacts}
+                title="Nova conversa (Contatos salvos)"
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[#AEBAC1] hover:text-[#00A884] hover:bg-[#202C33] active:scale-95 transition-all cursor-pointer"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center bg-[#202C33] rounded-[8px] px-2.5 h-[32px] gap-2 border border-transparent focus-within:border-[#00A884]/50 transition-all">
+              <Search className="w-3.5 h-3.5 text-[#8696A0] shrink-0" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={chatSearch}
+                onChange={(e) => setChatSearch(e.target.value)}
+                placeholder="Pesquisar conversa..."
+                className="bg-transparent text-[13px] text-[#E9EDEF] placeholder-[#8696A0] outline-none w-full"
+              />
+              {chatSearch && (
+                <button
+                  type="button"
+                  onClick={() => setChatSearch('')}
+                  className="text-[#8696A0] hover:text-[#E9EDEF] p-0.5 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Esqueleto animado (Skeleton) das linhas de conversa */}
-          <div className="flex-1 flex flex-col justify-around py-2">
-            {[0, 1, 2, 3, 4].map((idx) => (
-              <div
-                key={idx}
-                className="flex items-center gap-3 px-2 py-2 animate-pulse"
-              >
-                <div className="w-[42px] h-[42px] rounded-full bg-[#2A3942]/80 shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-3.5 bg-[#2A3942]/80 rounded w-3/5" />
-                  <div className="h-2.5 bg-[#202C33] rounded w-4/5" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        /* Lista de Conversas Rolável */
-        <div className="flex-1 overflow-y-auto py-2 px-1.5 wa-scrollbar">
-          {chats.map((chat) => (
-            <button
-              key={chat.id}
-              type="button"
-              onClick={() => selectChatFromList(chat.id)}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[5px] hover:bg-[#202C33]/80 active:bg-[#202C33] transition-colors text-left group"
-            >
-              {/* Avatar do Contato ou Grupo/Comunidade */}
-              <div className="relative w-[42px] h-[42px] shrink-0 flex items-center justify-center">
-                <img
-                  src={chat.avatar}
-                  alt={chat.name}
-                  className={`w-[42px] h-[42px] object-cover ${
-                    chat.parentName ? 'rounded-[8px]' : 'rounded-full'
-                  }`}
-                  draggable={false}
-                />
-              </div>
-
-              {/* Textos Centralizados */}
-              <div className="flex-1 min-w-0">
-                {chat.parentName && (
-                  <div className="text-[11px] text-[#8696A0] leading-tight truncate mb-[1px]">
-                    {chat.parentName}
+          {isLoadingChats ? (
+            <div className="flex-1 flex flex-col justify-between py-4 px-3 overflow-hidden">
+              {/* Banner superior de status de sincronização */}
+              <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-[6px] bg-[#202C33]/90 border border-white/[0.05]">
+                <Loader2 className="w-5 h-5 text-[#25D366] animate-spin shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-[#E9EDEF] leading-tight">
+                    Carregando conversas...
                   </div>
-                )}
-                <div className="text-[14px] font-medium text-[#E9EDEF] leading-snug truncate">
-                  {chat.name}
+                  <div className="text-[11px] text-[#8696A0] truncate mt-0.5">
+                    {waStatus === 'authenticated' || waStatus === 'ready'
+                      ? 'Sincronizando mensagens recentes'
+                      : 'Conectando à sessão do WhatsApp'}
+                  </div>
                 </div>
-                <div className="mt-[1px]">{renderLastMessagePreview(chat)}</div>
               </div>
 
-              {/* Indicador de menção (@) e mensagens não lidas à direita */}
-              {chat.unreadCount > 0 && (
-                <div className="shrink-0 pl-1 flex items-center justify-end gap-1.5">
-                  {chat.isGroup && chat.hasMention && (
-                    <span
-                      title="Você foi marcado neste grupo"
-                      className="w-[18px] h-[18px] rounded-full bg-[#32CAED] text-[#111B21] text-[11px] font-black leading-none flex items-center justify-center shadow-sm select-none"
-                    >
-                      @
-                    </span>
+              {/* Esqueleto animado (Skeleton) das linhas de conversa */}
+              <div className="flex-1 flex flex-col justify-around py-2">
+                {[0, 1, 2, 3, 4].map((idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center gap-3 px-2 py-2 animate-pulse"
+                  >
+                    <div className="w-[42px] h-[42px] rounded-full bg-[#2A3942]/80 shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-3.5 bg-[#2A3942]/80 rounded w-3/5" />
+                      <div className="h-2.5 bg-[#202C33] rounded w-4/5" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : filteredChats.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-4 text-center">
+              <Search className="w-8 h-8 text-[#8696A0]/40 mb-2" />
+              <p className="text-[13px] text-[#8696A0]">Nenhuma conversa encontrada</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setView('contacts');
+                  fetchSavedContacts(chatSearch);
+                }}
+                className="mt-2.5 px-3 py-1.5 rounded-[6px] bg-[#00A884]/20 hover:bg-[#00A884]/30 text-[#00A884] text-[12px] font-medium transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Pesquisar nos contatos salvos</span>
+              </button>
+            </div>
+          ) : (
+            /* Lista de Conversas Rolável */
+            <div className="flex-1 overflow-y-auto py-1 px-1.5 wa-scrollbar">
+              {filteredChats.map((chat) => (
+                <button
+                  key={chat.id}
+                  type="button"
+                  onClick={() => selectChatFromList(chat.id)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[5px] hover:bg-[#202C33]/80 active:bg-[#202C33] transition-colors text-left group"
+                >
+                  {/* Avatar do Contato ou Grupo/Comunidade */}
+                  <div className="relative w-[40px] h-[40px] shrink-0 flex items-center justify-center">
+                    <img
+                      src={chat.avatar}
+                      alt={chat.name}
+                      className={`w-[40px] h-[40px] object-cover ${
+                        chat.parentName ? 'rounded-[8px]' : 'rounded-full'
+                      }`}
+                      draggable={false}
+                    />
+                  </div>
+
+                  {/* Textos Centralizados */}
+                  <div className="flex-1 min-w-0">
+                    {chat.parentName && (
+                      <div className="text-[11px] text-[#8696A0] leading-tight truncate mb-[1px]">
+                        {chat.parentName}
+                      </div>
+                    )}
+                    <div className="text-[13.5px] font-medium text-[#E9EDEF] leading-snug truncate">
+                      {chat.name}
+                    </div>
+                    <div className="mt-[1px]">{renderLastMessagePreview(chat)}</div>
+                  </div>
+
+                  {/* Indicador de menção (@) e mensagens não lidas à direita */}
+                  {chat.unreadCount > 0 && (
+                    <div className="shrink-0 pl-1 flex items-center justify-end gap-1.5">
+                      {chat.isGroup && chat.hasMention && (
+                        <span
+                          title="Você foi marcado neste grupo"
+                          className="w-[18px] h-[18px] rounded-full bg-[#32CAED] text-[#111B21] text-[11px] font-black leading-none flex items-center justify-center shadow-sm select-none"
+                        >
+                          @
+                        </span>
+                      )}
+                      <span className="min-w-[20px] h-[20px] px-[6px] rounded-full bg-[#25D366] text-[#111B21] text-[11.5px] font-bold leading-none flex items-center justify-center shadow-sm">
+                        {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
+                      </span>
+                    </div>
                   )}
-                  <span className="min-w-[20px] h-[20px] px-[6px] rounded-full bg-[#25D366] text-[#111B21] text-[11.5px] font-bold leading-none flex items-center justify-center shadow-sm">
-                    {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
-                  </span>
-                </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        /* Tela de Nova Conversa (Contatos Salvos da Conta do WhatsApp) */
+        <>
+          <div className="px-3 pt-3 pb-2 flex flex-col gap-2 border-b border-white/[0.06] shrink-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setView('chats');
+                    setContactSearch('');
+                  }}
+                  title="Voltar para conversas"
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-[#AEBAC1] hover:text-[#E9EDEF] hover:bg-[#202C33] active:scale-95 transition-all cursor-pointer -ml-1"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+                <h2 className="text-[15px] font-semibold text-[#E9EDEF] tracking-tight">Nova conversa</h2>
+              </div>
+              <span className="text-[11px] text-[#8696A0]">
+                {savedContacts.length > 0 ? `${savedContacts.length} contatos` : ''}
+              </span>
+            </div>
+
+            <div className="flex items-center bg-[#202C33] rounded-[8px] px-2.5 h-[32px] gap-2 border border-transparent focus-within:border-[#00A884]/50 transition-all">
+              <Search className="w-3.5 h-3.5 text-[#8696A0] shrink-0" />
+              <input
+                autoFocus
+                type="text"
+                value={contactSearch}
+                onChange={(e) => handleContactSearchChange(e.target.value)}
+                placeholder="Pesquisar contatos salvos..."
+                className="bg-transparent text-[13px] text-[#E9EDEF] placeholder-[#8696A0] outline-none w-full"
+              />
+              {contactSearch && (
+                <button
+                  type="button"
+                  onClick={() => handleContactSearchChange('')}
+                  className="text-[#8696A0] hover:text-[#E9EDEF] p-0.5 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               )}
-            </button>
-          ))}
-        </div>
+            </div>
+          </div>
+
+          {isLoadingContacts ? (
+            <div className="flex-1 flex flex-col items-center justify-center gap-2.5 p-4 text-center">
+              <Loader2 className="w-6 h-6 text-[#00A884] animate-spin" />
+              <span className="text-[12.5px] text-[#8696A0]">
+                Carregando contatos salvos...
+              </span>
+            </div>
+          ) : filteredContacts.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-4 text-center">
+              <User className="w-8 h-8 text-[#8696A0]/40 mb-2" />
+              <p className="text-[13px] text-[#8696A0]">Nenhum contato encontrado</p>
+              <p className="text-[11px] text-[#8696A0]/70 mt-1 max-w-[210px]">
+                {contactSearch
+                  ? 'Tente pesquisar por outro nome ou número'
+                  : 'Nenhum contato salvo encontrado na sua conta de WhatsApp'}
+              </p>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto py-1 px-1.5 wa-scrollbar">
+              <div className="px-3 py-1.5 text-[11px] font-semibold text-[#00A884] uppercase tracking-wider">
+                Contatos no WhatsApp
+              </div>
+              {filteredContacts.map((contact) => (
+                <button
+                  key={contact.id}
+                  type="button"
+                  onClick={() => handleSelectContact(contact)}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-[5px] hover:bg-[#202C33]/80 active:bg-[#202C33] transition-colors text-left group"
+                >
+                  <div className="w-[38px] h-[38px] rounded-full overflow-hidden shrink-0 bg-[#2A3942] flex items-center justify-center">
+                    {contact.avatar ? (
+                      <img
+                        src={contact.avatar}
+                        alt={contact.name}
+                        className="w-full h-full object-cover rounded-full"
+                        draggable={false}
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <span className="text-[14px] font-semibold text-[#E9EDEF]">
+                        {(contact.name || '?')[0].toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13.5px] font-medium text-[#E9EDEF] leading-snug truncate">
+                      {contact.name}
+                    </div>
+                    {(contact.phoneNumber || contact.pushname) && (
+                      <div className="text-[11.5px] text-[#8696A0] leading-tight truncate mt-0.5">
+                        {contact.phoneNumber || contact.pushname}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Seta / Triângulo Inferior Direito Apontando exatamente para o Centro do Botão Verde do WhatsApp */}

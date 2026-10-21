@@ -31,6 +31,15 @@ export interface QuotedMessage {
   fromMe?: boolean;
 }
 
+export interface SavedContact {
+  id: string;
+  name: string;
+  pushname?: string;
+  phoneNumber?: string;
+  avatar?: string;
+  isMyContact?: boolean;
+}
+
 export interface AudioData {
   duration: string;
   durationSeconds: number;
@@ -182,6 +191,7 @@ export interface ElectronAPI {
     query?: string,
     limit?: number
   ) => Promise<GroupParticipant[]>;
+  getSavedContacts?: (query?: string) => Promise<SavedContact[]>;
   sendMessage: (payload: SendMessagePayload) => Promise<FormattedMessage | null>;
   sendSticker?: (payload: SendStickerPayload) => Promise<FormattedMessage | null>;
   sendMedia?: (payload: SendMediaPayload) => Promise<FormattedMessage | null>;

@@ -369,6 +369,11 @@ function registerIpcHandlers() {
     }
   );
 
+  ipcMain.handle('wa:get-saved-contacts', async (_event, query?: string) => {
+    if (!waService) return [];
+    return await waService.getSavedContacts(query);
+  });
+
   ipcMain.handle('wa:get-sfx', async (_event, type: 'user' | 'group', preset = 'default') => {
     try {
       const prefix = type === 'group' ? 'group' : 'user';
