@@ -57,6 +57,7 @@ export interface FormattedMessage {
   dateLabel?: string;
   fromMe: boolean;
   type: 'text' | 'audio' | 'image' | 'video' | 'sticker';
+  isViewOnce?: boolean;
   senderName?: string;
   senderColor?: string;
   senderAvatar?: string;

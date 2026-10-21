@@ -63,14 +63,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const { updateMessageMedia, setViewingImage } = useBubbleStore();
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [autoPlayVideo, setAutoPlayVideo] = useState(false);
   const [savedSticker, setSavedSticker] = useState(false);
 
-  // Decripta automaticamente imagens, vídeos, figurinhas e áudios em alta resolução
+  // Decripta automaticamente imagens, vídeos, figurinhas e áudios em alta resolução (incluindo visualização única)
   useEffect(() => {
     let cancelled = false;
     if (
-      (type === 'image' || type === 'sticker' || type === 'audio' || type === 'video') &&
+      (type === 'image' || type === 'sticker' || type === 'audio' || type === 'video' || message.isViewOnce) &&
       !isHdLoaded &&
       window.electronAPI?.downloadMedia
     ) {
@@ -78,8 +79,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       window.electronAPI
         .downloadMedia(message.id)
         .then((dataUrl) => {
-          if (!cancelled && dataUrl) {
-            updateMessageMedia(message.chatId, message.id, dataUrl);
+          if (!cancelled) {
+            if (dataUrl) {
+              updateMessageMedia(message.chatId, message.id, dataUrl);
+              setLoadFailed(false);
+            } else if (message.isViewOnce) {
+              setLoadFailed(true);
+            }
+          }
+        })
+        .catch(() => {
+          if (!cancelled && message.isViewOnce) {
+            setLoadFailed(true);
           }
         })
         .finally(() => {
@@ -91,7 +102,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [type, isHdLoaded, message.id, message.chatId, updateMessageMedia]);
+  }, [type, isHdLoaded, message.id, message.chatId, message.isViewOnce, updateMessageMedia]);
 
   const handlePlayOrExpandVideo = async (
     e: React.MouseEvent,
@@ -102,11 +113,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
     if (!targetVideoUrl && window.electronAPI?.downloadMedia) {
       setIsLoadingMedia(true);
-      const hd = await window.electronAPI.downloadMedia(message.id);
-      setIsLoadingMedia(false);
-      if (hd) {
-        updateMessageMedia(message.chatId, message.id, hd);
-        targetVideoUrl = hd;
+      setLoadFailed(false);
+      try {
+        const hd = await window.electronAPI.downloadMedia(message.id);
+        if (hd) {
+          updateMessageMedia(message.chatId, message.id, hd);
+          targetVideoUrl = hd;
+          setLoadFailed(false);
+        } else if (message.isViewOnce) {
+          setLoadFailed(true);
+        }
+      } catch {
+        if (message.isViewOnce) {
+          setLoadFailed(true);
+        }
+      } finally {
+        setIsLoadingMedia(false);
       }
     }
 
@@ -122,7 +144,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           mediaType: 'video',
           imageUrl: imageUrl || '',
           videoUrl: targetVideoUrl,
-          caption: text || undefined,
+          caption: text || (message.isViewOnce ? 'Vídeo de visualização única' : undefined),
           senderName: fromMe ? 'Você' : senderName || 'Contato',
           timestamp,
         });
@@ -136,13 +158,25 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     e.stopPropagation();
     let targetUrl = imageUrl;
 
-    if (!isHdLoaded && window.electronAPI?.downloadMedia) {
+    if (!targetUrl && window.electronAPI?.downloadMedia) {
       setIsLoadingMedia(true);
-      const hd = await window.electronAPI.downloadMedia(message.id);
-      setIsLoadingMedia(false);
-      if (hd) {
-        updateMessageMedia(message.chatId, message.id, hd);
-        targetUrl = hd;
+      setLoadFailed(false);
+      try {
+        const hd = await window.electronAPI.downloadMedia(message.id);
+        if (hd) {
+          updateMessageMedia(message.chatId, message.id, hd);
+          targetUrl = hd;
+          setLoadFailed(false);
+        } else if (message.isViewOnce) {
+          setLoadFailed(true);
+        }
+      } catch (err) {
+        console.error('Error opening view once image:', err);
+        if (message.isViewOnce) {
+          setLoadFailed(true);
+        }
+      } finally {
+        setIsLoadingMedia(false);
       }
     }
 
@@ -155,7 +189,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         messageId: message.id,
         mediaType: 'image',
         imageUrl: targetUrl,
-        caption: text || undefined,
+        caption: text || (message.isViewOnce ? 'Foto de visualização única' : undefined),
         senderName: fromMe ? 'Você' : senderName || 'Contato',
         timestamp,
       });
@@ -338,9 +372,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           ) : (
             <div className="text-[13.2px] leading-[18px] break-words">
               {type === 'video' && (
-                <div className="relative group/vid mb-1.5 overflow-hidden rounded-[6px] bg-black/80 min-w-[210px]">
+                <div className="relative group/vid mb-1.5 overflow-hidden rounded-[6px] min-w-[210px]">
                   {videoUrl ? (
-                    <div className="relative overflow-hidden rounded-[6px]">
+                    <div className="relative overflow-hidden rounded-[6px] bg-black/80">
                       <video
                         src={videoUrl}
                         poster={imageUrl}
@@ -351,6 +385,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         onClick={(e) => e.stopPropagation()}
                         className="w-full min-w-[210px] max-h-[260px] rounded-[6px] bg-black object-contain"
                       />
+                      {/* Badge de Visualização Única no topo esquerdo */}
+                      {message.isViewOnce && (
+                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/75 backdrop-blur-md text-white text-[10.5px] font-medium flex items-center gap-1.5 shadow-md border border-white/20 select-none z-10 pointer-events-none">
+                          <span className="w-4 h-4 rounded-full border border-dashed border-[#25D366] text-[#25D366] flex items-center justify-center text-[10px] font-bold leading-none">
+                            1
+                          </span>
+                          <span>Visualização única</span>
+                        </div>
+                      )}
                       <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/vid:opacity-100 transition-opacity flex items-center gap-1.5 z-10">
                         <button
                           type="button"
@@ -369,6 +412,48 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           <ExternalLink className="w-3.5 h-3.5" />
                         </button>
                       </div>
+                    </div>
+                  ) : message.isViewOnce ? (
+                    <div className="flex flex-col gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => handlePlayOrExpandVideo(e, false)}
+                        className="w-[230px] p-2.5 rounded-[8px] bg-[#182229]/80 hover:bg-[#182229] border border-white/10 flex items-center gap-3 text-left transition-all group/vo select-none cursor-pointer"
+                        title="Clique para reproduzir o vídeo de visualização única"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-[#005C4B]/60 border border-[#25D366]/40 flex items-center justify-center shrink-0 text-[#25D366] group-hover/vo:bg-[#005C4B] transition-colors">
+                          {isLoadingMedia ? (
+                            <Loader2 className="w-5 h-5 animate-spin text-[#25D366]" />
+                          ) : (
+                            <div className="relative flex items-center justify-center font-bold text-[14px]">
+                              <svg
+                                viewBox="0 0 24 24"
+                                className="w-6 h-6 stroke-current fill-none stroke-[2]"
+                              >
+                                <circle cx="12" cy="12" r="9" strokeDasharray="3 2" />
+                              </svg>
+                              <span className="absolute text-[11px] font-bold">1</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[13px] font-medium text-[#E9EDEF] flex items-center gap-1.5">
+                            <span>Vídeo de visualização única</span>
+                          </div>
+                          <div className="text-[11px] text-[#8696A0] mt-0.5">
+                            {isLoadingMedia
+                              ? 'Carregando vídeo...'
+                              : loadFailed
+                              ? 'Protegida • Clique para tentar'
+                              : 'Clique para reproduzir'}
+                          </div>
+                        </div>
+                      </button>
+                      {loadFailed && (
+                        <div className="text-[11px] text-[#8696A0] leading-tight px-1">
+                          🔒 Protegida pelo WhatsApp. Se não abrir aqui, visualize no seu celular.
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div
@@ -412,7 +497,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </div>
               )}
 
-              {type !== 'video' && (type === 'image' || type === 'sticker' || imageUrl) && (
+              {type !== 'video' && (type === 'image' || type === 'sticker' || imageUrl || message.isViewOnce) && (
                 <div className="relative group/img mb-1.5 overflow-hidden rounded-[6px]">
                   {imageUrl ? (
                     <div
@@ -422,13 +507,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     >
                       <img
                         src={imageUrl}
-                        alt={text || 'Imagem'}
+                        alt={text || (message.isViewOnce ? 'Foto de visualização única' : 'Imagem')}
                         className={`w-full rounded-[6px] transition-transform duration-200 group-hover/img:scale-[1.02] ${
                           type === 'sticker'
                             ? 'max-w-[130px] max-h-[130px] object-contain'
                             : 'min-w-[190px] max-h-[240px] object-cover'
                         } ${!isHdLoaded && isLoadingMedia ? 'blur-[1.5px] brightness-90' : ''}`}
                       />
+
+                      {/* Badge de Visualização Única no topo esquerdo */}
+                      {message.isViewOnce && (
+                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/75 backdrop-blur-md text-white text-[10.5px] font-medium flex items-center gap-1.5 shadow-md border border-white/20 select-none z-10 pointer-events-none">
+                          <span className="w-4 h-4 rounded-full border border-dashed border-[#25D366] text-[#25D366] flex items-center justify-center text-[10px] font-bold leading-none">
+                            1
+                          </span>
+                          <span>Visualização única</span>
+                        </div>
+                      )}
 
                       {/* Spinner sutil enquanto baixa a versão HD */}
                       {isLoadingMedia && (
@@ -471,6 +566,48 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           <ExternalLink className="w-4 h-4" />
                         </button>
                       </div>
+                    </div>
+                  ) : message.isViewOnce ? (
+                    <div className="flex flex-col gap-1">
+                      <button
+                        type="button"
+                        onClick={handleOpenImage}
+                        className="w-[230px] p-2.5 rounded-[8px] bg-[#182229]/80 hover:bg-[#182229] border border-white/10 flex items-center gap-3 text-left transition-all group/vo select-none cursor-pointer"
+                        title="Clique para visualizar a imagem de visualização única"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-[#005C4B]/60 border border-[#25D366]/40 flex items-center justify-center shrink-0 text-[#25D366] group-hover/vo:bg-[#005C4B] transition-colors">
+                          {isLoadingMedia ? (
+                            <Loader2 className="w-5 h-5 animate-spin text-[#25D366]" />
+                          ) : (
+                            <div className="relative flex items-center justify-center font-bold text-[14px]">
+                              <svg
+                                viewBox="0 0 24 24"
+                                className="w-6 h-6 stroke-current fill-none stroke-[2]"
+                              >
+                                <circle cx="12" cy="12" r="9" strokeDasharray="3 2" />
+                              </svg>
+                              <span className="absolute text-[11px] font-bold">1</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[13px] font-medium text-[#E9EDEF] flex items-center gap-1.5">
+                            <span>Foto de visualização única</span>
+                          </div>
+                          <div className="text-[11px] text-[#8696A0] mt-0.5">
+                            {isLoadingMedia
+                              ? 'Carregando foto...'
+                              : loadFailed
+                              ? 'Protegida • Clique para tentar'
+                              : 'Clique para visualizar'}
+                          </div>
+                        </div>
+                      </button>
+                      {loadFailed && (
+                        <div className="text-[11px] text-[#8696A0] leading-tight px-1">
+                          🔒 Protegida pelo WhatsApp. Se não abrir aqui, visualize no seu celular.
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <button

@@ -133,6 +133,7 @@ export interface FormattedChatMessage {
   dateLabel?: string;
   fromMe: boolean;
   type: 'text' | 'audio' | 'image' | 'video' | 'sticker';
+  isViewOnce?: boolean;
   senderName?: string;
   senderColor?: string;
   senderAvatar?: string;
@@ -1212,6 +1213,13 @@ export class WhatsAppService {
           }
 
           const rawType = String(lastMsg?.type || 'chat');
+          const isViewOnce = Boolean(
+            lastMsg?.isViewOnce ||
+            lastMsg?.viewOnce ||
+            lastMsg?.isViewOnceV2 ||
+            lastMsg?.mediaData?.isViewOnce ||
+            rawType === 'view_once'
+          );
           const rawBody =
             rawType === 'chat'
               ? String(lastMsg?.body || '')
@@ -1229,6 +1237,7 @@ export class WhatsAppService {
             hasMention,
             timestamp: Number(lastMsg?.t || c.t || 0),
             lastMsgType: rawType,
+            lastMsgIsViewOnce: isViewOnce,
             lastMsgBody: formattedLastMsg.text,
             lastMsgFromMe: Boolean(lastMsg?.id?.fromMe),
             lastMsgAck: Number(lastMsg?.ack || 0),
@@ -1240,7 +1249,7 @@ export class WhatsAppService {
         return results;
       });
 
-      return rawChats.map((raw) => {
+      return rawChats.map((raw: any) => {
         if (raw.avatar) {
           this.avatarCache.set(raw.id, raw.avatar);
         }
@@ -1249,6 +1258,11 @@ export class WhatsAppService {
           this.avatarCache.get(raw.id) ||
           createInitialsAvatarDataUrl(raw.name);
 
+        const isViewOnce = Boolean(
+          raw.lastMsgIsViewOnce ||
+          raw.lastMsgType === 'view_once'
+        );
+
         let mediaType: 'text' | 'sticker' | 'photo' | 'video' | 'audio' = 'text';
         let text = raw.lastMsgBody || '';
         let duration: string | undefined;
@@ -1256,16 +1270,20 @@ export class WhatsAppService {
         if (raw.lastMsgType === 'sticker') {
           mediaType = 'sticker';
           text = 'Figurinha';
-        } else if (raw.lastMsgType === 'image') {
+        } else if (raw.lastMsgType === 'image' || isViewOnce) {
           mediaType = 'photo';
-          text = raw.lastMsgBody || 'Foto';
+          text = isViewOnce
+            ? (raw.lastMsgBody ? `📷 Foto (1x): ${raw.lastMsgBody}` : '📷 Foto de visualização única')
+            : (raw.lastMsgBody || 'Foto');
         } else if (
           raw.lastMsgType === 'video' ||
           raw.lastMsgType === 'ptv' ||
           raw.lastMsgType === 'gif'
         ) {
           mediaType = 'video';
-          text = raw.lastMsgBody || 'Vídeo';
+          text = isViewOnce
+            ? (raw.lastMsgBody ? `🎥 Vídeo (1x): ${raw.lastMsgBody}` : '🎥 Vídeo de visualização única')
+            : (raw.lastMsgBody || 'Vídeo');
         } else if (raw.lastMsgType === 'ptt' || raw.lastMsgType === 'audio') {
           mediaType = 'audio';
           duration = formatDuration(raw.lastMsgDuration || 15);
@@ -1864,7 +1882,18 @@ export class WhatsAppService {
           return msgs.map((m: any) => {
             const id = serializeId(m.id) || `${m.t}-${Math.random()}`;
             const fromMe = Boolean(m.id?.fromMe);
-            const rawType = String(m.type || 'chat');
+            let rawType = String(m.type || 'chat');
+            const isViewOnce = Boolean(
+              m.isViewOnce ||
+              m.viewOnce ||
+              m.isViewOnceV2 ||
+              m.mediaData?.isViewOnce ||
+              rawType === 'view_once'
+            );
+
+            if (isViewOnce && (rawType === 'view_once' || rawType === 'chat')) {
+              rawType = m.mimetype?.startsWith('video/') ? 'video' : 'image';
+            }
 
             let senderName = '';
             let authorId = '';
@@ -1958,6 +1987,7 @@ export class WhatsAppService {
             return {
               id,
               rawType,
+              isViewOnce,
               text,
               mentions,
               t: Number(m.t || 0),
@@ -1977,11 +2007,11 @@ export class WhatsAppService {
         limit
       );
 
-      // Pré-decripta em alta definição (HD) as mídias recentes de imagem/figurinha que ainda não estão em cache
+      // Pré-decripta em alta definição (HD) as mídias recentes de imagem/figurinha/visualização única que ainda não estão em cache
       const uncachedMediaIds = rawMsgs
         .filter(
-          (m) =>
-            (m.rawType === 'image' || m.rawType === 'sticker') &&
+          (m: any) =>
+            (m.rawType === 'image' || m.rawType === 'sticker' || m.isViewOnce) &&
             m.id &&
             !this.mediaCache.has(m.id)
         )
@@ -2053,6 +2083,7 @@ export class WhatsAppService {
           dateLabel,
           fromMe: m.fromMe,
           type,
+          isViewOnce: Boolean((m as any).isViewOnce),
           senderName: m.senderName || undefined,
           senderColor: m.senderName ? pickSenderColor(m.senderName) : undefined,
           senderAvatar: resolvedSenderAvatar,
@@ -2120,6 +2151,23 @@ export class WhatsAppService {
 
         if (!msg) return null;
 
+        const isViewOnce = Boolean(
+          msg.isViewOnce ||
+          msg.viewOnce ||
+          msg.isViewOnceV2 ||
+          msg.mediaData?.isViewOnce ||
+          msg.type === 'view_once'
+        );
+
+        if (isViewOnce) {
+          try {
+            if (msg.mediaData) {
+              msg.mediaData.isViewOnce = false;
+            }
+            msg.isViewOnce = false;
+          } catch (_) {}
+        }
+
         try {
           if (msg.mediaData && msg.mediaData.mediaStage !== 'RESOLVED') {
             await Promise.race([
@@ -2137,6 +2185,7 @@ export class WhatsAppService {
 
         const declaredMime =
           msg.mimetype ||
+          msg.mediaData?.mimetype ||
           (msg.type === 'sticker'
             ? 'image/webp'
             : msg.type === 'ptt' || msg.type === 'audio'
@@ -2144,6 +2193,20 @@ export class WhatsAppService {
             : msg.type === 'video' || msg.type === 'ptv' || msg.type === 'gif'
             ? 'video/mp4'
             : 'image/jpeg');
+
+        const directPath = msg.directPath || msg.mediaData?.directPath;
+        const encFilehash = msg.encFilehash || msg.mediaData?.encFilehash;
+        const filehash = msg.filehash || msg.mediaData?.filehash;
+        const mediaKey = msg.mediaKey || msg.mediaData?.mediaKey;
+        const mediaKeyTimestamp = msg.mediaKeyTimestamp || msg.mediaData?.mediaKeyTimestamp;
+        const targetType =
+          msg.type === 'view_once'
+            ? (declaredMime.startsWith('video') ? 'video' : 'image')
+            : (msg.type || (declaredMime.startsWith('video') ? 'video' : 'image'));
+
+        if (typeof msg.mediaData?.renderableUrl === 'string' && msg.mediaData.renderableUrl) {
+          return msg.mediaData.renderableUrl;
+        }
 
         const mockQpl = {
           addAnnotations() {
@@ -2154,19 +2217,24 @@ export class WhatsAppService {
           },
         };
 
-        const decryptedMedia: ArrayBuffer = await w
-          .require('WAWebDownloadManager')
-          .downloadManager.downloadAndMaybeDecrypt({
-            directPath: msg.directPath,
-            encFilehash: msg.encFilehash,
-            filehash: msg.filehash,
-            mediaKey: msg.mediaKey,
-            mediaKeyTimestamp: msg.mediaKeyTimestamp,
-            type: msg.type,
-            mimetype: declaredMime,
-            signal: new AbortController().signal,
-            downloadQpl: mockQpl,
-          });
+        let decryptedMedia: ArrayBuffer | null = null;
+        try {
+          decryptedMedia = await w
+            .require('WAWebDownloadManager')
+            .downloadManager.downloadAndMaybeDecrypt({
+              directPath,
+              encFilehash,
+              filehash,
+              mediaKey,
+              mediaKeyTimestamp,
+              type: targetType,
+              mimetype: declaredMime,
+              signal: new AbortController().signal,
+              downloadQpl: mockQpl,
+            });
+        } catch (downloadErr) {
+          console.warn('[WhatsApp Web] downloadAndMaybeDecrypt failed:', downloadErr);
+        }
 
         if (decryptedMedia && decryptedMedia.byteLength > 0) {
           let base64 = '';
