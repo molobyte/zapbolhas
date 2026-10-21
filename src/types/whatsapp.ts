@@ -28,6 +28,7 @@ export interface QuotedMessage {
   author: string;
   authorColor?: string;
   text: string;
+  fromMe?: boolean;
 }
 
 export interface AudioData {

@@ -241,6 +241,16 @@ export const INITIAL_MOCK_MESSAGES: Record<string, FormattedMessage[]> = {
   ],
   'unidev-qam': [
     {
+      id: 'uq-0',
+      chatId: 'unidev-qam',
+      text: 'O que acharam das últimas mudanças na interface?',
+      timestamp: '13:30',
+      dateLabel: 'Hoje',
+      fromMe: true,
+      type: 'text',
+      ack: 'read',
+    },
+    {
       id: 'uq-1',
       chatId: 'unidev-qam',
       senderName: '~Hllink',
@@ -252,6 +262,22 @@ export const INITIAL_MOCK_MESSAGES: Record<string, FormattedMessage[]> = {
     },
     {
       id: 'uq-2',
+      chatId: 'unidev-qam',
+      senderName: '~Hllink',
+      text: 'Ficou muito bom! Respondi seu comentário com o print abaixo:',
+      timestamp: '13:45',
+      dateLabel: 'Hoje',
+      fromMe: false,
+      type: 'text',
+      quotedMessage: {
+        id: 'uq-0',
+        author: 'Você',
+        text: 'O que acharam das últimas mudanças na interface?',
+        fromMe: true,
+      },
+    },
+    {
+      id: 'uq-3',
       chatId: 'unidev-qam',
       senderName: '~Hllink',
       text: 'Screenshot do painel atualizado',
@@ -2009,11 +2035,22 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const isPinned = pinnedChatIds.includes(chat.id);
     const now = Date.now();
     const isGroup = Boolean(chat.isGroup);
+    const isReplyToMe = Boolean(
+      isGroup &&
+      !message.fromMe &&
+      message.quotedMessage &&
+      (
+        message.quotedMessage.fromMe ||
+        message.quotedMessage.author === 'Você' ||
+        message.quotedMessage.author === '@Você'
+      )
+    );
     const messageMentionsMe = Boolean(
       isGroup &&
       !message.fromMe &&
       (
         chat.hasMention ||
+        isReplyToMe ||
         (Array.isArray(message.mentions) && message.mentions.some((m) => m === 'Você' || m === '@Você')) ||
         (typeof message.text === 'string' && (message.text.includes('@Você') || message.text.includes('@você')))
       )

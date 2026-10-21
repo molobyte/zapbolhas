@@ -145,6 +145,7 @@ export interface FormattedChatMessage {
     author: string;
     authorColor?: string;
     text: string;
+    fromMe?: boolean;
   };
   reaction?: string;
   audioData?: {
@@ -1160,6 +1161,7 @@ export class WhatsAppService {
             const unreadMsgs = msgs.slice(-Math.min(unreadCount, 15));
             for (const um of unreadMsgs) {
               if (!um.id?.fromMe) {
+                // 1. Menção direta ao usuário (@Você)
                 const mentionedJids: any[] = Array.isArray(um.mentionedJidList) ? um.mentionedJidList : [];
                 for (const mj of mentionedJids) {
                   const sid = serializeId(mj);
@@ -1170,6 +1172,27 @@ export class WhatsAppService {
                   }
                 }
                 if (hasMention) break;
+
+                // 2. Resposta a uma mensagem do usuário (citação / quote)
+                const isQuotedFromMe = Boolean(
+                  um.quotedMsg?.id?.fromMe ||
+                  um.quotedMsg?.fromMe ||
+                  um._quotedMsgObj?.id?.fromMe ||
+                  um._quotedMsgObj?.fromMe
+                );
+                if (isQuotedFromMe) {
+                  hasMention = true;
+                  break;
+                }
+
+                if (um.quotedParticipant) {
+                  const qsid = serializeId(um.quotedParticipant);
+                  const qu = qsid ? qsid.split('@')[0] : (typeof um.quotedParticipant === 'string' ? um.quotedParticipant : um.quotedParticipant?.user || '');
+                  if (qu && (myIds.has(qu) || myIds.has(qsid))) {
+                    hasMention = true;
+                    break;
+                  }
+                }
               }
             }
           }
@@ -1852,10 +1875,19 @@ export class WhatsAppService {
                 '';
             }
 
-            let quoted: { id: string; author: string; text: string } | null = null;
+            let quoted: { id: string; author: string; text: string; fromMe?: boolean } | null = null;
             if (m.quotedMsg) {
               let qAuthor = 'Contato';
-              if (m.quotedMsg.id?.fromMe) {
+              let isQuotedFromMe = Boolean(m.quotedMsg.id?.fromMe || m.quotedMsg.fromMe);
+              if (!isQuotedFromMe && m.quotedParticipant) {
+                const qPartSid = serializeId(m.quotedParticipant);
+                const qPartUser = qPartSid ? qPartSid.split('@')[0] : (typeof m.quotedParticipant === 'string' ? m.quotedParticipant : m.quotedParticipant?.user || '');
+                if (qPartUser && (myIds.has(qPartUser) || myIds.has(qPartSid))) {
+                  isQuotedFromMe = true;
+                }
+              }
+
+              if (isQuotedFromMe) {
                 qAuthor = 'Você';
               } else {
                 const qInfo = resolveSender(m.quotedParticipant, m.quotedMsg.notifyName);
@@ -1876,6 +1908,7 @@ export class WhatsAppService {
                 id: String(m.quotedStanzaID || id),
                 author: qAuthor,
                 text: qFormatted.text,
+                fromMe: isQuotedFromMe,
               };
             }
 
