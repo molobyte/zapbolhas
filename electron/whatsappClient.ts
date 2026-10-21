@@ -2832,14 +2832,14 @@ export class WhatsAppService {
           return '';
         };
 
-        const loadIdbContactMap = async (): Promise<Map<string, any>> => {
+        const loadIdbContactData = async (): Promise<{ map: Map<string, any>; list: any[] }> => {
           return new Promise((resolve) => {
-            const timer = setTimeout(() => resolve(new Map()), 800);
+            const timer = setTimeout(() => resolve({ map: new Map(), list: [] }), 800);
             try {
               const req = window.indexedDB.open('model-storage');
               req.onerror = () => {
                 clearTimeout(timer);
-                resolve(new Map());
+                resolve({ map: new Map(), list: [] });
               };
               req.onsuccess = (e: any) => {
                 try {
@@ -2852,7 +2852,7 @@ export class WhatsAppService {
                   }
                   if (!storeName) {
                     clearTimeout(timer);
-                    resolve(new Map());
+                    resolve({ map: new Map(), list: [] });
                     return;
                   }
                   const tx = db.transaction(storeName, 'readonly');
@@ -2876,25 +2876,25 @@ export class WhatsAppService {
                         }
                       }
                     }
-                    resolve(map);
+                    resolve({ map, list });
                   };
                   getAllReq.onerror = () => {
                     clearTimeout(timer);
-                    resolve(new Map());
+                    resolve({ map: new Map(), list: [] });
                   };
                 } catch (_) {
                   clearTimeout(timer);
-                  resolve(new Map());
+                  resolve({ map: new Map(), list: [] });
                 }
               };
             } catch (_) {
               clearTimeout(timer);
-              resolve(new Map());
+              resolve({ map: new Map(), list: [] });
             }
           });
         };
 
-        const idbMap = await loadIdbContactMap();
+        const { map: idbMap, list: idbList } = await loadIdbContactData();
         const allModels = ContactCol?.getModelsArray ? ContactCol.getModelsArray() : [];
 
         const formatPhone = (num: string) => {
@@ -2921,10 +2921,8 @@ export class WhatsAppService {
         const q = normalize(queryStr);
         const resultMap = new Map<string, any>();
 
-        const candidateItems: any[] = [...allModels];
-        for (const [_, item] of idbMap) {
-          if (item && item.id) candidateItems.push(item);
-        }
+        // Combina instâncias do ContactCol e itens do IndexedDB
+        const candidateItems: any[] = [...allModels, ...idbList];
 
         for (const item of candidateItems) {
           if (!item) continue;
@@ -2952,24 +2950,59 @@ export class WhatsAppService {
           if (isGroup || isBroadcast || isNewsletter || isMe) continue;
 
           let targetChatId = rawId;
-          if (rawId.endsWith('@lid') && item.phoneNumber) {
-            const pn = serializeId(item.phoneNumber);
-            if (pn && pn.endsWith('@c.us')) {
-              targetChatId = pn;
+          let phoneDigits = '';
+
+          // Se for conta @lid, resolve o número de telefone real
+          if (rawId.endsWith('@lid')) {
+            if (item.phoneNumber) {
+              const pn = serializeId(item.phoneNumber);
+              if (pn) {
+                targetChatId = pn;
+                phoneDigits = pn.split('@')[0].replace(/\D/g, '');
+              }
+            }
+            if (!phoneDigits && lidUtils?.toPn && widFactory?.createWid) {
+              try {
+                const widLid = widFactory.createWid(rawId);
+                const pnWid = lidUtils.toPn(widLid);
+                const pnSid = serializeId(pnWid);
+                if (pnSid) {
+                  targetChatId = pnSid;
+                  phoneDigits = pnSid.split('@')[0].replace(/\D/g, '');
+                }
+              } catch (_) {}
+            }
+            if (!phoneDigits) {
+              const idbMatch = idbMap.get(rawId);
+              if (idbMatch?.phoneNumber) {
+                const pn = serializeId(idbMatch.phoneNumber);
+                if (pn) {
+                  targetChatId = pn;
+                  phoneDigits = pn.split('@')[0].replace(/\D/g, '');
+                }
+              }
             }
           }
-          if (rawId.endsWith('@lid') && lidUtils?.toPn && widFactory?.createWid) {
-            try {
-              const widLid = widFactory.createWid(rawId);
-              const pnWid = lidUtils.toPn(widLid);
-              const pnSid = serializeId(pnWid);
-              if (pnSid && pnSid.endsWith('@c.us')) {
-                targetChatId = pnSid;
-              }
-            } catch (_) {}
+
+          if (!phoneDigits) {
+            phoneDigits = targetChatId.split('@')[0].replace(/\D/g, '');
           }
 
-          if (resultMap.has(targetChatId)) continue;
+          // Padroniza targetChatId para formato canônico @c.us quando há dígitos
+          if (phoneDigits && phoneDigits.length >= 8) {
+            targetChatId = `${phoneDigits}@c.us`;
+          }
+
+          // Chave de deduplicação normalizada (unifica números com ou sem 9º dígito no Brasil)
+          let dedupKey = phoneDigits;
+          if (phoneDigits.startsWith('55') && (phoneDigits.length === 12 || phoneDigits.length === 13)) {
+            const ddd = phoneDigits.slice(2, 4);
+            const last8 = phoneDigits.slice(-8);
+            dedupKey = `55${ddd}${last8}`;
+          }
+          if (!dedupKey) {
+            dedupKey = targetChatId;
+          }
 
           let savedName = '';
           if (ContactGetters?.getName) {
@@ -3004,27 +3037,26 @@ export class WhatsAppService {
           const cleanSaved = (savedName || '').replace(/^~/, '').trim();
           const pushname = (item.pushname || item.notifyName || idbItem?.pushname || '').replace(/^~/, '').trim();
 
-          const rawPhone = targetChatId.split('@')[0];
-          const formattedPhone = formatPhone(rawPhone);
+          const formattedPhone = formatPhone(phoneDigits);
 
           const isSavedContact = Boolean(
             item.isMyContact ||
             item.isAddressBookContact ||
             idbItem?.isMyContact ||
             idbItem?.isAddressBookContact ||
-            (cleanSaved && cleanSaved !== rawPhone && cleanSaved !== formattedPhone && cleanSaved !== pushname)
+            (cleanSaved && cleanSaved !== phoneDigits && cleanSaved !== formattedPhone && cleanSaved !== pushname)
           );
 
           if (!q && !isSavedContact) continue;
 
-          const displayName = cleanSaved || pushname || formattedPhone || rawPhone;
+          const displayName = cleanSaved || pushname || formattedPhone || phoneDigits;
           if (!displayName) continue;
 
           if (q) {
             const normName = normalize(displayName);
             const normPush = normalize(pushname);
             const normPhone = normalize(formattedPhone);
-            const normDigits = rawPhone.replace(/\D/g, '');
+            const normDigits = phoneDigits;
             if (
               !normName.includes(q) &&
               !normPush.includes(q) &&
@@ -3035,7 +3067,24 @@ export class WhatsAppService {
             }
           }
 
-          resultMap.set(targetChatId, {
+          // Se já existe um registro para esse mesmo número, faz merge inteligente preservando o melhor modelo/avatar
+          if (resultMap.has(dedupKey)) {
+            const existing = resultMap.get(dedupKey);
+            const isFromContactCol = Boolean(item.attributes || typeof item.get === 'function');
+            if (isFromContactCol) {
+              existing.rawModel = item;
+            }
+            if (!existing.isMyContact && isSavedContact) {
+              existing.name = displayName;
+              existing.isMyContact = true;
+            }
+            if (targetChatId.endsWith('@c.us')) {
+              existing.id = targetChatId;
+            }
+            continue;
+          }
+
+          resultMap.set(dedupKey, {
             id: targetChatId,
             name: displayName,
             pushname,
@@ -3048,7 +3097,7 @@ export class WhatsAppService {
         const list = Array.from(resultMap.values());
 
         await Promise.all(
-          list.slice(0, 100).map(async (c: any) => {
+          list.slice(0, 150).map(async (c: any) => {
             try {
               const pic =
                 ProfilePicThumb?.get?.(c.id) ||
@@ -3057,7 +3106,7 @@ export class WhatsAppService {
               let url = pic?.eurl || pic?.img || pic?.imgFull || '';
               if (!url && ProfilePicThumb?.find) {
                 const found: any = await Promise.race([
-                  ProfilePicThumb.find(c.id),
+                  ProfilePicThumb.find(c.rawModel?.id || c.id),
                   new Promise((r) => setTimeout(() => r(null), 120)),
                 ]);
                 url = found?.eurl || found?.img || found?.imgFull || '';

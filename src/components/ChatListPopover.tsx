@@ -116,16 +116,33 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
     });
   }, [chats, chatSearch]);
 
-  // Filtragem de contatos na tela de Nova Conversa
+  // Filtragem e deduplicação defensiva de contatos na tela de Nova Conversa
   const filteredContacts = React.useMemo(() => {
-    if (!contactSearch.trim()) return savedContacts;
-    const q = contactSearch.toLowerCase().trim();
-    return savedContacts.filter((contact) => {
-      const matchName = contact.name?.toLowerCase().includes(q);
-      const matchPush = contact.pushname?.toLowerCase().includes(q);
-      const matchPhone = contact.phoneNumber?.toLowerCase().includes(q);
-      const matchDigits = contact.phoneNumber?.replace(/\D/g, '').includes(q.replace(/\D/g, ''));
-      return matchName || matchPush || matchPhone || matchDigits;
+    const list = contactSearch.trim()
+      ? savedContacts.filter((contact) => {
+          const q = contactSearch.toLowerCase().trim();
+          const matchName = contact.name?.toLowerCase().includes(q);
+          const matchPush = contact.pushname?.toLowerCase().includes(q);
+          const matchPhone = contact.phoneNumber?.toLowerCase().includes(q);
+          const matchDigits = contact.phoneNumber?.replace(/\D/g, '').includes(q.replace(/\D/g, ''));
+          return matchName || matchPush || matchPhone || matchDigits;
+        })
+      : savedContacts;
+
+    // Deduplicação defensiva por telefone/chave normalizada
+    const seen = new Set<string>();
+    return list.filter((c) => {
+      const rawDigits =
+        c.phoneNumber?.replace(/\D/g, '') ||
+        c.id.split('@')[0].replace(/\D/g, '') ||
+        c.id;
+      const key =
+        rawDigits.startsWith('55') && (rawDigits.length === 12 || rawDigits.length === 13)
+          ? `55${rawDigits.slice(2, 4)}${rawDigits.slice(-8)}`
+          : rawDigits;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
   }, [savedContacts, contactSearch]);
 
