@@ -278,7 +278,7 @@ export class WhatsAppService {
   private lastError: string | null = null;
   private avatarCache = new Map<string, string>();
   private mediaCache = new Map<string, string>();
-  private myAvatarUrl = '/avatars/me.png';
+  private myAvatarUrl = createInitialsAvatarDataUrl('Eu');
   private syncTimer: NodeJS.Timeout | null = null;
 
   constructor(mainWindow: BrowserWindow) {
@@ -3364,7 +3364,7 @@ export class WhatsAppService {
             latest.audioData = {
               duration: '0:05',
               durationSeconds: 5,
-              senderAvatar: '/avatars/me.png',
+              senderAvatar: this.myAvatarUrl,
               waveform: [],
             };
           }

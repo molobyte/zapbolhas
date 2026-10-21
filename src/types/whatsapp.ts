@@ -124,6 +124,9 @@ export type ActivePopover = 'none' | 'chat-list' | 'chat-window' | 'qr-code' | '
 
 export type SoundPreset = 'default' | 'crystal' | 'pop' | 'custom';
 
+export const DEFAULT_AVATAR =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%236A7B83'/%3E%3Cpath fill='%23CFD9DF' d='M20 20a6 6 0 1 0 0-12 6 6 0 0 0 0 12zm0 3c-5.5 0-16 2.8-16 8.3V35h32v-3.7c0-5.5-10.5-8.3-16-8.3z'/%3E%3C/svg%3E";
+
 export interface DisplayInfo {
   id: number;
   label: string;

@@ -9,7 +9,7 @@ import {
   Video as VideoIcon,
   Star,
 } from 'lucide-react';
-import { FormattedMessage, QuotedMessage } from '../types/whatsapp';
+import { FormattedMessage, QuotedMessage, DEFAULT_AVATAR } from '../types/whatsapp';
 import { useBubbleStore } from '../store/useBubbleStore';
 import { AudioPlayer } from './AudioPlayer';
 import { normalizeImageToStickerWebp } from './EmojiStickerPicker';
@@ -59,16 +59,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     isHdLoaded,
   } = message;
 
-  const { mode, updateMessageMedia, setViewingImage } = useBubbleStore();
+  const { updateMessageMedia, setViewingImage } = useBubbleStore();
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [autoPlayVideo, setAutoPlayVideo] = useState(false);
   const [savedSticker, setSavedSticker] = useState(false);
 
-  // Decripta automaticamente imagens, vídeos, figurinhas e áudios em alta resolução quando no modo WhatsApp Real
+  // Decripta automaticamente imagens, vídeos, figurinhas e áudios em alta resolução
   useEffect(() => {
     let cancelled = false;
     if (
-      mode === 'whatsapp' &&
       (type === 'image' || type === 'sticker' || type === 'audio' || type === 'video') &&
       !isHdLoaded &&
       window.electronAPI?.downloadMedia
@@ -90,7 +89,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [mode, type, isHdLoaded, message.id, message.chatId, updateMessageMedia]);
+  }, [type, isHdLoaded, message.id, message.chatId, updateMessageMedia]);
 
   const handlePlayOrExpandVideo = async (
     e: React.MouseEvent,
@@ -241,7 +240,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           <div className="w-[28px] h-[28px] mr-2 self-start mt-0.5 shrink-0">
             {isFirstInGroup && (
               <img
-                src={senderAvatar || '/avatars/danilo-neves.png'}
+                src={senderAvatar || DEFAULT_AVATAR}
                 alt={senderName || 'Membro'}
                 className="w-[28px] h-[28px] rounded-full object-cover border border-white/10 shadow-sm"
                 draggable={false}

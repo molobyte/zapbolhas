@@ -16,424 +16,6 @@ import {
 } from '../types/whatsapp';
 import { triggerIncomingNotificationSound } from '../utils/notificationSound';
 
-const WAVEFORM_INCOMING_046 = [
-  0.22, 0.35, 0.65, 0.28, 0.82, 0.45, 0.3, 0.55, 0.9, 0.48, 0.32, 0.72,
-  0.38, 0.25, 0.68, 0.95, 0.52, 0.78, 0.34, 0.62, 0.88, 0.42, 0.92, 0.56,
-  0.3, 0.64, 0.48, 0.75, 0.35, 0.84, 0.44, 0.28, 0.5, 0.22,
-];
-
-const WAVEFORM_OUTGOING_216 = [
-  0.25, 0.42, 0.3, 0.75, 0.52, 0.88, 0.4, 0.68, 0.94, 0.6, 0.82, 0.45,
-  0.76, 0.55, 0.35, 0.7, 0.92, 0.62, 0.48, 0.85, 0.58, 0.38, 0.78, 0.9,
-  0.5, 0.66, 0.84, 0.44, 0.72, 0.88, 0.54, 0.74, 0.38, 0.24,
-];
-
-export const INITIAL_MOCK_SAVED_CONTACTS: SavedContact[] = [
-  {
-    id: '5511987654321@c.us',
-    name: 'Danilo Neves Xbox',
-    pushname: 'Danilo',
-    phoneNumber: '+55 11 98765-4321',
-    avatar: '/avatars/danilo-neves.png',
-    isMyContact: true,
-  },
-  {
-    id: '5511912345678@c.us',
-    name: 'Gabriel Henrique',
-    pushname: 'Gabriel',
-    phoneNumber: '+55 11 91234-5678',
-    avatar: '',
-    isMyContact: true,
-  },
-  {
-    id: '5521998871122@c.us',
-    name: 'Matheus Developer',
-    pushname: 'Matheus',
-    phoneNumber: '+55 21 99887-1122',
-    avatar: '',
-    isMyContact: true,
-  },
-  {
-    id: '5531977663344@c.us',
-    name: 'Larissa Santos',
-    pushname: 'Lari',
-    phoneNumber: '+55 31 97766-3344',
-    avatar: '',
-    isMyContact: true,
-  },
-  {
-    id: '5541988224455@c.us',
-    name: 'Camila Tech',
-    pushname: 'Camila',
-    phoneNumber: '+55 41 98822-4455',
-    avatar: '',
-    isMyContact: true,
-  },
-  {
-    id: '5511965432109@c.us',
-    name: 'Dr. Roberto',
-    pushname: 'Roberto',
-    phoneNumber: '+55 11 96543-2109',
-    avatar: '',
-    isMyContact: true,
-  },
-  {
-    id: '5511954321098@c.us',
-    name: 'Rodrigo Marketing',
-    pushname: 'Rodrigo',
-    phoneNumber: '+55 11 95432-1098',
-    avatar: '',
-    isMyContact: true,
-  },
-];
-
-export const INITIAL_MOCK_CHATS: ChatSummary[] = [
-  {
-    id: 'cacadores-rewards',
-    parentName: 'Caçadores De Rewards',
-    name: '💚🎖️Caçadores de Rewards🎖️💚',
-    avatar: '/avatars/cacadores-rewards.png',
-    unreadCount: 0,
-    isGroup: true,
-    lastMessage: {
-      senderName: '~João Victor',
-      text: 'Figurinha',
-      mediaType: 'sticker',
-      timestamp: '13:58',
-    },
-  },
-  {
-    id: 'xbox-clube',
-    parentName: 'Comunidade Xbox 🇧🇷',
-    name: 'Xbox Clube',
-    avatar: '/avatars/xbox-clube.png',
-    unreadCount: 0,
-    isGroup: true,
-    lastMessage: {
-      senderName: '~Daniel',
-      text: 'fritar ovo',
-      mediaType: 'text',
-      timestamp: '13:54',
-    },
-  },
-  {
-    id: 'unidev-qam',
-    name: 'Unidev QAM',
-    avatar: '/avatars/unidev-qam.png',
-    unreadCount: 2,
-    isGroup: true,
-    hasMention: true,
-    lastMessage: {
-      senderName: '~Hllink',
-      text: 'Foto',
-      mediaType: 'photo',
-      timestamp: '13:51',
-    },
-  },
-  {
-    id: 'amigos-xbox',
-    name: 'Amigos XBOX',
-    avatar: '/avatars/amigos-xbox.png',
-    unreadCount: 0,
-    isGroup: true,
-    lastMessage: {
-      senderName: 'Júnior (Amigo do Danilo)',
-      text: 'Figurinha',
-      mediaType: 'sticker',
-      timestamp: '13:49',
-    },
-  },
-  {
-    id: 'danilo-neves',
-    name: 'Danilo Neves Xbox',
-    avatar: '/avatars/danilo-neves.png',
-    unreadCount: 4,
-    isGroup: false,
-    lastMessage: {
-      text: '2:16',
-      mediaType: 'audio',
-      fromMe: true,
-      ack: 'read',
-      duration: '2:16',
-      timestamp: '13:50',
-    },
-  },
-  {
-    id: 'conquista-bloqueada',
-    name: 'Canal ConquistaBloqueada',
-    avatar: '/avatars/conquista-bloqueada.png',
-    unreadCount: 0,
-    isGroup: true,
-    lastMessage: {
-      senderName: '~🎮😎EnrickDKastro🇧🇷💚',
-      text: 'Figurinha',
-      mediaType: 'sticker',
-      timestamp: '13:30',
-    },
-  },
-];
-
-export const INITIAL_MOCK_BUBBLES: BubbleItem[] = [
-  {
-    chatId: 'danilo-neves',
-    name: 'Danilo Neves Xbox',
-    avatar: '/avatars/danilo-neves.png',
-    unreadCount: 4,
-    lastActivity: 1000,
-  },
-  {
-    chatId: 'unidev-qam',
-    name: 'Unidev QAM',
-    avatar: '/avatars/unidev-qam.png',
-    unreadCount: 2,
-    isGroup: true,
-    hasMention: true,
-    lastActivity: 2000,
-  },
-];
-
-export const INITIAL_MOCK_MESSAGES: Record<string, FormattedMessage[]> = {
-  'danilo-neves': [
-    {
-      id: 'dn-0',
-      chatId: 'danilo-neves',
-      text: 'Bora jogar mais tarde?',
-      timestamp: '21:29',
-      fromMe: false,
-      type: 'text',
-    },
-    {
-      id: 'dn-1',
-      chatId: 'danilo-neves',
-      text: 'Top demais',
-      timestamp: '21:30',
-      fromMe: false,
-      type: 'text',
-    },
-    {
-      id: 'dn-2',
-      chatId: 'danilo-neves',
-      text: 'Kkk',
-      timestamp: '21:30',
-      fromMe: false,
-      type: 'text',
-    },
-    {
-      id: 'dn-3',
-      chatId: 'danilo-neves',
-      text: 'Hoje a tarde entrei',
-      timestamp: '21:30',
-      fromMe: false,
-      type: 'text',
-    },
-    {
-      id: 'dn-4',
-      chatId: 'danilo-neves',
-      text: 'Mais tu tava em outro jogo aí não quis atrapalhar kkk',
-      timestamp: '21:30',
-      fromMe: false,
-      type: 'text',
-    },
-    {
-      id: 'dn-5',
-      chatId: 'danilo-neves',
-      text: 'Ah eu deixei aberto por causa do rewards',
-      timestamp: '22:35',
-      fromMe: true,
-      type: 'text',
-      ack: 'read',
-      reaction: '😂',
-      quotedMessage: {
-        id: 'dn-4',
-        author: 'Danilo Neves Xbox',
-        authorColor: '#E59866',
-        text: 'Mais tu tava em outro jogo aí não quis atrapalhar kkk',
-      },
-    },
-    {
-      id: 'dn-6',
-      chatId: 'danilo-neves',
-      text: 'Ahuahaua',
-      timestamp: '22:35',
-      fromMe: true,
-      type: 'text',
-      ack: 'read',
-    },
-    {
-      id: 'dn-7',
-      chatId: 'danilo-neves',
-      text: 'Não tava on nao',
-      timestamp: '22:35',
-      fromMe: true,
-      type: 'text',
-      ack: 'read',
-    },
-    {
-      id: 'dn-8',
-      chatId: 'danilo-neves',
-      text: '',
-      timestamp: '13:45',
-      dateLabel: 'Hoje',
-      fromMe: false,
-      type: 'audio',
-      audioData: {
-        duration: '0:46',
-        durationSeconds: 46,
-        senderAvatar: '/avatars/danilo-neves.png',
-        waveform: WAVEFORM_INCOMING_046,
-      },
-    },
-    {
-      id: 'dn-9',
-      chatId: 'danilo-neves',
-      text: '',
-      timestamp: '13:50',
-      fromMe: true,
-      type: 'audio',
-      ack: 'read',
-      audioData: {
-        duration: '2:16',
-        durationSeconds: 136,
-        senderAvatar: '/avatars/me.png',
-        waveform: WAVEFORM_OUTGOING_216,
-      },
-    },
-  ],
-  'unidev-qam': [
-    {
-      id: 'uq-0',
-      chatId: 'unidev-qam',
-      text: 'O que acharam das últimas mudanças na interface?',
-      timestamp: '13:30',
-      dateLabel: 'Hoje',
-      fromMe: true,
-      type: 'text',
-      ack: 'read',
-    },
-    {
-      id: 'uq-1',
-      chatId: 'unidev-qam',
-      senderName: '~Hllink',
-      text: 'Pessoal, subi a build nova do projeto para testes!',
-      timestamp: '13:40',
-      dateLabel: 'Hoje',
-      fromMe: false,
-      type: 'text',
-    },
-    {
-      id: 'uq-2',
-      chatId: 'unidev-qam',
-      senderName: '~Hllink',
-      text: 'Ficou muito bom! Respondi seu comentário com o print abaixo:',
-      timestamp: '13:45',
-      dateLabel: 'Hoje',
-      fromMe: false,
-      type: 'text',
-      quotedMessage: {
-        id: 'uq-0',
-        author: 'Você',
-        text: 'O que acharam das últimas mudanças na interface?',
-        fromMe: true,
-      },
-    },
-    {
-      id: 'uq-3',
-      chatId: 'unidev-qam',
-      senderName: '~Hllink',
-      text: 'Screenshot do painel atualizado',
-      timestamp: '13:51',
-      fromMe: false,
-      type: 'image',
-      imageUrl: '/avatars/unidev-qam.png',
-      isHdLoaded: true,
-    },
-  ],
-  'cacadores-rewards': [
-    {
-      id: 'cr-1',
-      chatId: 'cacadores-rewards',
-      senderName: '~João Victor',
-      text: 'Alguém já fez a missão diária do Game Pass hoje?',
-      timestamp: '13:50',
-      dateLabel: 'Hoje',
-      fromMe: false,
-      type: 'text',
-    },
-    {
-      id: 'cr-2',
-      chatId: 'cacadores-rewards',
-      senderName: '~João Victor',
-      text: '🎯 Figurinha enviada',
-      timestamp: '13:58',
-      fromMe: false,
-      type: 'text',
-    },
-  ],
-  'xbox-clube': [
-    {
-      id: 'xc-1',
-      chatId: 'xbox-clube',
-      senderName: '~Daniel',
-      text: 'Meu Series X esquentou tanto no Call of Duty que dá pra',
-      timestamp: '13:53',
-      dateLabel: 'Hoje',
-      fromMe: false,
-      type: 'text',
-    },
-    {
-      id: 'xc-2',
-      chatId: 'xbox-clube',
-      senderName: '~Daniel',
-      text: 'fritar ovo',
-      timestamp: '13:54',
-      fromMe: false,
-      type: 'text',
-    },
-  ],
-  'amigos-xbox': [
-    {
-      id: 'ax-1',
-      chatId: 'amigos-xbox',
-      senderName: 'Júnior (Amigo do Danilo)',
-      text: 'Logo mais tem lobby fechado de Forza Horizon!',
-      timestamp: '13:48',
-      dateLabel: 'Hoje',
-      fromMe: false,
-      type: 'text',
-    },
-    {
-      id: 'ax-2',
-      chatId: 'amigos-xbox',
-      senderName: 'Júnior (Amigo do Danilo)',
-      text: '🏎️ Figurinha',
-      timestamp: '13:49',
-      fromMe: false,
-      type: 'text',
-    },
-  ],
-  'conquista-bloqueada': [
-    {
-      id: 'cb-1',
-      chatId: 'conquista-bloqueada',
-      senderName: '~🎮😎EnrickDKastro🇧🇷💚',
-      text: 'Platinei mais um 1000G hoje galera!',
-      timestamp: '13:29',
-      dateLabel: 'Hoje',
-      fromMe: false,
-      type: 'text',
-    },
-    {
-      id: 'cb-2',
-      chatId: 'conquista-bloqueada',
-      senderName: '~🎮😎EnrickDKastro🇧🇷💚',
-      text: '🏆 Figurinha',
-      timestamp: '13:30',
-      fromMe: false,
-      type: 'text',
-    },
-  ],
-};
-
 export interface UnreadBannerInfo {
   count: number;
   firstUnreadMsgId?: string;
@@ -458,33 +40,6 @@ function computeFirstUnreadMsgId(
   }
   return firstUnreadId || messages[Math.max(0, messages.length - unreadCount)]?.id;
 }
-
-export const MOCK_GROUP_PARTICIPANTS: Record<string, GroupParticipant[]> = {
-  'cacadores-rewards': [
-    { id: '5511990001111@c.us', name: 'João Victor', pushname: 'João', avatar: '/avatars/cacadores-rewards.png', isAdmin: true },
-    { id: '5511990002222@c.us', name: 'Danilo Neves', pushname: 'Danilo', avatar: '/avatars/danilo-neves.png' },
-    { id: '5511990003333@c.us', name: 'Hllink', avatar: '/avatars/unidev-qam.png' },
-    { id: '5511990004444@c.us', name: 'Enrick D Kastro', pushname: 'Enrick', avatar: '/avatars/conquista-bloqueada.png' },
-  ],
-  'xbox-clube': [
-    { id: '5511990005555@c.us', name: 'Daniel', pushname: 'Daniel', avatar: '/avatars/xbox-clube.png', isAdmin: true },
-    { id: '5511990002222@c.us', name: 'Danilo Neves', pushname: 'Danilo', avatar: '/avatars/danilo-neves.png' },
-    { id: '5511990006666@c.us', name: 'Júnior', avatar: '/avatars/amigos-xbox.png' },
-  ],
-  'unidev-qam': [
-    { id: '5511990003333@c.us', name: 'Hllink', avatar: '/avatars/unidev-qam.png', isAdmin: true },
-    { id: '5511990002222@c.us', name: 'Danilo Neves', avatar: '/avatars/danilo-neves.png' },
-    { id: '5511990001111@c.us', name: 'João Victor', avatar: '/avatars/cacadores-rewards.png' },
-  ],
-  'amigos-xbox': [
-    { id: '5511990006666@c.us', name: 'Júnior', avatar: '/avatars/amigos-xbox.png', isAdmin: true },
-    { id: '5511990002222@c.us', name: 'Danilo Neves', avatar: '/avatars/danilo-neves.png' },
-  ],
-  'conquista-bloqueada': [
-    { id: '5511990004444@c.us', name: 'EnrickDKastro', avatar: '/avatars/conquista-bloqueada.png', isAdmin: true },
-    { id: '5511990002222@c.us', name: 'Danilo Neves', avatar: '/avatars/danilo-neves.png' },
-  ],
-};
 
 interface SavedUserSettings {
   bubbleScale: number;
@@ -654,7 +209,6 @@ interface BubbleStoreState {
   qrDataUrl: string | null;
   waError: string | null;
   hasSyncedRealChats: boolean;
-  userForcedMock: boolean;
 
   // Configurações do Usuário
   bubbleScale: number;
@@ -677,12 +231,10 @@ interface BubbleStoreState {
   unreadBannerByChat: Record<string, UnreadBannerInfo | undefined>;
   replyingTo: QuotedMessage | null;
   viewingImage: ViewingImageState | null;
-  showDebugControls: boolean;
   savedContacts: SavedContact[];
   isLoadingContacts: boolean;
 
   // Actions
-  setMode: (mode: ConnectionMode) => void;
   setWaStatus: (status: WaConnectionState, error?: string | null) => void;
   setQrDataUrl: (qr: string | null) => void;
   setChats: (chats: ChatSummary[]) => void;
@@ -696,7 +248,6 @@ interface BubbleStoreState {
   updateMessageMedia: (chatId: string, msgId: string, mediaDataUrl: string) => void;
   setReplyingTo: (quote: QuotedMessage | null) => void;
   setViewingImage: (img: ViewingImageState | null) => void;
-  toggleDebugControls: () => void;
 
   // Settings Actions
   setBubbleScale: (scale: number) => void;
@@ -739,8 +290,6 @@ interface BubbleStoreState {
     waveform?: number[];
   }) => Promise<void>;
   receiveIncomingMessage: (payload: IncomingMessagePayload) => void;
-  simulateIncomingMessage: () => void;
-  resetDemoState: () => void;
 }
 
 function getCurrentTimeStr(): string {
@@ -754,7 +303,6 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   qrDataUrl: null,
   waError: null,
   hasSyncedRealChats: false,
-  userForcedMock: false,
 
   bubbleScale: initialSettings.bubbleScale,
   maxBubbles: initialSettings.maxBubbles,
@@ -771,53 +319,17 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   activePopover: 'none',
   activeChatId: null,
   messagesByChat: {},
-  groupParticipantsByChat: MOCK_GROUP_PARTICIPANTS,
-  initialGroupParticipantsByChat: MOCK_GROUP_PARTICIPANTS,
+  groupParticipantsByChat: {},
+  initialGroupParticipantsByChat: {},
   unreadBannerByChat: {},
   replyingTo: null,
   viewingImage: null,
-  showDebugControls: false,
-  savedContacts: INITIAL_MOCK_SAVED_CONTACTS,
+  savedContacts: [],
   isLoadingContacts: false,
 
-  setMode: (mode) => {
-    if (mode === 'whatsapp') {
-      set({
-        mode: 'whatsapp',
-        userForcedMock: false,
-        activeChatId: null,
-      });
-      if (window.electronAPI) {
-        window.electronAPI.initWhatsApp().then((res) => {
-          if (res.qrDataUrl) {
-            set({ qrDataUrl: res.qrDataUrl });
-          }
-          get().setWaStatus(res.status);
-        });
-      }
-    } else {
-      set({
-        mode: 'mock',
-        userForcedMock: true,
-        hasSyncedRealChats: false,
-        activePopover: 'none',
-        activeChatId: null,
-        chats: INITIAL_MOCK_CHATS,
-        activeBubbles: organizeBubbles(
-          INITIAL_MOCK_BUBBLES,
-          get().maxBubbles,
-          get().pinnedChatIds
-        ),
-        messagesByChat: INITIAL_MOCK_MESSAGES,
-      });
-    }
-  },
-
   setWaStatus: (waStatus, waError = null) => {
-    const { activePopover, userForcedMock } = get();
+    const { activePopover } = get();
     set({ waStatus, waError });
-
-    if (userForcedMock) return;
 
     if (waStatus === 'qr') {
       // Sem sessão conectada: abre automaticamente o leitor de QR Code
@@ -860,13 +372,12 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   applyRealWhatsAppChats: (realChats) => {
     const {
       hasSyncedRealChats,
-      userForcedMock,
       activeBubbles,
       activePopover,
       activeChatId,
     } = get();
 
-    if (userForcedMock || !realChats || realChats.length === 0) return;
+    if (!realChats || realChats.length === 0) return;
 
     if (!hasSyncedRealChats) {
       const { maxBubbles, pinnedChatIds } = get();
@@ -1016,11 +527,11 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     }),
 
   fetchGroupParticipants: async (chatId, query, limit = 10) => {
-    const { mode, initialGroupParticipantsByChat } = get();
+    const { initialGroupParticipantsByChat } = get();
     const cleanQuery = (query || '').trim();
     const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 50));
 
-    // Se a busca estiver vazia e já temos a lista inicial de 10 colaboradores para este grupo, restaura imediatamente
+    // Se a busca estiver vazia e já temos a lista inicial de participantes para este grupo, restaura imediatamente
     if (!cleanQuery && initialGroupParticipantsByChat[chatId]?.length > 0) {
       set((state) => ({
         groupParticipantsByChat: {
@@ -1031,7 +542,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       return initialGroupParticipantsByChat[chatId];
     }
 
-    if (mode === 'whatsapp' && window.electronAPI?.getGroupParticipants) {
+    if (window.electronAPI?.getGroupParticipants) {
       try {
         const participants = await window.electronAPI.getGroupParticipants(
           chatId,
@@ -1058,36 +569,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       }
     }
 
-    const mock = MOCK_GROUP_PARTICIPANTS[chatId] || [];
-    let filtered = mock;
-    if (cleanQuery) {
-      const normalize = (str: string) =>
-        (str || '')
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .toLowerCase();
-      const q = normalize(cleanQuery);
-      filtered = mock.filter((p) => {
-        const nName = normalize(p.name);
-        const nPush = normalize(p.pushname || '');
-        const nId = (p.id || '').toLowerCase();
-        return nName.includes(q) || nPush.includes(q) || nId.includes(q);
-      });
-    }
-    const limited = filtered.slice(0, safeLimit);
-    set((state) => ({
-      groupParticipantsByChat: {
-        ...state.groupParticipantsByChat,
-        [chatId]: limited,
-      },
-      ...(!cleanQuery && {
-        initialGroupParticipantsByChat: {
-          ...state.initialGroupParticipantsByChat,
-          [chatId]: limited,
-        },
-      }),
-    }));
-    return limited;
+    return [];
   },
 
   updateMessageMedia: (chatId, msgId, mediaDataUrl) =>
@@ -1140,9 +622,6 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   setReplyingTo: (replyingTo) => set({ replyingTo }),
 
   setViewingImage: (viewingImage) => set({ viewingImage }),
-
-  toggleDebugControls: () =>
-    set((state) => ({ showDebugControls: !state.showDebugControls })),
 
   setBubbleScale: (scale) => {
     const clamped = Math.min(1.45, Math.max(0.65, Number(scale.toFixed(2))));
@@ -1433,7 +912,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   // 5.3 Fluxo de Criação de Bolha pela Lista
   selectChatFromList: (chatId) => {
-    const { chats, activeBubbles, mode, messagesByChat, unreadBannerByChat } = get();
+    const { chats, activeBubbles, messagesByChat, unreadBannerByChat } = get();
     const targetChat = chats.find((c) => c.id === chatId);
     if (!targetChat) return;
 
@@ -1502,7 +981,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       get().fetchGroupParticipants(chatId);
     }
 
-    if (mode === 'whatsapp' && window.electronAPI) {
+    if (window.electronAPI) {
       const desiredLimit = Math.min(500, Math.max(100, unreadAtOpen + 20));
       window.electronAPI.getMessages(chatId, desiredLimit).then((msgs) => {
         if (msgs) {
@@ -1514,8 +993,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   },
 
   fetchSavedContacts: async (query?: string) => {
-    const { mode } = get();
-    if (mode === 'whatsapp' && window.electronAPI?.getSavedContacts) {
+    if (window.electronAPI?.getSavedContacts) {
       set({ isLoadingContacts: true });
       try {
         const contacts = await window.electronAPI.getSavedContacts(query);
@@ -1525,17 +1003,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         set({ isLoadingContacts: false });
       }
     } else {
-      set({ isLoadingContacts: true });
-      const q = (query || '').toLowerCase().trim();
-      const filtered = q
-        ? INITIAL_MOCK_SAVED_CONTACTS.filter(
-            (c) =>
-              c.name.toLowerCase().includes(q) ||
-              c.phoneNumber?.toLowerCase().includes(q) ||
-              c.pushname?.toLowerCase().includes(q)
-          )
-        : INITIAL_MOCK_SAVED_CONTACTS;
-      set({ savedContacts: filtered, isLoadingContacts: false });
+      set({ savedContacts: [], isLoadingContacts: false });
     }
   },
 
@@ -1574,7 +1042,6 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       activeChatId,
       activeBubbles,
       chats,
-      mode,
       messagesByChat,
       unreadBannerByChat,
       maxBubbles,
@@ -1647,7 +1114,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       get().fetchGroupParticipants(chatId);
     }
 
-    if (mode === 'whatsapp' && window.electronAPI) {
+    if (window.electronAPI) {
       const desiredLimit = Math.min(500, Math.max(100, unreadAtOpen + 20));
       window.electronAPI.getMessages(chatId, desiredLimit).then((msgs) => {
         if (msgs) {
@@ -1740,7 +1207,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   // Envio de mensagem de texto
   sendMessage: async (text, mentions, textForWhatsApp, mentionedDisplayNames) => {
     const trimmed = text.trim();
-    const { activeChatId, replyingTo, mode, messagesByChat, chats, unreadBannerByChat } =
+    const { activeChatId, replyingTo, messagesByChat, chats, unreadBannerByChat } =
       get();
     if (!trimmed || !activeChatId) return;
 
@@ -1792,7 +1259,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       replyingTo: null,
     });
 
-    if (mode === 'whatsapp' && window.electronAPI) {
+    if (window.electronAPI) {
       await window.electronAPI.sendMessage({
         chatId: activeChatId,
         text: (textForWhatsApp && textForWhatsApp.trim()) || trimmed,
@@ -1811,7 +1278,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   // Envio de figurinha (sticker)
   sendSticker: async (stickerDataUrl) => {
-    const { activeChatId, replyingTo, mode, messagesByChat, chats, unreadBannerByChat } =
+    const { activeChatId, replyingTo, messagesByChat, chats, unreadBannerByChat } =
       get();
     if (!stickerDataUrl || !activeChatId) return;
 
@@ -1864,7 +1331,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       replyingTo: null,
     });
 
-    if (mode === 'whatsapp' && window.electronAPI?.sendSticker) {
+    if (window.electronAPI?.sendSticker) {
       const sentMsg = await window.electronAPI.sendSticker({
         chatId: activeChatId,
         stickerDataUrl,
@@ -1891,7 +1358,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   // Envio de mídia (foto / vídeo / anexo)
   sendMedia: async (payload) => {
-    const { activeChatId, replyingTo, mode, messagesByChat, chats, unreadBannerByChat } =
+    const { activeChatId, replyingTo, messagesByChat, chats, unreadBannerByChat } =
       get();
     if (!payload.mediaDataUrl || !activeChatId) return;
 
@@ -1946,7 +1413,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       replyingTo: null,
     });
 
-    if (mode === 'whatsapp' && window.electronAPI?.sendMedia) {
+    if (window.electronAPI?.sendMedia) {
       try {
         const sentMsg = await window.electronAPI.sendMedia({
           chatId: activeChatId,
@@ -2019,7 +1486,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     durationSeconds: number;
     waveform?: number[];
   }) => {
-    const { activeChatId, messagesByChat, chats, mode } = get();
+    const { activeChatId, messagesByChat, chats } = get();
     if (!activeChatId) return;
 
     const mins = Math.floor(durationSeconds / 60);
@@ -2040,8 +1507,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         duration: durationStr,
         durationSeconds,
         audioUrl: audioDataUrl,
-        senderAvatar: '/avatars/me.png',
-        waveform: waveform && waveform.length > 0 ? waveform : WAVEFORM_OUTGOING_216,
+        senderAvatar: '',
+        waveform: waveform && waveform.length > 0 ? waveform : [],
       },
     };
 
@@ -2076,7 +1543,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       chats: updatedChats,
     });
 
-    if (mode === 'whatsapp' && window.electronAPI?.sendMedia) {
+    if (window.electronAPI?.sendMedia) {
       try {
         const realMsg = await window.electronAPI.sendMedia({
           chatId: activeChatId,
@@ -2097,8 +1564,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
                         audioData: {
                           duration: durationStr,
                           durationSeconds,
-                          senderAvatar: realMsg.audioData?.senderAvatar || '/avatars/me.png',
-                          waveform: waveform || realMsg.audioData?.waveform || WAVEFORM_OUTGOING_216,
+                          senderAvatar: realMsg.audioData?.senderAvatar || '',
+                          waveform: waveform || realMsg.audioData?.waveform || [],
                           audioUrl: realMsg.audioData?.audioUrl || audioDataUrl,
                         },
                       }
@@ -2300,71 +1767,6 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         ...messagesByChat,
         [chat.id]: updatedMessages,
       },
-    });
-  },
-
-  simulateIncomingMessage: () => {
-    const { chats, activeBubbles } = get();
-    const sampleMessages = [
-      'Bora entrar na party do Xbox agora? 🎮',
-      'Acabei de resgatar 500 pontos no Rewards!',
-      'Salve! Viu a promoção nova na Xbox Store?',
-      'Entra aí no call, estamos esperando!',
-    ];
-    const randomText =
-      sampleMessages[Math.floor(Math.random() * sampleMessages.length)];
-    const timestamp = getCurrentTimeStr();
-
-    const nonBubbleChat = chats.find(
-      (c) => !activeBubbles.some((b) => b.chatId === c.id)
-    );
-    const targetChat =
-      nonBubbleChat && Math.random() > 0.45
-        ? nonBubbleChat
-        : chats[Math.floor(Math.random() * chats.length)];
-
-    if (!targetChat) return;
-
-    const simulatedMessage: FormattedMessage = {
-      id: `sim-${Date.now()}`,
-      chatId: targetChat.id,
-      senderName: targetChat.isGroup ? '~GamerXbox' : targetChat.name,
-      text: randomText,
-      timestamp,
-      fromMe: false,
-      type: 'text',
-    };
-
-    get().receiveIncomingMessage({
-      chat: {
-        ...targetChat,
-        isMuted: false,
-        lastMessage: {
-          senderName: targetChat.isGroup ? '~GamerXbox' : undefined,
-          text: randomText,
-          mediaType: 'text',
-          timestamp,
-        },
-      },
-      message: simulatedMessage,
-    });
-  },
-
-  resetDemoState: () => {
-    set({
-      mode: 'mock',
-      userForcedMock: true,
-      hasSyncedRealChats: false,
-      chats: INITIAL_MOCK_CHATS,
-      activeBubbles: organizeBubbles(
-        INITIAL_MOCK_BUBBLES,
-        get().maxBubbles,
-        get().pinnedChatIds
-      ),
-      activePopover: 'none',
-      activeChatId: null,
-      messagesByChat: INITIAL_MOCK_MESSAGES,
-      replyingTo: null,
     });
   },
 }));

@@ -100,9 +100,7 @@ export const App: React.FC = () => {
     });
 
     const unsubMsg = api.onMessageReceived((payload) => {
-      if (!useBubbleStore.getState().userForcedMock) {
-        receiveIncomingMessage(payload);
-      }
+      receiveIncomingMessage(payload);
     });
 
     const unsubStatus = api.onStatusChange(({ status, error }) => {

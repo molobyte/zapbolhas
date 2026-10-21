@@ -10,7 +10,6 @@ let waService: WhatsAppService | null = null;
 let selectedDisplayId: number | null = null;
 
 const MAX_OVERLAY_WIDTH = 1200;
-const OVERLAY_HEIGHT = 740;
 
 interface SavedDisplayPref {
   displayId: number;

@@ -15,7 +15,7 @@ import {
   Pause,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
-import { GroupParticipant, CHAT_SIZE_CONFIG, ChatBubbleSize, ChatSummary } from '../types/whatsapp';
+import { GroupParticipant, CHAT_SIZE_CONFIG, ChatBubbleSize, ChatSummary, DEFAULT_AVATAR } from '../types/whatsapp';
 import { MessageBubble } from './MessageBubble';
 import { EmojiStickerPicker, PickerTab } from './EmojiStickerPicker';
 import { FormattedText } from './FormattedText';
@@ -1269,7 +1269,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <img
-                          src={p.avatar || '/avatars/me.png'}
+                          src={p.avatar || DEFAULT_AVATAR}
                           alt={p.name}
                           className="w-6 h-6 rounded-full object-cover shrink-0 border border-white/10"
                         />
