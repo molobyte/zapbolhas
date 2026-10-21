@@ -62,6 +62,7 @@ export const INITIAL_MOCK_CHATS: ChatSummary[] = [
     avatar: '/avatars/unidev-qam.png',
     unreadCount: 2,
     isGroup: true,
+    hasMention: true,
     lastMessage: {
       senderName: '~Hllink',
       text: 'Foto',
@@ -125,6 +126,8 @@ export const INITIAL_MOCK_BUBBLES: BubbleItem[] = [
     name: 'Unidev QAM',
     avatar: '/avatars/unidev-qam.png',
     unreadCount: 2,
+    isGroup: true,
+    hasMention: true,
     lastActivity: 2000,
   },
 ];
@@ -787,6 +790,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           avatar: c.avatar,
           unreadCount: c.unreadCount,
           isPinned: pinnedChatIds.includes(c.id),
+          isGroup: c.isGroup,
+          hasMention: Boolean(c.hasMention),
           lastActivity: Date.now() - (maxBubbles - idx) * 1000,
         }));
 
@@ -820,6 +825,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         avatar: fresh.avatar,
         unreadCount: isCurrentlyOpen ? 0 : fresh.unreadCount,
         isPinned: b.isPinned ?? pinnedChatIds.includes(b.chatId),
+        isGroup: fresh.isGroup ?? b.isGroup,
+        hasMention: isCurrentlyOpen ? false : Boolean(fresh.hasMention ?? b.hasMention),
       };
     });
 
@@ -836,6 +843,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           avatar: c.avatar,
           unreadCount: c.unreadCount,
           isPinned: pinnedChatIds.includes(c.id),
+          isGroup: c.isGroup,
+          hasMention: Boolean(c.hasMention),
           lastActivity: Date.now(),
         };
         if (isAnyChatOpen) {
@@ -853,9 +862,9 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const normalizedChats = realChats.map((c) => {
       const isCurrentlyOpen =
         activePopover === 'chat-window' && activeChatId === c.id;
-      if (isCurrentlyOpen && c.unreadCount > 0) {
+      if (isCurrentlyOpen && (c.unreadCount > 0 || c.hasMention)) {
         window.electronAPI?.markAsRead(c.id);
-        return { ...c, unreadCount: 0 };
+        return { ...c, unreadCount: 0, hasMention: false };
       }
       return c;
     });
@@ -1361,6 +1370,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         avatar: targetChat.avatar,
         unreadCount: 0,
         isPinned,
+        isGroup: targetChat.isGroup,
+        hasMention: false,
         lastActivity: now,
       };
       updatedBubbles = organizeBubbles(
@@ -1370,12 +1381,12 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       );
     } else {
       updatedBubbles = activeBubbles.map((b) =>
-        b.chatId === chatId ? { ...b, unreadCount: 0 } : b
+        b.chatId === chatId ? { ...b, unreadCount: 0, hasMention: false } : b
       );
     }
 
     const updatedChats = chats.map((c) =>
-      c.id === chatId ? { ...c, unreadCount: 0 } : c
+      c.id === chatId ? { ...c, unreadCount: 0, hasMention: false } : c
     );
 
     set({
@@ -1463,10 +1474,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         : undefined;
 
     const updatedBubbles = baseBubbles.map((b) =>
-      b.chatId === chatId ? { ...b, unreadCount: 0 } : b
+      b.chatId === chatId ? { ...b, unreadCount: 0, hasMention: false } : b
     );
     const updatedChats = chats.map((c) =>
-      c.id === chatId ? { ...c, unreadCount: 0 } : c
+      c.id === chatId ? { ...c, unreadCount: 0, hasMention: false } : c
     );
 
     set({
@@ -1993,6 +2004,16 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const bubbleExists = bubbleIndex >= 0;
     const isPinned = pinnedChatIds.includes(chat.id);
     const now = Date.now();
+    const isGroup = Boolean(chat.isGroup);
+    const messageMentionsMe = Boolean(
+      isGroup &&
+      !message.fromMe &&
+      (
+        chat.hasMention ||
+        (Array.isArray(message.mentions) && message.mentions.some((m) => m === 'Você' || m === '@Você')) ||
+        (typeof message.text === 'string' && (message.text.includes('@Você') || message.text.includes('@você')))
+      )
+    );
     let updatedBubbles: BubbleItem[];
 
     if (isAnyChatOpen) {
@@ -2006,6 +2027,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           avatar: chat.avatar,
           unreadCount: isThisChatCurrentlyOpen ? 0 : currentBubble.unreadCount + 1,
           isPinned: currentBubble.isPinned ?? isPinned,
+          isGroup,
+          hasMention: isThisChatCurrentlyOpen
+            ? false
+            : (messageMentionsMe ? true : Boolean(currentBubble.hasMention || chat.hasMention)),
           lastActivity: now,
         };
         updatedBubbles = activeBubbles.map((b) =>
@@ -2020,6 +2045,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           avatar: chat.avatar,
           unreadCount: isThisChatCurrentlyOpen ? 0 : 1,
           isPinned,
+          isGroup,
+          hasMention: isThisChatCurrentlyOpen
+            ? false
+            : Boolean(messageMentionsMe || chat.hasMention),
           lastActivity: now,
         };
         updatedBubbles = [newBubble, ...activeBubbles];
@@ -2035,6 +2064,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           avatar: chat.avatar,
           unreadCount: currentBubble.unreadCount + 1,
           isPinned: currentBubble.isPinned ?? isPinned,
+          isGroup,
+          hasMention: messageMentionsMe
+            ? true
+            : Boolean(currentBubble.hasMention || chat.hasMention),
           lastActivity: now,
         };
         const withoutCurrent = activeBubbles.filter((b) => b.chatId !== chat.id);
@@ -2050,6 +2083,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           avatar: chat.avatar,
           unreadCount: 1,
           isPinned,
+          isGroup,
+          hasMention: Boolean(messageMentionsMe || chat.hasMention),
           lastActivity: now,
         };
         updatedBubbles = organizeBubbles(
@@ -2071,10 +2106,22 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
                 ...c,
                 lastMessage: chat.lastMessage,
                 unreadCount: isThisChatCurrentlyOpen ? 0 : (c.unreadCount || 0) + 1,
+                hasMention: isThisChatCurrentlyOpen
+                  ? false
+                  : (messageMentionsMe ? true : Boolean(c.hasMention || chat.hasMention)),
               }
             : c
         )
-      : [chat, ...chats];
+      : [
+          {
+            ...chat,
+            unreadCount: isThisChatCurrentlyOpen ? 0 : (chat.unreadCount || 1),
+            hasMention: isThisChatCurrentlyOpen
+              ? false
+              : (messageMentionsMe ? true : Boolean(chat.hasMention)),
+          },
+          ...chats,
+        ];
 
     if (isThisChatCurrentlyOpen && !message.fromMe) {
       window.electronAPI?.markAsRead(chat.id);

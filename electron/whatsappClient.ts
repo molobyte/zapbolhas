@@ -112,6 +112,7 @@ export interface FormattedChatSummary {
   unreadCount: number;
   isGroup: boolean;
   isMuted?: boolean;
+  hasMention?: boolean;
   lastMessage: {
     text: string;
     senderName?: string;
@@ -1152,6 +1153,27 @@ export class WhatsAppService {
           const isMuted = Boolean(c.mute?.expiration && c.mute.expiration !== 0);
           const unreadCount = Number(c.unreadCount || 0);
 
+          const unreadMentionCount = Number(c.unreadMentionCount || 0);
+          let hasMention = Boolean(isGroup && (c.hasUnreadMention || unreadMentionCount > 0));
+
+          if (!hasMention && isGroup && unreadCount > 0) {
+            const unreadMsgs = msgs.slice(-Math.min(unreadCount, 15));
+            for (const um of unreadMsgs) {
+              if (!um.id?.fromMe) {
+                const mentionedJids: any[] = Array.isArray(um.mentionedJidList) ? um.mentionedJidList : [];
+                for (const mj of mentionedJids) {
+                  const sid = serializeId(mj);
+                  const u = sid ? sid.split('@')[0] : (typeof mj === 'string' ? mj : mj?.user || '');
+                  if (u && (myIds.has(u) || myIds.has(sid))) {
+                    hasMention = true;
+                    break;
+                  }
+                }
+                if (hasMention) break;
+              }
+            }
+          }
+
           let senderName = '';
           if (lastMsg && !lastMsg.id?.fromMe && isGroup) {
             const info = resolveSender(lastMsg.author, lastMsg.notifyName);
@@ -1172,6 +1194,7 @@ export class WhatsAppService {
             unreadCount,
             isGroup,
             isMuted,
+            hasMention,
             timestamp: Number(lastMsg?.t || c.t || 0),
             lastMsgType: rawType,
             lastMsgBody: formattedLastMsg.text,
@@ -1230,6 +1253,7 @@ export class WhatsAppService {
           unreadCount: raw.unreadCount,
           isGroup: raw.isGroup,
           isMuted: raw.isMuted,
+          hasMention: Boolean(raw.hasMention),
           lastMessage: {
             text,
             senderName: raw.senderName || undefined,

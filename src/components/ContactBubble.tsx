@@ -102,6 +102,23 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
           </motion.span>
         )}
       </AnimatePresence>
+
+      {/* Bolinha de Notificação de Menção no Canto Inferior Esquerdo (@ em #32CAED) */}
+      <AnimatePresence>
+        {bubble.hasMention && (
+          <motion.span
+            key="mention-badge"
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 520, damping: 20 }}
+            title="Você foi marcado neste grupo"
+            className="pointer-events-none absolute -bottom-[3px] -left-[2px] w-[19px] h-[19px] rounded-full bg-[#32CAED] text-[#111B21] text-[11.5px] font-black leading-none flex items-center justify-center shadow-[0_2px_6px_rgba(0,0,0,0.55)] border border-[#111B21]/60 z-10 select-none"
+          >
+            @
+          </motion.span>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

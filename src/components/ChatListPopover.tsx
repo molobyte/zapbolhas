@@ -213,12 +213,22 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
                 <div className="mt-[1px]">{renderLastMessagePreview(chat)}</div>
               </div>
 
-              {/* Indicador numérico de mensagens não lidas à direita */}
-              {chat.unreadCount > 0 && (
-                <div className="shrink-0 pl-1 flex items-center justify-end">
-                  <span className="min-w-[20px] h-[20px] px-[6px] rounded-full bg-[#25D366] text-[#111B21] text-[11.5px] font-bold leading-none flex items-center justify-center shadow-sm">
-                    {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
-                  </span>
+              {/* Indicador de menção (@) e mensagens não lidas à direita */}
+              {(chat.unreadCount > 0 || chat.hasMention) && (
+                <div className="shrink-0 pl-1 flex items-center justify-end gap-1.5">
+                  {chat.isGroup && chat.hasMention && (
+                    <span
+                      title="Você foi marcado neste grupo"
+                      className="w-[18px] h-[18px] rounded-full bg-[#32CAED] text-[#111B21] text-[11px] font-black leading-none flex items-center justify-center shadow-sm select-none"
+                    >
+                      @
+                    </span>
+                  )}
+                  {chat.unreadCount > 0 && (
+                    <span className="min-w-[20px] h-[20px] px-[6px] rounded-full bg-[#25D366] text-[#111B21] text-[11.5px] font-bold leading-none flex items-center justify-center shadow-sm">
+                      {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
+                    </span>
+                  )}
                 </div>
               )}
             </button>

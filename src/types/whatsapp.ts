@@ -19,6 +19,7 @@ export interface ChatSummary {
   unreadCount: number;
   isGroup: boolean;
   isMuted?: boolean;
+  hasMention?: boolean;
   lastMessage: LastMessagePreview;
 }
 
@@ -95,6 +96,8 @@ export interface BubbleItem {
   unreadCount: number;
   isPinned?: boolean;
   lastActivity?: number;
+  isGroup?: boolean;
+  hasMention?: boolean;
 }
 
 export interface ViewingImageState {
