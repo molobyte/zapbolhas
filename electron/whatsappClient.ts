@@ -781,29 +781,33 @@ export class WhatsAppService {
             } catch (_) {}
           }
 
+          const fromMe = Boolean(m.id?.fromMe || m.fromMe);
           const rawType = String(getProp(m, 'type') || '');
           const directPath = getProp(m, 'directPath') || (mediaData && getProp(mediaData, 'directPath'));
+          const renderableUrl = getProp(mediaData, 'renderableUrl');
           const body = String(getProp(m, 'body') || '').trim();
           const caption = String(getProp(m, 'caption') || '').trim();
 
           // 2. Se o body for uma mediaKey pura em base64 (como 'MLFJqi4g1bZ/UbmrH/S/PBh146yzj/jPL+RvuwYUwsUiqLiH/2Q==')
           // Nenhum texto humano real é uma chave base64 pura de 40 a 70 caracteres terminada em '='
-          const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body) && body.endsWith('=');
+          const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body) && body.endsWith('=') && !/\s/.test(body);
           if (isMediaKey) {
             return true;
           }
 
-          // 3. Se for do tipo 'image', 'video' ou 'view_once' e não tiver directPath
-          // Na Web, toda imagem/vídeo normal possui directPath. A ausência de directPath indica visualização única protegida.
-          if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
+          // 3. MENSAGENS ENVIADAS (fromMe) pelo nosso app NUNCA são de visualização única.
+          // Para mensagens RECEBIDAS (!fromMe) do tipo image/video/view_once sem directPath e sem renderableUrl:
+          if (!fromMe && (rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath && !renderableUrl) {
             return true;
           }
 
-          // 4. Se for qualquer mensagem sem texto, sem legenda e sem directPath (exceto reações, áudio, figurinhas normais e revogadas)
+          // 4. Se for mensagem recebida sem texto, sem legenda, sem directPath e sem renderableUrl
           if (
+            !fromMe &&
             !body &&
             !caption &&
             !directPath &&
+            !renderableUrl &&
             rawType !== 'ptt' &&
             rawType !== 'audio' &&
             rawType !== 'sticker' &&
@@ -1597,29 +1601,33 @@ export class WhatsAppService {
               } catch (_) {}
             }
 
+            const fromMe = Boolean(m.id?.fromMe || m.fromMe);
             const rawType = String(getProp(m, 'type') || '');
             const directPath = getProp(m, 'directPath') || (mediaData && getProp(mediaData, 'directPath'));
+            const renderableUrl = getProp(mediaData, 'renderableUrl');
             const body = String(getProp(m, 'body') || '').trim();
             const caption = String(getProp(m, 'caption') || '').trim();
 
             // 2. Se o body for uma mediaKey pura em base64 (como 'MLFJqi4g1bZ/UbmrH/S/PBh146yzj/jPL+RvuwYUwsUiqLiH/2Q==')
             // Nenhum texto humano real é uma chave base64 pura de 40 a 70 caracteres terminada em '='
-            const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body) && body.endsWith('=');
+            const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body) && body.endsWith('=') && !/\s/.test(body);
             if (isMediaKey) {
               return true;
             }
 
-            // 3. Se for do tipo 'image', 'video' ou 'view_once' e não tiver directPath
-            // Na Web, toda imagem/vídeo normal possui directPath. A ausência de directPath indica visualização única protegida.
-            if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
+            // 3. MENSAGENS ENVIADAS (fromMe) pelo nosso app NUNCA são de visualização única.
+            // Para mensagens RECEBIDAS (!fromMe) do tipo image/video/view_once sem directPath e sem renderableUrl:
+            if (!fromMe && (rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath && !renderableUrl) {
               return true;
             }
 
-            // 4. Se for qualquer mensagem sem texto, sem legenda e sem directPath (exceto reações, áudio, figurinhas normais e revogadas)
+            // 4. Se for mensagem recebida sem texto, sem legenda, sem directPath e sem renderableUrl
             if (
+              !fromMe &&
               !body &&
               !caption &&
               !directPath &&
+              !renderableUrl &&
               rawType !== 'ptt' &&
               rawType !== 'audio' &&
               rawType !== 'sticker' &&
@@ -2272,7 +2280,7 @@ export class WhatsAppService {
               };
             }
 
-            // Extrai preview imediato de m.body ou m.mediaData.preview (exceto para visualização única)
+            // Extrai preview imediato de m.mediaData.preview ou m.preview (exceto para visualização única)
             let thumbBase64 = '';
             if (
               !isViewOnce &&
@@ -2282,18 +2290,43 @@ export class WhatsAppService {
                 rawType === 'gif' ||
                 rawType === 'sticker')
             ) {
-              const rawPreview =
-                (typeof getProp(m, 'body') === 'string' && (getProp(m, 'body') as string).length > 20 ? (getProp(m, 'body') as string) : '') ||
-                (typeof getProp(m?.mediaData, 'preview')?._b64 === 'string' ? getProp(m?.mediaData, 'preview')._b64 : '') ||
-                (typeof getProp(m?.mediaData, 'preview') === 'string' ? getProp(m?.mediaData, 'preview') : '') ||
-                (typeof getProp(m, 'preview') === 'string' ? getProp(m, 'preview') : '');
+              const mData = getProp(m, 'mediaData') || m.mediaData || m.__x_mediaData;
+              const previewObj = getProp(mData, 'preview');
+              let candidate = '';
+              if (previewObj) {
+                if (typeof previewObj === 'string') {
+                  candidate = previewObj;
+                } else if (typeof previewObj._b64 === 'string') {
+                  candidate = previewObj._b64;
+                }
+              }
 
-              if (rawPreview) {
-                if (rawPreview.startsWith('data:')) {
-                  thumbBase64 = rawPreview;
-                } else {
+              if (!candidate) {
+                const p = getProp(m, 'preview');
+                if (typeof p === 'string') candidate = p;
+              }
+
+              // Só aceita de m.body se for realmente uma string base64 de imagem (começando com /9j/ ou data:image/), NUNCA texto de legenda com espaços!
+              if (!candidate) {
+                const b = String(getProp(m, 'body') || '').trim();
+                if (
+                  b.length >= 50 &&
+                  !/\s/.test(b) &&
+                  (b.startsWith('/9j/') ||
+                    b.startsWith('data:image/') ||
+                    b.startsWith('iVBORw0KGgo') ||
+                    b.startsWith('UklGR'))
+                ) {
+                  candidate = b;
+                }
+              }
+
+              if (candidate) {
+                if (candidate.startsWith('data:image/') || candidate.startsWith('data:video/')) {
+                  thumbBase64 = candidate;
+                } else if (!/\s/.test(candidate) && /^[A-Za-z0-9+/=]+$/.test(candidate)) {
                   const mime = rawType === 'sticker' ? 'image/webp' : 'image/jpeg';
-                  thumbBase64 = `data:${mime};base64,${rawPreview}`;
+                  thumbBase64 = `data:${mime};base64,${candidate}`;
                 }
               }
             }
@@ -2605,29 +2638,33 @@ export class WhatsAppService {
             } catch (_) {}
           }
 
+          const fromMe = Boolean(m.id?.fromMe || m.fromMe);
           const rawType = String(getProp(m, 'type') || '');
           const directPath = getProp(m, 'directPath') || (mediaData && getProp(mediaData, 'directPath'));
+          const renderableUrl = getProp(mediaData, 'renderableUrl');
           const body = String(getProp(m, 'body') || '').trim();
           const caption = String(getProp(m, 'caption') || '').trim();
 
           // 2. Se o body for uma mediaKey pura em base64 (como 'MLFJqi4g1bZ/UbmrH/S/PBh146yzj/jPL+RvuwYUwsUiqLiH/2Q==')
           // Nenhum texto humano real é uma chave base64 pura de 40 a 70 caracteres terminada em '='
-          const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body) && body.endsWith('=');
+          const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body) && body.endsWith('=') && !/\s/.test(body);
           if (isMediaKey) {
             return true;
           }
 
-          // 3. Se for do tipo 'image', 'video' ou 'view_once' e não tiver directPath
-          // Na Web, toda imagem/vídeo normal possui directPath. A ausência de directPath indica visualização única protegida.
-          if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
+          // 3. MENSAGENS ENVIADAS (fromMe) pelo nosso app NUNCA são de visualização única.
+          // Para mensagens RECEBIDAS (!fromMe) do tipo image/video/view_once sem directPath e sem renderableUrl:
+          if (!fromMe && (rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath && !renderableUrl) {
             return true;
           }
 
-          // 4. Se for qualquer mensagem sem texto, sem legenda e sem directPath (exceto reações, áudio, figurinhas normais e revogadas)
+          // 4. Se for mensagem recebida sem texto, sem legenda, sem directPath e sem renderableUrl
           if (
+            !fromMe &&
             !body &&
             !caption &&
             !directPath &&
+            !renderableUrl &&
             rawType !== 'ptt' &&
             rawType !== 'audio' &&
             rawType !== 'sticker' &&
@@ -2678,7 +2715,24 @@ export class WhatsAppService {
 
         const renderableUrl = getProp(msg.mediaData, 'renderableUrl');
         if (typeof renderableUrl === 'string' && renderableUrl) {
-          return renderableUrl;
+          if (renderableUrl.startsWith('data:')) {
+            return renderableUrl;
+          }
+          if (renderableUrl.startsWith('blob:')) {
+            try {
+              const res = await fetch(renderableUrl);
+              const blob = await res.blob();
+              const b64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = () => resolve('');
+                reader.readAsDataURL(blob);
+              });
+              if (b64 && b64.startsWith('data:')) {
+                return b64;
+              }
+            } catch (_) {}
+          }
         }
 
         const mockQpl = {
@@ -3914,10 +3968,13 @@ export class WhatsAppService {
       const recent = await this.getMessages(payload.chatId, 5);
       const latest = recent[recent.length - 1] || null;
       if (latest && (latest.type === 'image' || latest.type === 'video' || latest.type === 'audio')) {
-        if (latest.type === 'image' && !latest.imageUrl) {
+        if (latest.id) {
+          this.mediaCache.set(latest.id, payload.mediaDataUrl);
+        }
+        if (latest.type === 'image') {
           latest.imageUrl = payload.mediaDataUrl;
           latest.isHdLoaded = true;
-        } else if (latest.type === 'video' && !latest.videoUrl) {
+        } else if (latest.type === 'video') {
           latest.videoUrl = payload.mediaDataUrl;
           latest.isHdLoaded = true;
         } else if (latest.type === 'audio') {

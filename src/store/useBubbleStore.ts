@@ -1518,20 +1518,16 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         );
         if (freshMsgs && freshMsgs.length > 0) {
           const enriched = freshMsgs.map((m, idx) => {
-            if (
+            const isMatch =
               (sentMsg && m.id === sentMsg.id) ||
-              (idx === freshMsgs.length - 1 &&
-                m.fromMe &&
-                (m.type === 'image' || m.type === 'video') &&
-                !m.imageUrl &&
-                !m.videoUrl)
-            ) {
+              (idx === freshMsgs.length - 1 && m.fromMe && (m.type === 'image' || m.type === 'video'));
+            if (isMatch) {
               return {
                 ...m,
                 imageUrl:
-                  mediaType === 'image' ? m.imageUrl || payload.mediaDataUrl : m.imageUrl,
+                  mediaType === 'image' ? payload.mediaDataUrl : m.imageUrl,
                 videoUrl:
-                  mediaType === 'video' ? m.videoUrl || payload.mediaDataUrl : m.videoUrl,
+                  mediaType === 'video' ? payload.mediaDataUrl : m.videoUrl,
                 isHdLoaded: true,
               };
             }

@@ -71,7 +71,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // Mensagem de visualização única protegida pelo WhatsApp
   const isViewOnceMsg =
     Boolean(message.isViewOnce) ||
-    (!displayCaption &&
+    (!fromMe &&
+      !displayCaption &&
       !imageUrl &&
       !videoUrl &&
       !audioData &&
@@ -469,7 +470,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         >
                           <img
                             src={imageUrl}
-                            alt={text || 'Imagem'}
+                            alt=""
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              target.style.display = 'none';
+                              if (!isHdLoaded && window.electronAPI?.downloadMedia) {
+                                window.electronAPI.downloadMedia(message.id).then((hd) => {
+                                  if (hd) {
+                                    updateMessageMedia(message.chatId, message.id, hd);
+                                    target.style.display = 'block';
+                                  }
+                                });
+                              }
+                            }}
                             className={`w-full rounded-[6px] transition-transform duration-200 group-hover/img:scale-[1.02] ${
                               type === 'sticker'
                                 ? 'max-w-[130px] max-h-[130px] object-contain'
