@@ -86,6 +86,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const userHasScrolledUpRef = useRef<boolean>(false);
   const isAtBottomRef = useRef<boolean>(true);
   const initialUnreadScrolledForChatRef = useRef<string | null>(null);
+  const userInteractedScrollRef = useRef<boolean>(false);
   const isLoadingOlderRef = useRef<boolean>(false);
 
   // Estados e Refs para Gravação de Áudio / Nota de Voz (Visual WhatsApp Web)
@@ -228,7 +229,8 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         if (divider) {
           const containerRect = container.getBoundingClientRect();
           const dividerRect = divider.getBoundingClientRect();
-          const targetScrollTop = container.scrollTop + (dividerRect.top - containerRect.top) - 16;
+          // Posiciona o divisor a 84px do topo do container (completamente livre da barra de cabeçalho e com respiro visual)
+          const targetScrollTop = container.scrollTop + (dividerRect.top - containerRect.top) - 84;
           container.scrollTop = Math.max(0, targetScrollTop);
 
           // Se a lista de mensagens já completou o fetch da API (ou ambiente sem electron), confirma a rolagem
@@ -264,6 +266,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   // Sempre que trocar de conversa (ou abrir a janela), reseta a trava e o estado de rolagem inicial
   useLayoutEffect(() => {
     initialUnreadScrolledForChatRef.current = null;
+    userInteractedScrollRef.current = false;
     userHasScrolledUpRef.current = false;
     isLoadingOlderRef.current = false;
     isAtBottomRef.current = true;
@@ -293,7 +296,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     scrollToTarget,
   ]);
 
-  // Observa mudanças de altura do conteúdo (ex: decodificação assíncrona de <img> base64 ou download HD)
+  // Observa mudanças de altura do conteúdo (ex: decodificação assíncrona de <img> base64, cards ou figurinhas)
   // para manter a rolagem correta sem atrapalhar quem está lendo mensagens anteriores
   useEffect(() => {
     const contentEl = messagesContentRef.current;
@@ -301,6 +304,14 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
     const observer = new ResizeObserver(() => {
       const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
+      const hasUnread = Boolean(unreadBanner && unreadBanner.count > 0);
+
+      // Enquanto o usuário ainda não rolou manualmente com o mouse, mantém o divisor de não lidas ancorado em 84px
+      if (hasUnread && !userInteractedScrollRef.current) {
+        scrollToTarget('divider');
+        return;
+      }
+
       if (!hasInitialScrolled) {
         scrollToTarget();
       } else if (isAtBottomRef.current && !userHasScrolledUpRef.current) {
@@ -313,7 +324,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
     observer.observe(contentEl);
     return () => observer.disconnect();
-  }, [currentChatId, scrollToTarget]);
+  }, [currentChatId, unreadBanner, scrollToTarget]);
 
   useEffect(() => {
     if (replyingTo && inputRef.current) {
@@ -1267,17 +1278,24 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         ref={scrollContainerRef}
         onScroll={handleScroll}
         onLoadCapture={() => {
+          const hasUnread = Boolean(unreadBanner && unreadBanner.count > 0);
+          if (hasUnread && !userInteractedScrollRef.current) {
+            scrollToTarget('divider');
+            return;
+          }
           const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
           if (!hasInitialScrolled || (isAtBottomRef.current && !userHasScrolledUpRef.current)) {
             scrollToTarget();
           }
         }}
         onWheel={(e) => {
+          userInteractedScrollRef.current = true;
           if (e.deltaY < 0) {
             maybeLoadOlderMessages();
           }
         }}
         onPointerDown={(e) => {
+          userInteractedScrollRef.current = true;
           const container = scrollContainerRef.current;
           if (!container) return;
           const rect = container.getBoundingClientRect();
@@ -1320,13 +1338,16 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                 {isFirstUnread && unreadBanner && (
                   <div
                     ref={unreadDividerRef}
-                    className="my-2.5 -mx-3 py-1.5 px-3 bg-[#182229]/90 border-y border-white/[0.04] flex items-center justify-center select-none"
+                    className="my-3.5 -mx-2 py-1 px-2 flex items-center justify-center gap-2.5 select-none"
                   >
-                    <span className="bg-[#202C33] text-[#E9EDEF] text-[11px] font-medium tracking-wide uppercase px-3.5 py-1 rounded-full shadow-[0_1px_2px_rgba(0,0,0,0.35)]">
+                    <div className="flex-1 h-[1px] bg-gradient-to-r from-transparent via-[#00A884]/40 to-[#00A884]/65" />
+                    <span className="bg-[#182229] border border-[#00A884]/60 text-[#25D366] text-[11px] font-semibold tracking-wider uppercase px-3.5 py-1 rounded-full shadow-[0_2px_10px_rgba(0,0,0,0.5)] flex items-center gap-1.5 shrink-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#25D366] animate-pulse" />
                       {unreadBanner.count === 1
                         ? '1 mensagem não lida'
                         : `${unreadBanner.count} mensagens não lidas`}
                     </span>
+                    <div className="flex-1 h-[1px] bg-gradient-to-l from-transparent via-[#00A884]/40 to-[#00A884]/65" />
                   </div>
                 )}
                 <MessageBubble
