@@ -14,7 +14,7 @@ import {
   Trash2,
   Pause,
 } from 'lucide-react';
-import { useBubbleStore } from '../store/useBubbleStore';
+import { useBubbleStore, isMatchingMessageId } from '../store/useBubbleStore';
 import { GroupParticipant, CHAT_SIZE_CONFIG, ChatBubbleSize, ChatSummary, DEFAULT_AVATAR } from '../types/whatsapp';
 import { MessageBubble } from './MessageBubble';
 import { EmojiStickerPicker, PickerTab } from './EmojiStickerPicker';
@@ -189,51 +189,75 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
   arrowRightPx = Math.max(minArrowRight, Math.min(maxArrowRightInWindow, arrowRightPx));
 
-  const scrollToTarget = useCallback(() => {
+  // Determina com precisão a primeira mensagem não lida para posicionamento do divisor
+  const firstUnreadMsg = useMemo(() => {
+    if (!unreadBanner || unreadBanner.count <= 0 || messages.length === 0) return null;
+
+    if (unreadBanner.firstUnreadMsgId) {
+      const match = messages.find((m) =>
+        isMatchingMessageId(m.id, unreadBanner.firstUnreadMsgId!)
+      );
+      if (match) return match;
+    }
+
+    let remaining = unreadBanner.count;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (!messages[i].fromMe) {
+        remaining--;
+        if (remaining <= 0) {
+          return messages[i];
+        }
+      }
+    }
+
+    const fallbackIdx = Math.max(0, messages.length - unreadBanner.count);
+    return messages[fallbackIdx] || null;
+  }, [unreadBanner, messages]);
+
+  const scrollToTarget = useCallback((forceTarget?: 'divider' | 'bottom') => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
     const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
+    const divider = unreadDividerRef.current;
+    const hasUnread = Boolean(unreadBanner && unreadBanner.count > 0);
 
-    if (!hasInitialScrolled) {
-      const divider = unreadDividerRef.current;
-      const isWaitingFullFetch = Boolean(
-        unreadBanner &&
-          unreadBanner.count > 0 &&
-          !unreadBanner.resolvedFromFullFetch &&
-          messages.length < unreadBanner.count
-      );
+    // Se a conversa tem mensagens não lidas:
+    if (hasUnread) {
+      if (!hasInitialScrolled || forceTarget === 'divider') {
+        if (divider) {
+          const containerRect = container.getBoundingClientRect();
+          const dividerRect = divider.getBoundingClientRect();
+          const targetScrollTop = container.scrollTop + (dividerRect.top - containerRect.top) - 16;
+          container.scrollTop = Math.max(0, targetScrollTop);
 
-      if (divider && unreadBanner && unreadBanner.count > 0) {
-        // Posiciona a visualização na barra de mensagens não lidas apenas na abertura inicial
-        container.scrollTop = Math.max(0, divider.offsetTop - 68);
-        if (!isWaitingFullFetch) {
-          initialUnreadScrolledForChatRef.current = currentChatId;
-        }
-        const distanceToBottom =
-          container.scrollHeight - container.scrollTop - container.clientHeight;
-        const atBottom = distanceToBottom <= 40;
-        isAtBottomRef.current = atBottom;
-        userHasScrolledUpRef.current = !atBottom;
-        return;
-      }
-
-      if (!isWaitingFullFetch) {
-        // Se não há mensagens não lidas ou não há divider após carregamento, rola até o final
-        if (!unreadBanner || unreadBanner.count === 0 || messages.length > 0) {
-          container.scrollTop = container.scrollHeight;
-          initialUnreadScrolledForChatRef.current = currentChatId;
-          isAtBottomRef.current = true;
-          userHasScrolledUpRef.current = false;
+          // Se a lista de mensagens já completou o fetch da API (ou ambiente sem electron), confirma a rolagem
+          if (unreadBanner?.resolvedFromFullFetch || !window.electronAPI) {
+            initialUnreadScrolledForChatRef.current = currentChatId;
+          }
+          userHasScrolledUpRef.current = true;
+          isAtBottomRef.current = false;
           return;
         }
+        // Se há mensagens não lidas mas o divider ainda não montou no DOM (fetch da API em trânsito),
+        // NÃO rola para o rodapé; aguarda a montagem das mensagens com o divisor
+        return;
       }
-    } else {
-      // Se a rolagem inicial da conversa já ocorreu, NUNCA volta para a barra de não lidas.
-      // Rola para o rodapé apenas se o usuário já estiver no final da conversa acompanhando mensagens novas.
-      if (isAtBottomRef.current && !userHasScrolledUpRef.current) {
-        container.scrollTop = container.scrollHeight;
-      }
+    }
+
+    // Se NÃO há mensagens não lidas na abertura inicial:
+    if (!hasUnread && (!hasInitialScrolled || forceTarget === 'bottom')) {
+      container.scrollTop = container.scrollHeight;
+      initialUnreadScrolledForChatRef.current = currentChatId;
+      isAtBottomRef.current = true;
+      userHasScrolledUpRef.current = false;
+      return;
+    }
+
+    // Se a rolagem inicial já ocorreu:
+    // Apenas mantém acompanhamento no final caso o usuário NÃO tenha rolado para cima
+    if (isAtBottomRef.current && !userHasScrolledUpRef.current) {
+      container.scrollTop = container.scrollHeight;
     }
   }, [currentChatId, unreadBanner, messages.length]);
 
@@ -248,19 +272,26 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   // Sincroniza o scroll imediatamente antes da pintura e no próximo frame quando mensagens ou banner mudam
   useLayoutEffect(() => {
     const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
-    // Se a rolagem inicial já ocorreu e o usuário não está no final (está descendo/lendo mensagens anteriores), não rola
     if (hasInitialScrolled && (userHasScrolledUpRef.current || !isAtBottomRef.current)) {
       return;
     }
 
     scrollToTarget();
     const rafId = requestAnimationFrame(() => {
-      if (!hasInitialScrolled || (isAtBottomRef.current && !userHasScrolledUpRef.current)) {
+      const isDone = initialUnreadScrolledForChatRef.current === currentChatId;
+      if (!isDone || (isAtBottomRef.current && !userHasScrolledUpRef.current)) {
         scrollToTarget();
       }
     });
     return () => cancelAnimationFrame(rafId);
-  }, [currentChatId, messages, unreadBanner?.firstUnreadMsgId, unreadBanner?.count, scrollToTarget]);
+  }, [
+    currentChatId,
+    messages,
+    unreadBanner?.firstUnreadMsgId,
+    unreadBanner?.count,
+    unreadBanner?.resolvedFromFullFetch,
+    scrollToTarget,
+  ]);
 
   // Observa mudanças de altura do conteúdo (ex: decodificação assíncrona de <img> base64 ou download HD)
   // para manter a rolagem correta sem atrapalhar quem está lendo mensagens anteriores
@@ -270,8 +301,13 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
     const observer = new ResizeObserver(() => {
       const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
-      if (!hasInitialScrolled || (isAtBottomRef.current && !userHasScrolledUpRef.current)) {
+      if (!hasInitialScrolled) {
         scrollToTarget();
+      } else if (isAtBottomRef.current && !userHasScrolledUpRef.current) {
+        const container = scrollContainerRef.current;
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
       }
     });
 
@@ -1259,9 +1295,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         <div ref={messagesContentRef} className="flex flex-col min-h-full justify-end">
           {messages.map((msg, index) => {
             const prevMsg = index > 0 ? messages[index - 1] : null;
-            const isFirstUnread =
-              Boolean(unreadBanner && unreadBanner.count > 0) &&
-              msg.id === unreadBanner?.firstUnreadMsgId;
+            const isFirstUnread = Boolean(firstUnreadMsg && firstUnreadMsg.id === msg.id);
 
             const isSenderChanged = Boolean(
               prevMsg && (

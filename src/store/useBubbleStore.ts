@@ -350,7 +350,7 @@ function getCurrentTimeStr(): string {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
 
-function isMatchingMessageId(msgId: string, targetId: string): boolean {
+export function isMatchingMessageId(msgId: string, targetId: string): boolean {
   if (!msgId || !targetId) return false;
   if (msgId === targetId) return true;
   if (msgId.endsWith(`_${targetId}`) || targetId.endsWith(`_${msgId}`)) return true;
@@ -1127,10 +1127,19 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     if (!targetChat) return;
 
     const existingBubble = activeBubbles.find((b) => b.chatId === chatId);
-    const unreadAtOpen = Math.max(
+    const rawUnread = Math.max(
       existingBubble?.unreadCount || 0,
       targetChat.unreadCount || 0
     );
+    const isExplicitlyUnread = Boolean(
+      existingBubble?.isMarkedUnread ||
+      targetChat.isMarkedUnread ||
+      existingBubble?.unreadCount === -1 ||
+      targetChat.unreadCount === -1
+    );
+    const unreadAtOpen = isExplicitlyUnread
+      ? Math.max(1, rawUnread > 0 ? rawUnread : 0)
+      : Math.max(0, rawUnread);
     const existingMsgs = messagesByChat[chatId] || [];
 
     const bannerInfo: UnreadBannerInfo | undefined =
@@ -1288,10 +1297,19 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
     const existingBubble = baseBubbles.find((b) => b.chatId === chatId);
     const targetChat = chats.find((c) => c.id === chatId);
-    const unreadAtOpen = Math.max(
+    const rawUnread = Math.max(
       existingBubble?.unreadCount || 0,
       targetChat?.unreadCount || 0
     );
+    const isExplicitlyUnread = Boolean(
+      existingBubble?.isMarkedUnread ||
+      targetChat?.isMarkedUnread ||
+      existingBubble?.unreadCount === -1 ||
+      targetChat?.unreadCount === -1
+    );
+    const unreadAtOpen = isExplicitlyUnread
+      ? Math.max(1, rawUnread > 0 ? rawUnread : 0)
+      : Math.max(0, rawUnread);
     const existingMsgs = messagesByChat[chatId] || [];
 
     const bannerInfo: UnreadBannerInfo | undefined =
