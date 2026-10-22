@@ -654,22 +654,124 @@ export class WhatsAppService {
           return val._serialized || val.id || '';
         };
 
+        const serializeKey = (val: any): string => {
+          if (!val) return '';
+          if (typeof val === 'string') return val;
+          if (val._serialized) return val._serialized;
+          const fromMe = Boolean(val.fromMe);
+          const remote = serializeId(val.remote);
+          const id = val.id || '';
+          if (remote && id) {
+            return `${fromMe}_${remote}_${id}`;
+          }
+          return id;
+        };
+
         const parentId =
-          serializeId(reaction.msgId) ||
-          serializeId(reaction.parentMsgKey) ||
-          serializeId(reaction.reactionParentKey) ||
+          serializeKey(reaction.msgId) ||
+          serializeKey(reaction.parentMsgKey) ||
+          serializeKey(reaction.reactionParentKey) ||
           '';
-        const chatId =
+
+        let chatId =
           serializeId(reaction.msgId?.remote) ||
           serializeId(reaction.parentMsgKey?.remote) ||
           '';
+        if (!chatId && parentId) {
+          const match = parentId.match(/_([0-9a-zA-Z._-]+@(c\.us|g\.us|broadcast))_/);
+          if (match) {
+            chatId = match[1];
+          } else {
+            const parts = parentId.split('_');
+            if (parts.length >= 2 && (parts[1].endsWith('@c.us') || parts[1].endsWith('@g.us'))) {
+              chatId = parts[1];
+            }
+          }
+        }
+
         const emoji = String(reaction.reaction || reaction.reactionText || '').trim();
-        const senderId =
+
+        let senderId =
           serializeId(reaction.senderId) ||
           serializeId(reaction.senderUserJid) ||
           serializeId(reaction.author) ||
+          serializeId(reaction.from) ||
           '';
-        const fromMe = Boolean(reaction.id?.fromMe ?? reaction.msgKey?.fromMe ?? false);
+
+        let fromMe = Boolean(reaction.id?.fromMe ?? reaction.msgKey?.fromMe ?? false);
+        if (!fromMe && typeof reaction.id === 'string' && reaction.id.startsWith('true_')) {
+          fromMe = true;
+        }
+        if (!fromMe && this.client?.info?.wid) {
+          const myWid = serializeId(this.client.info.wid);
+          if (myWid && senderId && (senderId === myWid || senderId.split('@')[0] === myWid.split('@')[0])) {
+            fromMe = true;
+          }
+        }
+
+        let senderName: string | undefined;
+        let senderAvatar: string | undefined;
+        if (fromMe) {
+          senderName = 'Você';
+        } else if (senderId && this.client?.pupPage) {
+          try {
+            const info = await this.client.pupPage.evaluate(async (sJid: string) => {
+              const w = window as any;
+              const c = w.require?.('WAWebCollections')?.Contact?.get?.(sJid);
+              const name = c?.formattedTitle || c?.name || c?.pushname || '';
+              const pic = w.require?.('WAWebCollections')?.ProfilePicThumb?.get?.(sJid);
+              const avatar = pic?.eurl || pic?.img || pic?.imgFull || '';
+              return { name, avatar };
+            }, senderId);
+            if (info) {
+              senderName = info.name || undefined;
+              senderAvatar = info.avatar || undefined;
+            }
+          } catch {
+            // Ignore contact lookup error
+          }
+        }
+
+        // Tenta obter também a lista completa e oficial de reações atualizadas para essa mensagem
+        let fullReactions: any[] | undefined;
+        if (this.client?.pupPage && parentId) {
+          try {
+            fullReactions = await this.client.pupPage.evaluate(async (pId: string) => {
+              const w = window as any;
+              const ReactionsCol = w.require?.('WAWebCollections')?.Reactions;
+              if (!ReactionsCol) return null;
+              let rObj = ReactionsCol.get?.(pId);
+              if (!rObj && ReactionsCol.find) {
+                rObj = await Promise.race([
+                  ReactionsCol.find(pId),
+                  new Promise((r) => setTimeout(() => r(null), 300)),
+                ]);
+              }
+              if (!rObj) return null;
+              const rawList =
+                typeof rObj.reactions?.serialize === 'function'
+                  ? rObj.reactions.serialize()
+                  : typeof rObj.reactions?.getModelsArray === 'function'
+                  ? rObj.reactions.getModelsArray()
+                  : Array.isArray(rObj.reactions)
+                  ? rObj.reactions
+                  : [];
+              if (!rawList || rawList.length === 0) return null;
+              return rawList.map((r: any) => ({
+                emoji: r.aggregateEmoji || r.reactionText || r.emoji || r.id,
+                count: Number(r.count || (r.senders?.length ?? 1)),
+                fromMe: Boolean(r.hasReactionByMe),
+                senders: (r.senders || []).map((s: any) => ({
+                  id: s.senderUserJid || s.author || '',
+                  fromMe: Boolean(s.msgKey?.fromMe ?? s.fromMe ?? false),
+                  timestamp: Number(s.timestamp || 0),
+                })),
+              }));
+            }, parentId);
+          } catch {
+            // Ignore error
+          }
+        }
 
         if (parentId) {
           this.emitToRenderer('wa:reaction-received', {
@@ -677,7 +779,10 @@ export class WhatsAppService {
             chatId,
             reaction: emoji,
             senderId,
+            senderName,
+            senderAvatar,
             fromMe,
+            reactions: fullReactions || undefined,
             timestamp: reaction.timestamp ? Number(reaction.timestamp) : Date.now(),
           });
         }
@@ -2209,37 +2314,7 @@ export class WhatsAppService {
             chat.groupMetadata || chat.id?.server === 'g.us' || targetChatId.endsWith('@g.us')
           );
 
-          // Mapeia reações de mensagens raw para anexar diretamente à mensagem pai em vez de exibi-las como balão separado
-          const reactionMap = new Map<string, Map<string, { emoji: string; fromMe: boolean; timestamp: number }>>();
           const allRawModels: any[] = chat.msgs?.getModelsArray?.() || [];
-          for (const rm of allRawModels) {
-            if (rm && (rm.type === 'reaction' || rm.reactionParentKey || rm.msgKey)) {
-              const parentId =
-                serializeId(rm.msgKey) ||
-                serializeId(rm.reactionParentKey) ||
-                serializeId(rm.parentMsgId) ||
-                (rm.msgKey ? serializeId(rm.msgKey._serialized || rm.msgKey.id) : '');
-              const emoji = String(rm.reactionText || rm.text || rm.body || '').trim();
-              if (parentId) {
-                let sendersForParent = reactionMap.get(parentId);
-                if (!sendersForParent) {
-                  sendersForParent = new Map();
-                  reactionMap.set(parentId, sendersForParent);
-                }
-                const sId = serializeId(rm.author) || serializeId(rm.from) || (rm.id?.fromMe ? 'me' : 'sender');
-                if (emoji) {
-                  sendersForParent.set(sId, {
-                    emoji,
-                    fromMe: Boolean(rm.id?.fromMe),
-                    timestamp: Number(rm.t || rm.timestamp || 0),
-                  });
-                } else {
-                  sendersForParent.delete(sId);
-                }
-              }
-            }
-          }
-
           const msgs: any[] = allRawModels
             .filter(isValidMsg)
             .slice(-effectiveLimit);
@@ -2279,6 +2354,168 @@ export class WhatsAppService {
                 }
               })
             );
+          } else if (targetChatId) {
+            try {
+              const c = ContactCol?.get?.(targetChatId);
+              const pic =
+                ProfilePicThumb?.get?.(targetChatId) ||
+                c?.profilePicThumb;
+              let url = pic?.eurl || pic?.img || pic?.imgFull || '';
+              if (!url && ProfilePicThumb?.find) {
+                const found: any = await Promise.race([
+                  ProfilePicThumb.find(targetChatId),
+                  new Promise((r) => setTimeout(() => r(null), 180)),
+                ]);
+                url = found?.eurl || found?.img || found?.imgFull || '';
+              }
+              if (url) {
+                authorAvatarMap[targetChatId] = url;
+              }
+            } catch (_) {}
+          }
+
+          const ReactionsCol = w.require?.('WAWebCollections')?.Reactions;
+
+          const extractReactions = (rm: any): any[] => {
+            if (!rm) return [];
+            let rawList: any[] = [];
+            if (typeof rm.reactions?.serialize === 'function') {
+              try { rawList = rm.reactions.serialize(); } catch (_) {}
+            }
+            if ((!rawList || rawList.length === 0) && typeof rm.reactions?.getModelsArray === 'function') {
+              try { rawList = rm.reactions.getModelsArray(); } catch (_) {}
+            }
+            if ((!rawList || rawList.length === 0) && Array.isArray(rm.reactions)) {
+              rawList = rm.reactions;
+            }
+            if ((!rawList || rawList.length === 0) && Array.isArray(rm.reactions?.models)) {
+              rawList = rm.reactions.models;
+            }
+            if ((!rawList || rawList.length === 0) && typeof rm.serialize === 'function') {
+              try { rawList = rm.serialize(); } catch (_) {}
+            }
+            if ((!rawList || rawList.length === 0) && typeof rm.getModelsArray === 'function') {
+              try { rawList = rm.getModelsArray(); } catch (_) {}
+            }
+            if ((!rawList || rawList.length === 0) && Array.isArray(rm)) {
+              rawList = rm;
+            }
+            if (!Array.isArray(rawList) || rawList.length === 0) return [];
+
+            const parsed: any[] = [];
+            for (const r of rawList) {
+              const emoji = String(r.aggregateEmoji || r.reactionText || r.emoji || r.id || r.text || '').trim();
+              if (!emoji) continue;
+
+              let sendersRaw: any[] = [];
+              if (typeof r.senders?.serialize === 'function') {
+                try { sendersRaw = r.senders.serialize(); } catch (_) {}
+              }
+              if ((!sendersRaw || sendersRaw.length === 0) && typeof r.senders?.getModelsArray === 'function') {
+                try { sendersRaw = r.senders.getModelsArray(); } catch (_) {}
+              }
+              if ((!sendersRaw || sendersRaw.length === 0) && Array.isArray(r.senders)) {
+                sendersRaw = r.senders;
+              }
+              if ((!sendersRaw || sendersRaw.length === 0) && Array.isArray(r.senders?.models)) {
+                sendersRaw = r.senders.models;
+              }
+
+              const senders = (sendersRaw || []).map((s: any) => {
+                const sId =
+                  serializeId(s.senderUserJid) ||
+                  serializeId(s.author) ||
+                  serializeId(s.from) ||
+                  serializeId(s.id) ||
+                  '';
+                const sFromMe = Boolean(s.fromMe ?? s.msgKey?.fromMe ?? s.id?.fromMe ?? false);
+                const contactObj = sId ? ContactCol?.get?.(sId) : null;
+                const sName = sFromMe
+                  ? 'Você'
+                  : contactObj?.formattedTitle || contactObj?.name || contactObj?.pushname || (sId ? sId : undefined);
+                const sAvatar = sFromMe ? undefined : authorAvatarMap[sId];
+                return {
+                  id: sId,
+                  name: sName,
+                  avatar: sAvatar,
+                  fromMe: sFromMe,
+                  timestamp: Number(s.timestamp || s.reactionTimestamp || s.t || 0),
+                };
+              });
+
+              const fromMe = Boolean(r.hasReactionByMe || senders.some((s: any) => s.fromMe));
+              const count = Math.max(senders.length, Number(r.count || 1));
+              parsed.push({
+                emoji,
+                count,
+                fromMe,
+                senders: senders.length > 0 ? senders : undefined,
+              });
+            }
+            return parsed;
+          };
+
+          const reactionsByMsgId = new Map<string, any[]>();
+
+          // 1. Carrega todos os modelos de reações atualmente na memória do WhatsApp Web
+          if (ReactionsCol) {
+            try {
+              const allReactionModels =
+                (typeof ReactionsCol.getModelsArray === 'function' ? ReactionsCol.getModelsArray() : null) ||
+                (Array.isArray(ReactionsCol.models) ? ReactionsCol.models : []);
+              for (const rm of allReactionModels) {
+                const pId = serializeId(rm.id) || serializeId(rm.msgId) || serializeId(rm.parentMsgKey);
+                if (pId) {
+                  const extracted = extractReactions(rm);
+                  if (extracted.length > 0) {
+                    reactionsByMsgId.set(pId, extracted);
+                  }
+                }
+              }
+            } catch (_) {}
+          }
+
+          // 2. Para cada mensagem em msgs, tenta obter do cache síncrono e busca mensagens com hasReaction
+          if (ReactionsCol) {
+            for (const m of msgs) {
+              const mId = serializeId(m.id);
+              if (mId && !reactionsByMsgId.has(mId)) {
+                try {
+                  const cached = ReactionsCol.get?.(mId);
+                  if (cached) {
+                    const extracted = extractReactions(cached);
+                    if (extracted.length > 0) {
+                      reactionsByMsgId.set(mId, extracted);
+                    }
+                  }
+                } catch (_) {}
+              }
+            }
+
+            const pendingMsgs = msgs.filter((m: any) => {
+              const mId = serializeId(m.id);
+              return mId && (Boolean(m.hasReaction) || Boolean(m.reactions)) && !reactionsByMsgId.has(mId);
+            });
+
+            if (pendingMsgs.length > 0 && typeof ReactionsCol.find === 'function') {
+              await Promise.all(
+                pendingMsgs.map(async (m: any) => {
+                  const mId = serializeId(m.id);
+                  try {
+                    const found = await Promise.race([
+                      ReactionsCol.find(mId),
+                      new Promise((resolve) => setTimeout(() => resolve(null), 800)),
+                    ]);
+                    if (found) {
+                      const extracted = extractReactions(found);
+                      if (extracted.length > 0) {
+                        reactionsByMsgId.set(mId, extracted);
+                      }
+                    }
+                  } catch (_) {}
+                })
+              );
+            }
           }
 
           return msgs.map((m: any) => {
@@ -2399,86 +2636,19 @@ export class WhatsAppService {
               }
             }
 
-            const parsedReactions: Array<{
-              emoji: string;
-              count: number;
-              fromMe?: boolean;
-              senders?: Array<{ id: string; name?: string; avatar?: string; fromMe?: boolean; timestamp?: number }>;
-            }> = [];
-
-            try {
-              if (m.reactions) {
-                const rList = typeof m.reactions.getModelsArray === 'function'
-                  ? m.reactions.getModelsArray()
-                  : Array.isArray(m.reactions)
-                  ? m.reactions
-                  : Array.isArray(m.reactions.models)
-                  ? m.reactions.models
-                  : [];
-                for (const r of rList) {
-                  const emoji = String(r.aggregateEmoji || r.reactionText || r.emoji || r.id || r.text || '').trim();
-                  if (!emoji) continue;
-                  const sendersRaw = typeof r.senders?.getModelsArray === 'function'
-                    ? r.senders.getModelsArray()
-                    : Array.isArray(r.senders)
-                    ? r.senders
-                    : Array.isArray(r.senders?.models)
-                    ? r.senders.models
-                    : [];
-                  const senders = sendersRaw.map((s: any) => {
-                    const sId = serializeId(s.senderUserJid) || serializeId(s.author) || serializeId(s.from) || serializeId(s.id) || '';
-                    const sFromMe = Boolean(s.fromMe ?? s.msgKey?.fromMe ?? s.id?.fromMe ?? false);
-                    const contactObj = sId ? ContactCol?.get?.(sId) : null;
-                    const sName = sFromMe ? 'Você' : (contactObj?.formattedTitle || contactObj?.name || contactObj?.pushname || (sId ? sId : undefined));
-                    const sAvatar = sFromMe ? undefined : authorAvatarMap[sId];
-                    return {
-                      id: sId,
-                      name: sName,
-                      avatar: sAvatar,
-                      fromMe: sFromMe,
-                      timestamp: Number(s.timestamp || s.reactionTimestamp || s.t || 0),
-                    };
-                  });
-                  const fromMe = Boolean(r.hasReactionByMe || senders.some((s: any) => s.fromMe));
-                  const count = Math.max(senders.length, Number(r.count || 1));
-                  parsedReactions.push({
-                    emoji,
-                    count,
-                    fromMe,
-                    senders: senders.length > 0 ? senders : undefined,
-                  });
+            let parsedReactions = reactionsByMsgId.get(id);
+            if (!parsedReactions || parsedReactions.length === 0) {
+              for (const [k, v] of reactionsByMsgId.entries()) {
+                if (k.endsWith(`_${id}`) || id.endsWith(`_${k}`)) {
+                  parsedReactions = v;
+                  break;
                 }
               }
-            } catch (_) {}
-
-            if (parsedReactions.length === 0 && reactionMap.has(id)) {
-              const sendersMap = reactionMap.get(id)!;
-              const byEmoji = new Map<string, Array<{ id: string; name?: string; avatar?: string; fromMe?: boolean; timestamp?: number }>>();
-              for (const [sId, rData] of sendersMap.entries()) {
-                const list = byEmoji.get(rData.emoji) || [];
-                const contactObj = sId && sId !== 'me' && sId !== 'sender' ? ContactCol?.get?.(sId) : null;
-                const sName = rData.fromMe ? 'Você' : (contactObj?.formattedTitle || contactObj?.name || contactObj?.pushname || (sId !== 'sender' ? sId : undefined));
-                const sAvatar = rData.fromMe ? undefined : authorAvatarMap[sId];
-                list.push({
-                  id: sId,
-                  name: sName,
-                  avatar: sAvatar,
-                  fromMe: rData.fromMe,
-                  timestamp: rData.timestamp,
-                });
-                byEmoji.set(rData.emoji, list);
-              }
-              for (const [emoji, senders] of byEmoji.entries()) {
-                parsedReactions.push({
-                  emoji,
-                  count: senders.length,
-                  fromMe: senders.some((s) => s.fromMe),
-                  senders,
-                });
-              }
             }
-
-            const reactions = parsedReactions.length > 0 ? parsedReactions : undefined;
+            if ((!parsedReactions || parsedReactions.length === 0) && (m.reactions || m.hasReaction)) {
+              parsedReactions = extractReactions(m);
+            }
+            const reactions = parsedReactions && parsedReactions.length > 0 ? parsedReactions : undefined;
             const reaction = reactions?.[0]?.emoji || undefined;
 
             const isChat = rawType === 'chat';

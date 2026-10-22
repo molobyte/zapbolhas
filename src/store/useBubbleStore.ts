@@ -334,7 +334,10 @@ interface BubbleStoreState {
     chatId?: string;
     reaction: string;
     senderId?: string;
+    senderName?: string;
+    senderAvatar?: string;
     fromMe?: boolean;
+    reactions?: MessageReactionItem[];
     timestamp?: number;
   }) => void;
   receiveIncomingMessage: (payload: IncomingMessagePayload) => void;
@@ -343,6 +346,15 @@ interface BubbleStoreState {
 function getCurrentTimeStr(): string {
   const now = new Date();
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+function isMatchingMessageId(msgId: string, targetId: string): boolean {
+  if (!msgId || !targetId) return false;
+  if (msgId === targetId) return true;
+  if (msgId.endsWith(`_${targetId}`) || targetId.endsWith(`_${msgId}`)) return true;
+  const partA = msgId.includes('_') ? msgId.split('_')[2] : msgId;
+  const partB = targetId.includes('_') ? targetId.split('_')[2] : targetId;
+  return Boolean(partA && partB && partA === partB);
 }
 
 export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
@@ -545,21 +557,23 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   setMessagesForChat: (chatId, messages) =>
     set((state) => {
       const prevMsgs = state.messagesByChat[chatId] || [];
-      const hdMap = new Map(
-        prevMsgs.filter((m) => m.isHdLoaded).map((m) => [m.id, m])
-      );
+      const prevMap = new Map(prevMsgs.map((m) => [m.id, m]));
       const merged = messages.map((m) => {
-        const prevHd = hdMap.get(m.id);
-        if (!prevHd || m.isHdLoaded) return m;
+        const prev = prevMap.get(m.id);
+        const resolvedReactions = m.reactions || prev?.reactions;
+        const resolvedReaction = m.reaction || prev?.reaction;
+        if (!prev) return { ...m, reactions: resolvedReactions, reaction: resolvedReaction };
         return {
           ...m,
-          imageUrl: prevHd.imageUrl || m.imageUrl,
-          videoUrl: prevHd.videoUrl || m.videoUrl,
-          isHdLoaded: true,
+          imageUrl: prev.isHdLoaded && !m.isHdLoaded ? prev.imageUrl || m.imageUrl : m.imageUrl,
+          videoUrl: prev.isHdLoaded && !m.isHdLoaded ? prev.videoUrl || m.videoUrl : m.videoUrl,
+          isHdLoaded: m.isHdLoaded || prev.isHdLoaded,
           audioData:
-            m.audioData && prevHd.audioData?.audioUrl
-              ? { ...m.audioData, audioUrl: prevHd.audioData.audioUrl }
+            m.audioData && prev.audioData?.audioUrl
+              ? { ...m.audioData, audioUrl: prev.audioData.audioUrl }
               : m.audioData,
+          reactions: resolvedReactions,
+          reaction: resolvedReaction,
         };
       });
 
@@ -2035,7 +2049,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     chatId?: string;
     reaction: string;
     senderId?: string;
+    senderName?: string;
+    senderAvatar?: string;
     fromMe?: boolean;
+    reactions?: MessageReactionItem[];
     timestamp?: number;
   }) => {
     const { messagesByChat } = get();
@@ -2043,7 +2060,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     let targetChatId = payload.chatId;
     if (!targetChatId || !messagesByChat[targetChatId]) {
       for (const [cid, msgs] of Object.entries(messagesByChat)) {
-        if (msgs.some((m) => m.id === payload.messageId)) {
+        if (msgs.some((m) => isMatchingMessageId(m.id, payload.messageId))) {
           targetChatId = cid;
           break;
         }
@@ -2054,10 +2071,29 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const currentMsgs = messagesByChat[targetChatId];
     if (!currentMsgs) return;
 
-    const msgIndex = currentMsgs.findIndex((m) => m.id === payload.messageId);
+    const msgIndex = currentMsgs.findIndex((m) => isMatchingMessageId(m.id, payload.messageId));
     if (msgIndex === -1) return;
 
     const msg = currentMsgs[msgIndex];
+
+    // Se o backend forneceu a lista oficial completa de reações atualizadas:
+    if (payload.reactions && Array.isArray(payload.reactions)) {
+      const updatedMsg: FormattedMessage = {
+        ...msg,
+        reactions: payload.reactions.length > 0 ? payload.reactions : undefined,
+        reaction: payload.reactions[0]?.emoji || undefined,
+      };
+      const updatedList = [...currentMsgs];
+      updatedList[msgIndex] = updatedMsg;
+      set({
+        messagesByChat: {
+          ...messagesByChat,
+          [targetChatId]: updatedList,
+        },
+      });
+      return;
+    }
+
     let currentReactions: MessageReactionItem[] = msg.reactions
       ? msg.reactions.map((r) => ({
           ...r,
@@ -2071,14 +2107,16 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const senderId = payload.senderId || (isFromMe ? 'me' : 'sender');
     const newEmoji = (payload.reaction || '').trim();
 
-    // 1. Remove previous reaction from this sender across all emojis
+    // 1. Remove reações anteriores deste remetente
     for (let i = currentReactions.length - 1; i >= 0; i--) {
       const item = currentReactions[i];
       let removedSender = false;
 
       if (item.senders && item.senders.length > 0) {
         const sIdx = item.senders.findIndex(
-          (s) => (isFromMe && s.fromMe) || (s.id && s.id === senderId)
+          (s) =>
+            (isFromMe && s.fromMe) ||
+            (!isFromMe && s.id && (s.id === senderId || s.id.split('@')[0] === senderId.split('@')[0]))
         );
         if (sIdx !== -1) {
           item.senders.splice(sIdx, 1);
@@ -2098,7 +2136,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       }
     }
 
-    // 2. If newEmoji is non-empty, add/increment this emoji reaction
+    // 2. Se newEmoji não for vazio, adiciona ou incrementa a reação
     if (newEmoji) {
       let existingItem = currentReactions.find((r) => r.emoji === newEmoji);
       if (!existingItem) {
@@ -2120,7 +2158,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       }
       existingItem.senders.push({
         id: senderId,
-        name: isFromMe ? 'Você' : undefined,
+        name: isFromMe ? 'Você' : (payload.senderName || undefined),
+        avatar: isFromMe ? undefined : (payload.senderAvatar || undefined),
         fromMe: isFromMe,
         timestamp: payload.timestamp || Date.now(),
       });
@@ -2149,7 +2188,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   sendReaction: async (chatId: string, messageId: string, emoji: string) => {
     const { messagesByChat, applyReactionUpdate } = get();
     const currentMsgs = messagesByChat[chatId] || [];
-    const targetMsg = currentMsgs.find((m) => m.id === messageId);
+    const targetMsg = currentMsgs.find((m) => isMatchingMessageId(m.id, messageId));
 
     let existingMyEmoji: string | undefined;
     if (targetMsg?.reactions) {
