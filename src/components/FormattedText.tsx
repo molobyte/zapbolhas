@@ -1,4 +1,5 @@
 import React from 'react';
+import { isRawMediaBase64OrKey } from '../utils/textUtils';
 
 interface FormattedTextProps {
   text: string;
@@ -82,7 +83,7 @@ export const openBrowserUrl = (rawUrl: string) => {
 };
 
 export const FormattedText: React.FC<FormattedTextProps> = ({ text, mentions, className }) => {
-  if (!text) return null;
+  if (!text || isRawMediaBase64OrKey(text)) return null;
 
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;

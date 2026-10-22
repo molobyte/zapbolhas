@@ -258,6 +258,28 @@ function createInitialsAvatarDataUrl(name: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+function isRawMediaBase64OrKey(str?: string | null): boolean {
+  if (!str || typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  if (/\s/.test(trimmed)) return false;
+  if (trimmed.length >= 24) {
+    if (
+      trimmed.startsWith('/9j/') ||
+      trimmed.startsWith('iVBORw0KGgo') ||
+      trimmed.startsWith('R0lGODlh') ||
+      trimmed.startsWith('UklGR') ||
+      trimmed.startsWith('data:image/') ||
+      trimmed.startsWith('data:video/')
+    ) {
+      return true;
+    }
+    if (/^[A-Za-z0-9+/=]{32,}$/.test(trimmed)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function mapAck(ack?: number): 'sent' | 'delivered' | 'read' {
   if (ack && ack >= 3) return 'read';
   if (ack === 2) return 'delivered';
@@ -692,23 +714,6 @@ export class WhatsAppService {
                 return true;
               }
             } catch (_) {}
-          }
-
-          const rawBody = getProp(m, 'body');
-          const rawCaption = getProp(m, 'caption');
-          const rawType = getProp(m, 'type') || 'chat';
-          const hasNoText = (!rawBody || String(rawBody).trim() === '') && (!rawCaption || String(rawCaption).trim() === '');
-          const isSpecialOrRevoked =
-            rawType === 'revoked' ||
-            rawType === 'audio' ||
-            rawType === 'ptt' ||
-            rawType === 'notification' ||
-            rawType === 'e2e_notification' ||
-            rawType === 'call_log' ||
-            rawType === 'gp2';
-
-          if (hasNoText && !isSpecialOrRevoked) {
-            return true;
           }
 
           return false;
@@ -1280,11 +1285,12 @@ export class WhatsAppService {
             const mime = String(getProp(lastMsg, 'mimetype') || getProp(lastMsg?.mediaData, 'mimetype') || '');
             rawType = mime.startsWith('video/') ? 'video' : 'image';
           }
-          const rawBody =
-            rawType === 'chat'
-              ? String(getProp(lastMsg, 'body') || '')
-              : String(getProp(lastMsg, 'caption') || (isViewOnce ? '' : (getProp(lastMsg, 'body') || '')));
+          const isChat = rawType === 'chat';
+          const rawBody = isChat
+            ? String(getProp(lastMsg, 'body') || '')
+            : String(getProp(lastMsg, 'caption') || '');
           const formattedLastMsg = formatMentionsInText(rawBody, lastMsg);
+          const cleanLastMsgText = isRawMediaBase64OrKey(formattedLastMsg.text) ? '' : formattedLastMsg.text;
 
           results.push({
             id,
@@ -1298,7 +1304,7 @@ export class WhatsAppService {
             timestamp: Number(lastMsg?.t || c.t || 0),
             lastMsgType: rawType,
             lastMsgIsViewOnce: isViewOnce,
-            lastMsgBody: formattedLastMsg.text,
+            lastMsgBody: cleanLastMsgText,
             lastMsgFromMe: Boolean(lastMsg?.id?.fromMe),
             lastMsgAck: Number(lastMsg?.ack || 0),
             lastMsgDuration: Number(lastMsg?.duration || 0),
@@ -1449,23 +1455,28 @@ export class WhatsAppService {
               } catch (_) {}
             }
 
-            const rawBody = getProp(m, 'body');
-            const rawCaption = getProp(m, 'caption');
-            const rawType = getProp(m, 'type') || 'chat';
-            const hasNoText = (!rawBody || String(rawBody).trim() === '') && (!rawCaption || String(rawCaption).trim() === '');
-            const isSpecialOrRevoked =
-              rawType === 'revoked' ||
-              rawType === 'audio' ||
-              rawType === 'ptt' ||
-              rawType === 'notification' ||
-              rawType === 'e2e_notification' ||
-              rawType === 'call_log' ||
-              rawType === 'gp2';
+            return false;
+          };
 
-            if (hasNoText && !isSpecialOrRevoked) {
-              return true;
+          const isRawMediaBase64OrKey = (str: any): boolean => {
+            if (!str || typeof str !== 'string') return false;
+            const trimmed = str.trim();
+            if (/\s/.test(trimmed)) return false;
+            if (trimmed.length >= 24) {
+              if (
+                trimmed.startsWith('/9j/') ||
+                trimmed.startsWith('iVBORw0KGgo') ||
+                trimmed.startsWith('R0lGODlh') ||
+                trimmed.startsWith('UklGR') ||
+                trimmed.startsWith('data:image/') ||
+                trimmed.startsWith('data:video/')
+              ) {
+                return true;
+              }
+              if (/^[A-Za-z0-9+/=]{32,}$/.test(trimmed)) {
+                return true;
+              }
             }
-
             return false;
           };
 
@@ -1932,7 +1943,8 @@ export class WhatsAppService {
             m.type !== 'e2e_notification' &&
             m.type !== 'gp2' &&
             m.type !== 'notification_template' &&
-            m.type !== 'call_log';
+            m.type !== 'call_log' &&
+            m.type !== 'reaction';
 
           // Garante que todas as mensagens não lidas (+ margem de contexto acima da barra) sejam carregadas,
           // além de respeitar qualquer limite maior solicitado ao rolar para o topo
@@ -1960,7 +1972,25 @@ export class WhatsAppService {
           const isGroup = Boolean(
             chat.groupMetadata || chat.id?.server === 'g.us' || targetChatId.endsWith('@g.us')
           );
-          const msgs: any[] = (chat.msgs?.getModelsArray?.() || [])
+
+          // Mapeia reações recentes para anexar diretamente à mensagem pai em vez de exibi-las como balão separado
+          const reactionMap = new Map<string, string>();
+          const allRawModels: any[] = chat.msgs?.getModelsArray?.() || [];
+          for (const rm of allRawModels) {
+            if (rm && (rm.type === 'reaction' || rm.reactionParentKey || rm.msgKey)) {
+              const parentId =
+                serializeId(rm.msgKey) ||
+                serializeId(rm.reactionParentKey) ||
+                serializeId(rm.parentMsgId) ||
+                (rm.msgKey ? serializeId(rm.msgKey._serialized || rm.msgKey.id) : '');
+              const emoji = rm.reactionText || rm.text || rm.body;
+              if (parentId && emoji && typeof emoji === 'string') {
+                reactionMap.set(parentId, emoji);
+              }
+            }
+          }
+
+          const msgs: any[] = allRawModels
             .filter(isValidMsg)
             .slice(-effectiveLimit);
 
@@ -2094,20 +2124,46 @@ export class WhatsAppService {
               }
             }
 
-            const rawBodyText =
-              rawType === 'chat'
-                ? String(getProp(m, 'body') || '')
-                : rawType === 'revoked'
-                ? '🚫 Mensagem apagada'
-                : String(getProp(m, 'caption') || (isViewOnce ? '' : (getProp(m, 'body') || '')));
+            let msgReaction: string | undefined;
+            try {
+              if (m.reactions) {
+                const rList = typeof m.reactions.getModelsArray === 'function'
+                  ? m.reactions.getModelsArray()
+                  : Array.isArray(m.reactions)
+                  ? m.reactions
+                  : Array.isArray(m.reactions.models)
+                  ? m.reactions.models
+                  : [];
+                if (rList.length > 0) {
+                  const lastR = rList[rList.length - 1];
+                  msgReaction = lastR.reactionText || lastR.text || lastR.emoji || lastR.aggregate || undefined;
+                }
+              }
+            } catch (_) {}
+
+            const reaction = msgReaction || reactionMap.get(id) || undefined;
+
+            const isChat = rawType === 'chat';
+            let rawBodyText = '';
+            if (isChat) {
+              const b = String(getProp(m, 'body') || '');
+              rawBodyText = isRawMediaBase64OrKey(b) ? '' : b;
+            } else if (rawType === 'revoked') {
+              rawBodyText = '🚫 Mensagem apagada';
+            } else {
+              // Para imagens, vídeos, figurinhas, etc., o texto deve vir EXCLUSIVAMENTE do caption (legenda)
+              const c = String(getProp(m, 'caption') || '');
+              rawBodyText = isRawMediaBase64OrKey(c) ? '' : c;
+            }
 
             const { text, mentions } = formatMentionsInText(rawBodyText, m);
+            const finalText = isRawMediaBase64OrKey(text) ? '' : text;
 
             return {
               id,
               rawType,
               isViewOnce,
-              text,
+              text: finalText,
               mentions,
               t: Number(m.t || 0),
               fromMe,
@@ -2119,6 +2175,7 @@ export class WhatsAppService {
               senderName,
               quoted,
               thumbBase64,
+              reaction,
             };
           });
         },
@@ -2227,6 +2284,7 @@ export class WhatsAppService {
               }
             : undefined,
           audioData,
+          reaction: (m as any).reaction || undefined,
         };
       });
     } catch (err) {
@@ -2303,23 +2361,6 @@ export class WhatsAppService {
                 return true;
               }
             } catch (_) {}
-          }
-
-          const rawBody = getProp(m, 'body');
-          const rawCaption = getProp(m, 'caption');
-          const rawType = getProp(m, 'type') || 'chat';
-          const hasNoText = (!rawBody || String(rawBody).trim() === '') && (!rawCaption || String(rawCaption).trim() === '');
-          const isSpecialOrRevoked =
-            rawType === 'revoked' ||
-            rawType === 'audio' ||
-            rawType === 'ptt' ||
-            rawType === 'notification' ||
-            rawType === 'e2e_notification' ||
-            rawType === 'call_log' ||
-            rawType === 'gp2';
-
-          if (hasNoText && !isSpecialOrRevoked) {
-            return true;
           }
 
           return false;

@@ -14,6 +14,7 @@ import { useBubbleStore } from '../store/useBubbleStore';
 import { AudioPlayer } from './AudioPlayer';
 import { normalizeImageToStickerWebp } from './EmojiStickerPicker';
 import { FormattedText } from './FormattedText';
+import { isRawMediaBase64OrKey } from '../utils/textUtils';
 
 interface MessageBubbleProps {
   message: FormattedMessage;
@@ -66,11 +67,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [autoPlayVideo, setAutoPlayVideo] = useState(false);
   const [savedSticker, setSavedSticker] = useState(false);
 
-  // Se message.isViewOnce for true OU se a mensagem não tiver texto nem mídia carregada (característica de visualização única no WhatsApp)
-  const isViewOnceMsg = Boolean(
-    message.isViewOnce ||
-    (!text?.trim() && !imageUrl && !videoUrl && type !== 'audio')
-  );
+  // Mensagem de visualização única protegida pelo WhatsApp
+  const isViewOnceMsg = Boolean(message.isViewOnce);
+  const displayCaption = text && !isRawMediaBase64OrKey(text) ? text : '';
 
   // Decripta automaticamente imagens, vídeos, figurinhas e áudios em alta resolução (exceto visualização única protegida)
   useEffect(() => {
@@ -535,7 +534,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </>
               )}
 
-              {text && <FormattedText text={text} mentions={message.mentions} />}
+              {displayCaption && <FormattedText text={displayCaption} mentions={message.mentions} />}
 
               <span className="inline-flex items-center float-right ml-2.5 mt-1.5 -mb-0.5 text-[10.5px] text-[#8696A0] select-none leading-none">
                 <span>{timestamp}</span>
