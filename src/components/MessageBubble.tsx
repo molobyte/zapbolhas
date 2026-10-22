@@ -71,8 +71,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // Mensagem de visualização única protegida pelo WhatsApp
   const isViewOnceMsg =
     Boolean(message.isViewOnce) ||
-    (!fromMe &&
-      !displayCaption &&
+    (!displayCaption &&
       !imageUrl &&
       !videoUrl &&
       !audioData &&
@@ -376,10 +375,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-[13px] font-medium text-[#E9EDEF] flex items-center gap-1.5">
-                      <span>Mensagem de visualização única</span>
+                      <span>Mídia de visualização única</span>
                     </div>
                     <div className="text-[11px] text-[#8696A0] mt-0.5 leading-tight">
-                      Favor utilizar o celular para visualizar essa mensagem.
+                      {fromMe
+                        ? 'Enviada pelo celular como visualização única.'
+                        : 'Favor utilizar o celular para visualizar essa mensagem.'}
                     </div>
                   </div>
                 </div>

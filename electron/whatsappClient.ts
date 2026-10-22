@@ -795,15 +795,16 @@ export class WhatsAppService {
             return true;
           }
 
-          // 3. MENSAGENS ENVIADAS (fromMe) pelo nosso app NUNCA são de visualização única.
-          // Para mensagens RECEBIDAS (!fromMe) do tipo image/video/view_once sem directPath e sem renderableUrl:
-          if (!fromMe && (rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath && !renderableUrl) {
-            return true;
+          // 3. Se for mídia sem directPath e sem renderableUrl:
+          // Se for enviada por nós (fromMe) sem legenda e sem corpo, é uma visualização única enviada pelo celular
+          if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath && !renderableUrl) {
+            if (!fromMe || (!caption && !body)) {
+              return true;
+            }
           }
 
-          // 4. Se for mensagem recebida sem texto, sem legenda, sem directPath e sem renderableUrl
+          // 4. Se for mensagem sem texto, sem legenda, sem directPath e sem renderableUrl
           if (
-            !fromMe &&
             !body &&
             !caption &&
             !directPath &&
@@ -1615,15 +1616,16 @@ export class WhatsAppService {
               return true;
             }
 
-            // 3. MENSAGENS ENVIADAS (fromMe) pelo nosso app NUNCA são de visualização única.
-            // Para mensagens RECEBIDAS (!fromMe) do tipo image/video/view_once sem directPath e sem renderableUrl:
-            if (!fromMe && (rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath && !renderableUrl) {
-              return true;
+            // 3. Se for mídia sem directPath e sem renderableUrl:
+            // Se for enviada por nós (fromMe) sem legenda e sem corpo, é uma visualização única enviada pelo celular
+            if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath && !renderableUrl) {
+              if (!fromMe || (!caption && !body)) {
+                return true;
+              }
             }
 
-            // 4. Se for mensagem recebida sem texto, sem legenda, sem directPath e sem renderableUrl
+            // 4. Se for mensagem sem texto, sem legenda, sem directPath e sem renderableUrl
             if (
-              !fromMe &&
               !body &&
               !caption &&
               !directPath &&
@@ -2652,15 +2654,16 @@ export class WhatsAppService {
             return true;
           }
 
-          // 3. MENSAGENS ENVIADAS (fromMe) pelo nosso app NUNCA são de visualização única.
-          // Para mensagens RECEBIDAS (!fromMe) do tipo image/video/view_once sem directPath e sem renderableUrl:
-          if (!fromMe && (rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath && !renderableUrl) {
-            return true;
+          // 3. Se for mídia sem directPath e sem renderableUrl:
+          // Se for enviada por nós (fromMe) sem legenda e sem corpo, é uma visualização única enviada pelo celular
+          if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath && !renderableUrl) {
+            if (!fromMe || (!caption && !body)) {
+              return true;
+            }
           }
 
-          // 4. Se for mensagem recebida sem texto, sem legenda, sem directPath e sem renderableUrl
+          // 4. Se for mensagem sem texto, sem legenda, sem directPath e sem renderableUrl
           if (
-            !fromMe &&
             !body &&
             !caption &&
             !directPath &&
