@@ -79,6 +79,8 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
   const [trackedMentions, setTrackedMentions] = useState<Map<string, TrackedMentionData>>(new Map());
   const [zoom, setZoom] = useState(1);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesContentRef = useRef<HTMLDivElement | null>(null);
   const unreadDividerRef = useRef<HTMLDivElement | null>(null);
@@ -270,7 +272,19 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     userHasScrolledUpRef.current = false;
     isLoadingOlderRef.current = false;
     isAtBottomRef.current = true;
+    setHighlightedMessageId(null);
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+    }
   }, [currentChatId, activeChatId]);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+      }
+    };
+  }, []);
 
   // Sincroniza o scroll imediatamente antes da pintura e no próximo frame quando mensagens ou banner mudam
   useLayoutEffect(() => {
@@ -1202,6 +1216,95 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     maybeLoadOlderMessages();
   }, [maybeLoadOlderMessages]);
 
+  const handleJumpToMessage = useCallback(
+    async (targetMsgId: string) => {
+      if (!targetMsgId) return;
+
+      const findAndScrollToElement = (idToMatch: string): boolean => {
+        const container = scrollContainerRef.current;
+        if (!container) return false;
+
+        const allMsgEls = container.querySelectorAll<HTMLElement>('[data-msg-id]');
+        let targetEl: HTMLElement | null = null;
+
+        for (let i = 0; i < allMsgEls.length; i++) {
+          const el = allMsgEls[i];
+          const elMsgId = el.dataset.msgId;
+          if (elMsgId && isMatchingMessageId(elMsgId, idToMatch)) {
+            targetEl = el;
+            break;
+          }
+        }
+
+        if (targetEl) {
+          const foundEl: HTMLElement = targetEl;
+          const containerRect = container.getBoundingClientRect();
+          const elRect = foundEl.getBoundingClientRect();
+          const relativeTop = elRect.top - containerRect.top;
+          const targetScrollTop =
+            container.scrollTop +
+            relativeTop -
+            container.clientHeight / 2 +
+            elRect.height / 2;
+
+          userInteractedScrollRef.current = true;
+          userHasScrolledUpRef.current = true;
+          isAtBottomRef.current = false;
+
+          container.scrollTo({
+            top: Math.max(0, targetScrollTop),
+            behavior: 'smooth',
+          });
+
+          setHighlightedMessageId(foundEl.dataset.msgId || idToMatch);
+          if (highlightTimerRef.current) {
+            clearTimeout(highlightTimerRef.current);
+          }
+          highlightTimerRef.current = setTimeout(() => {
+            setHighlightedMessageId(null);
+          }, 2000);
+
+          return true;
+        }
+
+        return false;
+      };
+
+      // 1. Tenta encontrar a mensagem diretamente no DOM atual
+      if (findAndScrollToElement(targetMsgId)) {
+        return;
+      }
+
+      // 2. Se não encontrou no DOM mas está presente no array local de mensagens
+      const inMemoryMsg = messages.find((m) => isMatchingMessageId(m.id, targetMsgId));
+      if (inMemoryMsg) {
+        requestAnimationFrame(() => {
+          findAndScrollToElement(inMemoryMsg.id);
+        });
+        return;
+      }
+
+      // 3. Se a mensagem citada é antiga e não foi carregada no lote inicial
+      if (currentChatId && window.electronAPI?.getMessages) {
+        try {
+          const fetchLimit = Math.min(500, Math.max(150, messages.length + 120));
+          const olderMsgs = await window.electronAPI.getMessages(currentChatId, fetchLimit);
+          if (olderMsgs && olderMsgs.length > messages.length) {
+            useBubbleStore.getState().setMessagesForChat(currentChatId, olderMsgs);
+            requestAnimationFrame(() => {
+              setTimeout(() => {
+                findAndScrollToElement(targetMsgId);
+              }, 80);
+            });
+          }
+        } catch (err) {
+          console.error('[ChatWindowPopover] Erro ao carregar mensagens para ir à citação:', err);
+        }
+      }
+    },
+    [currentChatId, messages]
+  );
+
   if (!currentChat) return null;
 
   return (
@@ -1355,7 +1458,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                   isFirstInGroup={isFirstInGroup}
                   isSenderChanged={hasSenderGap}
                   isGroupChat={currentChat.isGroup}
+                  isHighlighted={Boolean(
+                    highlightedMessageId && isMatchingMessageId(msg.id, highlightedMessageId)
+                  )}
                   onReply={(quote) => setReplyingTo(quote)}
+                  onJumpToMessage={handleJumpToMessage}
                 />
               </React.Fragment>
             );
@@ -1372,7 +1479,15 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             exit={{ height: 0, opacity: 0 }}
             className="relative z-20 mx-2 px-3 py-1.5 bg-[#182229] rounded-t-[8px] border-b border-[#2A3942] flex items-center justify-between"
           >
-            <div className="flex-1 min-w-0 border-l-[3px] border-[#06CF9C] pl-2 py-0.5">
+            <div
+              className="flex-1 min-w-0 border-l-[3px] border-[#06CF9C] pl-2 py-0.5 cursor-pointer hover:opacity-90 select-none transition-opacity"
+              onClick={() => {
+                if (replyingTo.id) {
+                  handleJumpToMessage(replyingTo.id);
+                }
+              }}
+              title="Ir para a mensagem citada"
+            >
               <div className="text-[11px] font-semibold text-[#06CF9C] truncate">
                 {replyingTo.author}
               </div>

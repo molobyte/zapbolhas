@@ -32,7 +32,9 @@ interface MessageBubbleProps {
   isFirstInGroup: boolean;
   isGroupChat?: boolean;
   isSenderChanged?: boolean;
+  isHighlighted?: boolean;
   onReply: (quote: QuotedMessage) => void;
+  onJumpToMessage?: (messageId: string) => void;
 }
 
 const DoubleCheckIcon: React.FC<{ ack?: 'sent' | 'delivered' | 'read' }> = ({ ack = 'read' }) => (
@@ -52,7 +54,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   isFirstInGroup,
   isGroupChat,
   isSenderChanged = false,
+  isHighlighted = false,
   onReply,
+  onJumpToMessage,
 }) => {
   const {
     fromMe,
@@ -390,6 +394,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       {/* Linha da Mensagem */}
       <div
         ref={bubbleRef}
+        data-msg-id={message.id}
         onDoubleClick={handleReplyTrigger}
         className={`group/msg relative flex items-center ${
           fromMe ? 'justify-end' : 'justify-start'
@@ -447,10 +452,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
         {/* Balão da Mensagem */}
         <div
+          data-msg-bubble={message.id}
           className={`relative ${
             !fromMe && isGroupChat ? 'max-w-[76%]' : 'max-w-[82%]'
-          } rounded-[7.5px] px-2.5 py-1.5 shadow-[0_1px_1px_rgba(0,0,0,0.3)] ${
-            fromMe
+          } rounded-[7.5px] px-2.5 py-1.5 shadow-[0_1px_1px_rgba(0,0,0,0.3)] transition-all duration-500 ${
+            isHighlighted
+              ? fromMe
+                ? 'bg-[#02735E] ring-2 ring-[#00A884] shadow-[0_0_18px_rgba(0,168,132,0.55)] brightness-110 scale-[1.01]'
+                : 'bg-[#1a3832] ring-2 ring-[#00A884] shadow-[0_0_18px_rgba(0,168,132,0.55)] brightness-110 scale-[1.01]'
+              : fromMe
               ? 'bg-[#005C4B] text-[#E9EDEF]'
               : 'bg-[#202C33] text-[#E9EDEF]'
           } ${isFirstInGroup && !fromMe ? 'rounded-tl-none' : ''} ${
@@ -461,7 +471,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {isFirstInGroup && !fromMe && (
             <svg
               viewBox="0 0 8 13"
-              className="w-2 h-3 text-[#202C33] fill-current absolute -left-[7px] top-0 pointer-events-none"
+              className={`w-2 h-3 fill-current absolute -left-[7px] top-0 pointer-events-none transition-colors duration-500 ${
+                isHighlighted ? 'text-[#1a3832]' : 'text-[#202C33]'
+              }`}
             >
               <path d="M1.533 3.568 8 12.193V1H2.812C1.042 1 .474 2.156 1.533 3.568z" />
             </svg>
@@ -469,7 +481,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {isFirstInGroup && fromMe && (
             <svg
               viewBox="0 0 8 13"
-              className="w-2 h-3 text-[#005C4B] fill-current absolute -right-[7px] top-0 pointer-events-none"
+              className={`w-2 h-3 fill-current absolute -right-[7px] top-0 pointer-events-none transition-colors duration-500 ${
+                isHighlighted ? 'text-[#02735E]' : 'text-[#005C4B]'
+              }`}
             >
               <path d="M5.188 1H0v11.193l6.467-8.625C7.526 2.156 6.958 1 5.188 1z" />
             </svg>
@@ -491,8 +505,28 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               style={{
                 borderLeftColor: quotedMessage.authorColor || '#E59866',
               }}
-              className={`rounded-[5px] border-l-[4px] px-2.5 py-1.5 mb-1.5 ${
-                fromMe ? 'bg-[#025144]' : 'bg-[#1D282F]'
+              onClick={(e) => {
+                e.stopPropagation();
+                if (quotedMessage.id && onJumpToMessage) {
+                  onJumpToMessage(quotedMessage.id);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (quotedMessage.id && onJumpToMessage) {
+                    onJumpToMessage(quotedMessage.id);
+                  }
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              title="Ir para a mensagem citada"
+              className={`rounded-[5px] border-l-[4px] px-2.5 py-1.5 mb-1.5 cursor-pointer select-none transition-all active:scale-[0.99] hover:brightness-110 focus:outline-none ${
+                fromMe
+                  ? 'bg-[#025144] hover:bg-[#025b4c]'
+                  : 'bg-[#1D282F] hover:bg-[#25333c]'
               }`}
             >
               <div

@@ -2577,8 +2577,16 @@ export class WhatsAppService {
                   : String(m.quotedMsg.caption || '📷 Foto');
               const qFormatted = formatMentionsInText(qText, m.quotedMsg);
 
+              const qId =
+                (m.quotedMsg.id
+                  ? serializeId(m.quotedMsg.id) || m.quotedMsg.id._serialized || m.quotedMsg.id.id
+                  : null) ||
+                m.quotedStanzaID ||
+                (typeof m.quotedMsg === 'string' ? m.quotedMsg : '') ||
+                '';
+
               quoted = {
-                id: String(m.quotedStanzaID || id),
+                id: String(qId),
                 author: qAuthor,
                 text: qFormatted.text,
                 fromMe: isQuotedFromMe,
