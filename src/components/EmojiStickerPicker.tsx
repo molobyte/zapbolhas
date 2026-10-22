@@ -38,12 +38,12 @@ interface EmojiStickerPickerProps {
   onClose: () => void;
 }
 
-interface EmojiEntry {
+export interface EmojiEntry {
   char: string;
   keywords: string;
 }
 
-type EmojiCategoryId =
+export type EmojiCategoryId =
   | 'recent'
   | 'smileys'
   | 'gestures'
@@ -53,7 +53,7 @@ type EmojiCategoryId =
   | 'activities'
   | 'objects';
 
-const EMOJI_CATEGORIES: Array<{
+export const EMOJI_CATEGORIES: Array<{
   id: EmojiCategoryId;
   label: string;
   icon: React.ReactNode;
@@ -68,7 +68,7 @@ const EMOJI_CATEGORIES: Array<{
   { id: 'objects', label: 'Objetos', icon: <Lightbulb className="w-3.5 h-3.5" /> },
 ];
 
-const EMOJI_DATA: Record<Exclude<EmojiCategoryId, 'recent'>, EmojiEntry[]> = {
+export const EMOJI_DATA: Record<Exclude<EmojiCategoryId, 'recent'>, EmojiEntry[]> = {
   smileys: [
     { char: '😂', keywords: 'rindo lagrimas kkk engraçado feliz' },
     { char: '🤣', keywords: 'rolando rindo muito gargalhada kkk' },

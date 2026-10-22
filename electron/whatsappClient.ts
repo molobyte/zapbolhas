@@ -150,6 +150,18 @@ export interface FormattedChatMessage {
     fromMe?: boolean;
   };
   reaction?: string;
+  reactions?: Array<{
+    emoji: string;
+    count: number;
+    fromMe?: boolean;
+    senders?: Array<{
+      id: string;
+      name?: string;
+      avatar?: string;
+      fromMe?: boolean;
+      timestamp?: number;
+    }>;
+  }>;
   audioData?: {
     duration: string;
     durationSeconds: number;
@@ -631,6 +643,46 @@ export class WhatsAppService {
         }
       } catch (err) {
         console.error('[WhatsAppService] Error handling message_create:', err);
+      }
+    });
+
+    this.client.on('message_reaction', async (reaction: any) => {
+      try {
+        const serializeId = (val: any): string => {
+          if (!val) return '';
+          if (typeof val === 'string') return val;
+          return val._serialized || val.id || '';
+        };
+
+        const parentId =
+          serializeId(reaction.msgId) ||
+          serializeId(reaction.parentMsgKey) ||
+          serializeId(reaction.reactionParentKey) ||
+          '';
+        const chatId =
+          serializeId(reaction.msgId?.remote) ||
+          serializeId(reaction.parentMsgKey?.remote) ||
+          '';
+        const emoji = String(reaction.reaction || reaction.reactionText || '').trim();
+        const senderId =
+          serializeId(reaction.senderId) ||
+          serializeId(reaction.senderUserJid) ||
+          serializeId(reaction.author) ||
+          '';
+        const fromMe = Boolean(reaction.id?.fromMe ?? reaction.msgKey?.fromMe ?? false);
+
+        if (parentId) {
+          this.emitToRenderer('wa:reaction-received', {
+            messageId: parentId,
+            chatId,
+            reaction: emoji,
+            senderId,
+            fromMe,
+            timestamp: reaction.timestamp ? Number(reaction.timestamp) : Date.now(),
+          });
+        }
+      } catch (err) {
+        console.error('[WhatsAppService] Error handling message_reaction:', err);
       }
     });
 
@@ -2157,8 +2209,8 @@ export class WhatsAppService {
             chat.groupMetadata || chat.id?.server === 'g.us' || targetChatId.endsWith('@g.us')
           );
 
-          // Mapeia reações recentes para anexar diretamente à mensagem pai em vez de exibi-las como balão separado
-          const reactionMap = new Map<string, string>();
+          // Mapeia reações de mensagens raw para anexar diretamente à mensagem pai em vez de exibi-las como balão separado
+          const reactionMap = new Map<string, Map<string, { emoji: string; fromMe: boolean; timestamp: number }>>();
           const allRawModels: any[] = chat.msgs?.getModelsArray?.() || [];
           for (const rm of allRawModels) {
             if (rm && (rm.type === 'reaction' || rm.reactionParentKey || rm.msgKey)) {
@@ -2167,9 +2219,23 @@ export class WhatsAppService {
                 serializeId(rm.reactionParentKey) ||
                 serializeId(rm.parentMsgId) ||
                 (rm.msgKey ? serializeId(rm.msgKey._serialized || rm.msgKey.id) : '');
-              const emoji = rm.reactionText || rm.text || rm.body;
-              if (parentId && emoji && typeof emoji === 'string') {
-                reactionMap.set(parentId, emoji);
+              const emoji = String(rm.reactionText || rm.text || rm.body || '').trim();
+              if (parentId) {
+                let sendersForParent = reactionMap.get(parentId);
+                if (!sendersForParent) {
+                  sendersForParent = new Map();
+                  reactionMap.set(parentId, sendersForParent);
+                }
+                const sId = serializeId(rm.author) || serializeId(rm.from) || (rm.id?.fromMe ? 'me' : 'sender');
+                if (emoji) {
+                  sendersForParent.set(sId, {
+                    emoji,
+                    fromMe: Boolean(rm.id?.fromMe),
+                    timestamp: Number(rm.t || rm.timestamp || 0),
+                  });
+                } else {
+                  sendersForParent.delete(sId);
+                }
               }
             }
           }
@@ -2333,7 +2399,13 @@ export class WhatsAppService {
               }
             }
 
-            let msgReaction: string | undefined;
+            const parsedReactions: Array<{
+              emoji: string;
+              count: number;
+              fromMe?: boolean;
+              senders?: Array<{ id: string; name?: string; avatar?: string; fromMe?: boolean; timestamp?: number }>;
+            }> = [];
+
             try {
               if (m.reactions) {
                 const rList = typeof m.reactions.getModelsArray === 'function'
@@ -2343,14 +2415,71 @@ export class WhatsAppService {
                   : Array.isArray(m.reactions.models)
                   ? m.reactions.models
                   : [];
-                if (rList.length > 0) {
-                  const lastR = rList[rList.length - 1];
-                  msgReaction = lastR.reactionText || lastR.text || lastR.emoji || lastR.aggregate || undefined;
+                for (const r of rList) {
+                  const emoji = String(r.aggregateEmoji || r.reactionText || r.emoji || r.id || r.text || '').trim();
+                  if (!emoji) continue;
+                  const sendersRaw = typeof r.senders?.getModelsArray === 'function'
+                    ? r.senders.getModelsArray()
+                    : Array.isArray(r.senders)
+                    ? r.senders
+                    : Array.isArray(r.senders?.models)
+                    ? r.senders.models
+                    : [];
+                  const senders = sendersRaw.map((s: any) => {
+                    const sId = serializeId(s.senderUserJid) || serializeId(s.author) || serializeId(s.from) || serializeId(s.id) || '';
+                    const sFromMe = Boolean(s.fromMe ?? s.msgKey?.fromMe ?? s.id?.fromMe ?? false);
+                    const contactObj = sId ? ContactCol?.get?.(sId) : null;
+                    const sName = sFromMe ? 'Você' : (contactObj?.formattedTitle || contactObj?.name || contactObj?.pushname || (sId ? sId : undefined));
+                    const sAvatar = sFromMe ? undefined : authorAvatarMap[sId];
+                    return {
+                      id: sId,
+                      name: sName,
+                      avatar: sAvatar,
+                      fromMe: sFromMe,
+                      timestamp: Number(s.timestamp || s.reactionTimestamp || s.t || 0),
+                    };
+                  });
+                  const fromMe = Boolean(r.hasReactionByMe || senders.some((s: any) => s.fromMe));
+                  const count = Math.max(senders.length, Number(r.count || 1));
+                  parsedReactions.push({
+                    emoji,
+                    count,
+                    fromMe,
+                    senders: senders.length > 0 ? senders : undefined,
+                  });
                 }
               }
             } catch (_) {}
 
-            const reaction = msgReaction || reactionMap.get(id) || undefined;
+            if (parsedReactions.length === 0 && reactionMap.has(id)) {
+              const sendersMap = reactionMap.get(id)!;
+              const byEmoji = new Map<string, Array<{ id: string; name?: string; avatar?: string; fromMe?: boolean; timestamp?: number }>>();
+              for (const [sId, rData] of sendersMap.entries()) {
+                const list = byEmoji.get(rData.emoji) || [];
+                const contactObj = sId && sId !== 'me' && sId !== 'sender' ? ContactCol?.get?.(sId) : null;
+                const sName = rData.fromMe ? 'Você' : (contactObj?.formattedTitle || contactObj?.name || contactObj?.pushname || (sId !== 'sender' ? sId : undefined));
+                const sAvatar = rData.fromMe ? undefined : authorAvatarMap[sId];
+                list.push({
+                  id: sId,
+                  name: sName,
+                  avatar: sAvatar,
+                  fromMe: rData.fromMe,
+                  timestamp: rData.timestamp,
+                });
+                byEmoji.set(rData.emoji, list);
+              }
+              for (const [emoji, senders] of byEmoji.entries()) {
+                parsedReactions.push({
+                  emoji,
+                  count: senders.length,
+                  fromMe: senders.some((s) => s.fromMe),
+                  senders,
+                });
+              }
+            }
+
+            const reactions = parsedReactions.length > 0 ? parsedReactions : undefined;
+            const reaction = reactions?.[0]?.emoji || undefined;
 
             const isChat = rawType === 'chat';
             let rawBodyText = '';
@@ -2388,6 +2517,7 @@ export class WhatsAppService {
               quoted,
               thumbBase64,
               reaction,
+              reactions,
             };
           });
         },
@@ -2497,6 +2627,7 @@ export class WhatsAppService {
             : undefined,
           audioData,
           reaction: (m as any).reaction || undefined,
+          reactions: (m as any).reactions || undefined,
         };
       });
     } catch (err) {
@@ -4242,6 +4373,64 @@ export class WhatsAppService {
       }, chatId);
     } catch (err) {
       console.error('[WhatsAppService] Error in markAsUnread:', err);
+    }
+  }
+
+  public async sendReaction(chatId: string, messageId: string, reaction: string): Promise<boolean> {
+    if (!this.client?.pupPage || this.status !== 'ready') {
+      return false;
+    }
+    try {
+      const success = await this.client.pupPage.evaluate(
+        async ({ chatId, messageId, reaction }: { chatId: string; messageId: string; reaction: string }) => {
+          const w = window as any;
+          if (typeof w.require !== 'function') return false;
+
+          const serializeId = (val: any): string => {
+            if (!val) return '';
+            if (typeof val === 'string') return val;
+            return val._serialized || val.id || '';
+          };
+
+          try {
+            const collections = w.require('WAWebCollections');
+            let msg = collections.Msg?.get?.(messageId);
+            if (!msg && collections.Msg?.getMessagesById) {
+              const res = await collections.Msg.getMessagesById([messageId]);
+              msg = res?.messages?.[0];
+            }
+            if (!msg && chatId) {
+              const chat =
+                collections.Chat?.get?.(chatId) ||
+                collections.Chat?.getModelsArray?.().find((c: any) => serializeId(c.id) === chatId);
+              const models = chat?.msgs?.getModelsArray?.() || [];
+              msg = models.find((m: any) => {
+                const id = serializeId(m.id);
+                return id === messageId;
+              });
+            }
+            if (!msg) {
+              console.warn('[WhatsAppService] Could not find message to react:', messageId);
+              return false;
+            }
+
+            const sendReactionAction = w.require('WAWebSendReactionMsgAction');
+            if (sendReactionAction?.sendReactionToMsg) {
+              await sendReactionAction.sendReactionToMsg(msg, reaction || '');
+              return true;
+            }
+            return false;
+          } catch (innerErr) {
+            console.error('[WhatsAppService] sendReaction evaluate error:', innerErr);
+            return false;
+          }
+        },
+        { chatId, messageId, reaction }
+      );
+      return Boolean(success);
+    } catch (err) {
+      console.error('[WhatsAppService] Error in sendReaction:', err);
+      return false;
     }
   }
 

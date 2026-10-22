@@ -82,6 +82,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:mark-as-unread', chatId);
   },
 
+  sendReaction: (chatId: string, messageId: string, reaction: string) => {
+    return ipcRenderer.invoke('wa:send-reaction', { chatId, messageId, reaction });
+  },
+
   downloadMedia: (msgId: string) => {
     return ipcRenderer.invoke('wa:download-media', msgId);
   },
@@ -179,6 +183,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
     ipcRenderer.on('wa:message-received', handler);
     return () => ipcRenderer.removeListener('wa:message-received', handler);
+  },
+
+  onReactionReceived: (callback: (payload: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('wa:reaction-received', handler);
+    return () => ipcRenderer.removeListener('wa:reaction-received', handler);
   },
 
   onStatusChange: (callback: (payload: { status: string; error?: string | null }) => void) => {

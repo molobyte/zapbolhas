@@ -8,6 +8,7 @@ import {
   FormattedMessage,
   GroupParticipant,
   IncomingMessagePayload,
+  MessageReactionItem,
   QuotedMessage,
   SavedContact,
   BubbleBorderMode,
@@ -327,6 +328,15 @@ interface BubbleStoreState {
     durationSeconds: number;
     waveform?: number[];
   }) => Promise<void>;
+  sendReaction: (chatId: string, messageId: string, emoji: string) => Promise<void>;
+  applyReactionUpdate: (payload: {
+    messageId: string;
+    chatId?: string;
+    reaction: string;
+    senderId?: string;
+    fromMe?: boolean;
+    timestamp?: number;
+  }) => void;
   receiveIncomingMessage: (payload: IncomingMessagePayload) => void;
 }
 
@@ -2018,5 +2028,152 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         [chat.id]: updatedMessages,
       },
     });
+  },
+
+  applyReactionUpdate: (payload: {
+    messageId: string;
+    chatId?: string;
+    reaction: string;
+    senderId?: string;
+    fromMe?: boolean;
+    timestamp?: number;
+  }) => {
+    const { messagesByChat } = get();
+
+    let targetChatId = payload.chatId;
+    if (!targetChatId || !messagesByChat[targetChatId]) {
+      for (const [cid, msgs] of Object.entries(messagesByChat)) {
+        if (msgs.some((m) => m.id === payload.messageId)) {
+          targetChatId = cid;
+          break;
+        }
+      }
+    }
+    if (!targetChatId) return;
+
+    const currentMsgs = messagesByChat[targetChatId];
+    if (!currentMsgs) return;
+
+    const msgIndex = currentMsgs.findIndex((m) => m.id === payload.messageId);
+    if (msgIndex === -1) return;
+
+    const msg = currentMsgs[msgIndex];
+    let currentReactions: MessageReactionItem[] = msg.reactions
+      ? msg.reactions.map((r) => ({
+          ...r,
+          senders: r.senders ? [...r.senders] : undefined,
+        }))
+      : msg.reaction
+      ? [{ emoji: msg.reaction, count: 1, fromMe: false }]
+      : [];
+
+    const isFromMe = Boolean(payload.fromMe);
+    const senderId = payload.senderId || (isFromMe ? 'me' : 'sender');
+    const newEmoji = (payload.reaction || '').trim();
+
+    // 1. Remove previous reaction from this sender across all emojis
+    for (let i = currentReactions.length - 1; i >= 0; i--) {
+      const item = currentReactions[i];
+      let removedSender = false;
+
+      if (item.senders && item.senders.length > 0) {
+        const sIdx = item.senders.findIndex(
+          (s) => (isFromMe && s.fromMe) || (s.id && s.id === senderId)
+        );
+        if (sIdx !== -1) {
+          item.senders.splice(sIdx, 1);
+          item.count = Math.max(0, item.count - 1);
+          removedSender = true;
+        }
+      } else if (isFromMe && item.fromMe) {
+        item.count = Math.max(0, item.count - 1);
+        item.fromMe = false;
+        removedSender = true;
+      }
+
+      if (item.count <= 0) {
+        currentReactions.splice(i, 1);
+      } else if (removedSender && isFromMe) {
+        item.fromMe = item.senders ? item.senders.some((s) => s.fromMe) : false;
+      }
+    }
+
+    // 2. If newEmoji is non-empty, add/increment this emoji reaction
+    if (newEmoji) {
+      let existingItem = currentReactions.find((r) => r.emoji === newEmoji);
+      if (!existingItem) {
+        existingItem = {
+          emoji: newEmoji,
+          count: 0,
+          fromMe: isFromMe,
+          senders: [],
+        };
+        currentReactions.push(existingItem);
+      }
+
+      existingItem.count += 1;
+      if (isFromMe) {
+        existingItem.fromMe = true;
+      }
+      if (!existingItem.senders) {
+        existingItem.senders = [];
+      }
+      existingItem.senders.push({
+        id: senderId,
+        name: isFromMe ? 'Você' : undefined,
+        fromMe: isFromMe,
+        timestamp: payload.timestamp || Date.now(),
+      });
+    }
+
+    const updatedReactions = currentReactions.length > 0 ? currentReactions : undefined;
+    const updatedPrimaryReaction = updatedReactions?.[0]?.emoji || undefined;
+
+    const updatedMsg: FormattedMessage = {
+      ...msg,
+      reactions: updatedReactions,
+      reaction: updatedPrimaryReaction,
+    };
+
+    const updatedList = [...currentMsgs];
+    updatedList[msgIndex] = updatedMsg;
+
+    set({
+      messagesByChat: {
+        ...messagesByChat,
+        [targetChatId]: updatedList,
+      },
+    });
+  },
+
+  sendReaction: async (chatId: string, messageId: string, emoji: string) => {
+    const { messagesByChat, applyReactionUpdate } = get();
+    const currentMsgs = messagesByChat[chatId] || [];
+    const targetMsg = currentMsgs.find((m) => m.id === messageId);
+
+    let existingMyEmoji: string | undefined;
+    if (targetMsg?.reactions) {
+      const myItem = targetMsg.reactions.find(
+        (r) => r.fromMe || r.senders?.some((s) => s.fromMe)
+      );
+      if (myItem) existingMyEmoji = myItem.emoji;
+    } else if (targetMsg?.reaction && targetMsg?.fromMe) {
+      existingMyEmoji = targetMsg.reaction;
+    }
+
+    const targetReaction = existingMyEmoji === emoji ? '' : emoji;
+
+    applyReactionUpdate({
+      messageId,
+      chatId,
+      reaction: targetReaction,
+      fromMe: true,
+      senderId: 'me',
+      timestamp: Date.now(),
+    });
+
+    if (window.electronAPI?.sendReaction) {
+      await window.electronAPI.sendReaction(chatId, messageId, targetReaction);
+    }
   },
 }));

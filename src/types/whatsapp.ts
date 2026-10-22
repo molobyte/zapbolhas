@@ -49,6 +49,21 @@ export interface AudioData {
   waveform: number[];
 }
 
+export interface ReactionSender {
+  id: string;
+  name?: string;
+  avatar?: string;
+  fromMe?: boolean;
+  timestamp?: number;
+}
+
+export interface MessageReactionItem {
+  emoji: string;
+  count: number;
+  fromMe?: boolean;
+  senders?: ReactionSender[];
+}
+
 export interface FormattedMessage {
   id: string;
   chatId: string;
@@ -68,6 +83,7 @@ export interface FormattedMessage {
   ack?: 'sent' | 'delivered' | 'read';
   quotedMessage?: QuotedMessage;
   reaction?: string;
+  reactions?: MessageReactionItem[];
   audioData?: AudioData;
   mentions?: string[];
 }
@@ -219,6 +235,17 @@ export interface ElectronAPI {
   deleteUserSticker?: (stickerId: string) => Promise<boolean>;
   markAsRead: (chatId: string) => Promise<void>;
   markAsUnread?: (chatId: string) => Promise<void>;
+  sendReaction?: (chatId: string, messageId: string, reaction: string) => Promise<boolean>;
+  onReactionReceived?: (
+    callback: (payload: {
+      messageId: string;
+      chatId: string;
+      reaction: string;
+      senderId?: string;
+      fromMe?: boolean;
+      timestamp?: number;
+    }) => void
+  ) => () => void;
   downloadMedia: (msgId: string) => Promise<string | null>;
   openExternalImage: (dataUrl: string) => Promise<boolean>;
   openExternalUrl?: (url: string) => Promise<boolean>;

@@ -778,6 +778,15 @@ function registerIpcHandlers() {
     if (!waService) return;
     await waService.markAsUnread(chatId);
   });
+
+  ipcMain.handle(
+    'wa:send-reaction',
+    async (_event, payload: { chatId: string; messageId: string; reaction: string }) => {
+      if (!waService) return false;
+      const { chatId, messageId, reaction } = payload || {};
+      return waService.sendReaction(chatId, messageId, reaction);
+    }
+  );
 }
 
 app.whenReady().then(() => {
