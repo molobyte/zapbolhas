@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { AudioData, DEFAULT_AVATAR } from '../types/whatsapp';
 
 interface AudioPlayerProps {
@@ -8,12 +8,29 @@ interface AudioPlayerProps {
   ack?: 'sent' | 'delivered' | 'read';
 }
 
+function parseDurationString(str?: string): number {
+  if (!str) return 0;
+  const parts = str.split(':').map((p) => parseInt(p.trim(), 10));
+  if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+    return parts[0] * 60 + parts[1];
+  }
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  return 0;
+}
+
 function formatSeconds(sec: number): string {
   const s = Math.max(0, Math.floor(sec));
   const mins = Math.floor(s / 60);
   const rem = String(s % 60).padStart(2, '0');
   return `${mins}:${rem}`;
 }
+
+const DEFAULT_WAVEFORM = [
+  4, 7, 11, 16, 14, 18, 15, 20, 17, 13, 10, 8, 12, 16, 19,
+  15, 11, 7, 10, 14, 18, 16, 13, 9, 6, 10, 15, 12, 8, 5, 4
+];
 
 const DoubleCheckRead: React.FC<{ read?: boolean }> = ({ read = true }) => (
   <svg
@@ -47,55 +64,113 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0); // 0 to 1
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const totalSeconds = audioData.durationSeconds || 46;
 
+  // Calcula com robustez a duração total em segundos
+  const fallbackSeconds = useMemo(() => {
+    if (audioData.durationSeconds && audioData.durationSeconds > 0) {
+      return audioData.durationSeconds;
+    }
+    const parsed = parseDurationString(audioData.duration);
+    if (parsed > 0) {
+      return parsed;
+    }
+    return 15;
+  }, [audioData.durationSeconds, audioData.duration]);
+
+  // Obtém a duração válida do elemento de áudio, contornando o bug do Chromium
+  // em que gravações WebM/OGG de MediaRecorder reportam duration = Infinity
+  const getEffectiveDuration = (audio?: HTMLAudioElement | null): number => {
+    if (audio && Number.isFinite(audio.duration) && audio.duration > 0) {
+      return audio.duration;
+    }
+    return fallbackSeconds;
+  };
+
+  // Instanciação e ciclo de vida do elemento HTMLAudioElement
   useEffect(() => {
     if (audioData.audioUrl) {
       const audio = new Audio(audioData.audioUrl);
       audioRef.current = audio;
-      audio.ontimeupdate = () => {
-        if (audio.duration) {
-          setProgress(audio.currentTime / audio.duration);
-        }
-      };
+
       audio.onended = () => {
         setIsPlaying(false);
         setProgress(0);
       };
+
       return () => {
         audio.pause();
+        audioRef.current = null;
       };
+    } else {
+      audioRef.current = null;
     }
   }, [audioData.audioUrl]);
 
+  // Loop de atualização a 60fps enquanto o áudio estiver tocando
   useEffect(() => {
-    if (!isPlaying || audioData.audioUrl) return;
+    if (!isPlaying) return;
 
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        const next = prev + 0.2 / Math.min(totalSeconds, 30);
-        if (next >= 1) {
-          setIsPlaying(false);
-          return 0;
+    let animId: number;
+    const simStartTime = Date.now();
+    const startProgress = progress;
+
+    const tick = () => {
+      const audio = audioRef.current;
+      if (audio && audioData.audioUrl) {
+        const dur = getEffectiveDuration(audio);
+        if (dur > 0) {
+          const curTime = audio.currentTime;
+          if (curTime >= dur || audio.ended) {
+            setIsPlaying(false);
+            setProgress(0);
+            return;
+          }
+          setProgress(Math.min(1, Math.max(0, curTime / dur)));
         }
-        return next;
-      });
-    }, 100);
+      } else {
+        // Modo simulado caso não haja arquivo de áudio carregado
+        const elapsed = (Date.now() - simStartTime) / 1000;
+        const nextProgress = startProgress + elapsed / Math.max(1, fallbackSeconds);
+        if (nextProgress >= 1) {
+          setIsPlaying(false);
+          setProgress(0);
+          return;
+        }
+        setProgress(nextProgress);
+      }
+      animId = requestAnimationFrame(tick);
+    };
 
-    return () => clearInterval(interval);
-  }, [isPlaying, audioData.audioUrl, totalSeconds]);
+    animId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animId);
+  }, [isPlaying, audioData.audioUrl, fallbackSeconds]);
 
   const togglePlay = () => {
-    if (audioRef.current) {
+    const audio = audioRef.current;
+    if (audio && audioData.audioUrl) {
       if (isPlaying) {
-        audioRef.current.pause();
+        audio.pause();
         setIsPlaying(false);
       } else {
-        audioRef.current.play().catch(() => {});
+        const dur = getEffectiveDuration(audio);
+        // Se já chegou ao final, reinicia do começo
+        if (progress >= 1 || (audio.currentTime >= dur && dur > 0)) {
+          audio.currentTime = 0;
+          setProgress(0);
+        }
+        audio.play().catch(() => {});
         setIsPlaying(true);
       }
     } else {
-      setIsPlaying((prev) => !prev);
+      // Simulação quando não há áudio carregado
+      if (isPlaying) {
+        setIsPlaying(false);
+      } else {
+        if (progress >= 1) {
+          setProgress(0);
+        }
+        setIsPlaying(true);
+      }
     }
   };
 
@@ -103,15 +178,25 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     const clickRatio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     setProgress(clickRatio);
-    if (audioRef.current && audioRef.current.duration) {
-      audioRef.current.currentTime = clickRatio * audioRef.current.duration;
+
+    const audio = audioRef.current;
+    if (audio && audioData.audioUrl) {
+      const dur = getEffectiveDuration(audio);
+      if (dur > 0) {
+        audio.currentTime = Math.min(dur, Math.max(0, clickRatio * dur));
+      }
     }
   };
 
   const displayedDuration =
     isPlaying || progress > 0
-      ? formatSeconds(progress * totalSeconds)
-      : audioData.duration;
+      ? formatSeconds(progress * fallbackSeconds)
+      : audioData.duration || formatSeconds(fallbackSeconds);
+
+  const waveformBars =
+    audioData.waveform && audioData.waveform.length >= 8
+      ? audioData.waveform
+      : DEFAULT_WAVEFORM;
 
   const AvatarWithMic = (
     <div className="relative w-[45px] h-[45px] shrink-0">
@@ -135,7 +220,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     <button
       type="button"
       onClick={togglePlay}
-      className="w-7 h-7 flex items-center justify-center text-[#E9EDEF] hover:text-white transition-transform active:scale-90 shrink-0 focus:outline-none"
+      className="w-7 h-7 flex items-center justify-center text-[#E9EDEF] hover:text-white transition-transform active:scale-90 shrink-0 focus:outline-none cursor-pointer"
       title={isPlaying ? 'Pausar áudio' : 'Reproduzir áudio'}
     >
       {isPlaying ? (
@@ -158,14 +243,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         onClick={handleWaveformClick}
         className="relative h-[22px] max-h-[22px] max-w-[170px] overflow-hidden flex items-center gap-[2.5px] cursor-pointer select-none"
       >
-        {/* Bolinha Azul de Progresso */}
+        {/* Bolinha Azul de Progresso (60fps sincronizado sem delay de CSS) */}
         <div
           style={{ left: `calc(${progress * 100}% - 5px)` }}
-          className="absolute w-[10px] h-[10px] rounded-full bg-[#53BDEB] shadow z-10 pointer-events-none transition-[left] duration-75"
+          className="absolute w-[10px] h-[10px] rounded-full bg-[#53BDEB] shadow z-10 pointer-events-none"
         />
 
-        {audioData.waveform.map((val, idx) => {
-          const barRatio = idx / audioData.waveform.length;
+        {waveformBars.map((val, idx) => {
+          const barRatio = idx / waveformBars.length;
           const isPlayed = barRatio <= progress;
           const normalizedVal = val > 1 ? Math.min(1, val / 100) : Math.max(0, val);
           const heightPx = Math.max(3, Math.min(20, Math.round(normalizedVal * 18)));
