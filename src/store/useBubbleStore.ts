@@ -266,6 +266,7 @@ interface BubbleStoreState {
   viewingImage: ViewingImageState | null;
   savedContacts: SavedContact[];
   isLoadingContacts: boolean;
+  activeReactionDetailsMessage: FormattedMessage | null;
 
   // Actions
   setWaStatus: (status: WaConnectionState, error?: string | null) => void;
@@ -281,6 +282,7 @@ interface BubbleStoreState {
   updateMessageMedia: (chatId: string, msgId: string, mediaDataUrl: string) => void;
   setReplyingTo: (quote: QuotedMessage | null) => void;
   setViewingImage: (img: ViewingImageState | null) => void;
+  setActiveReactionDetailsMessage: (msg: FormattedMessage | null) => void;
 
   // Settings Actions
   setBubbleScale: (scale: number) => void;
@@ -388,6 +390,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   unreadBannerByChat: {},
   replyingTo: null,
   viewingImage: null,
+  activeReactionDetailsMessage: null,
   savedContacts: [],
   isLoadingContacts: false,
 
@@ -695,6 +698,9 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   setReplyingTo: (replyingTo) => set({ replyingTo }),
 
   setViewingImage: (viewingImage) => set({ viewingImage }),
+
+  setActiveReactionDetailsMessage: (activeReactionDetailsMessage) =>
+    set({ activeReactionDetailsMessage }),
 
   setBubbleScale: (scale) => {
     const clamped = Math.min(1.45, Math.max(0.65, Number(scale.toFixed(2))));
@@ -1102,6 +1108,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         activeChatId: null,
         replyingTo: null,
         viewingImage: null,
+        activeReactionDetailsMessage: null,
       });
       if (waStatus === 'ready' && window.electronAPI) {
         window.electronAPI.getChats().then((realChats) => {
@@ -1175,6 +1182,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       activeChatId: chatId,
       replyingTo: null,
       viewingImage: null,
+      activeReactionDetailsMessage: null,
       unreadBannerByChat: {
         ...unreadBannerByChat,
         [chatId]: bannerInfo,
@@ -1264,6 +1272,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         activeChatId: null,
         replyingTo: null,
         viewingImage: null,
+        activeReactionDetailsMessage: null,
       });
       return;
     }
@@ -1308,6 +1317,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       activeChatId: chatId,
       replyingTo: null,
       viewingImage: null,
+      activeReactionDetailsMessage: null,
       unreadBannerByChat: {
         ...unreadBannerByChat,
         [chatId]: bannerInfo,
@@ -1339,6 +1349,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       activeChatId: null,
       replyingTo: null,
       viewingImage: null,
+      activeReactionDetailsMessage: null,
     });
   },
 
@@ -1365,6 +1376,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       activeChatId: isClosingActiveChat ? null : activeChatId,
       replyingTo: isClosingActiveChat ? null : get().replyingTo,
       viewingImage: isClosingActiveChat ? null : get().viewingImage,
+      activeReactionDetailsMessage: isClosingActiveChat ? null : get().activeReactionDetailsMessage,
     });
   },
 
@@ -2085,11 +2097,19 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       };
       const updatedList = [...currentMsgs];
       updatedList[msgIndex] = updatedMsg;
+
+      const curDetails = get().activeReactionDetailsMessage;
+      const nextDetails =
+        curDetails && isMatchingMessageId(curDetails.id, payload.messageId)
+          ? (updatedMsg.reactions && updatedMsg.reactions.length > 0 ? updatedMsg : null)
+          : curDetails;
+
       set({
         messagesByChat: {
           ...messagesByChat,
           [targetChatId]: updatedList,
         },
+        activeReactionDetailsMessage: nextDetails,
       });
       return;
     }
@@ -2177,11 +2197,18 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const updatedList = [...currentMsgs];
     updatedList[msgIndex] = updatedMsg;
 
+    const curDetails = get().activeReactionDetailsMessage;
+    const nextDetails =
+      curDetails && isMatchingMessageId(curDetails.id, payload.messageId)
+        ? (updatedMsg.reactions && updatedMsg.reactions.length > 0 ? updatedMsg : null)
+        : curDetails;
+
     set({
       messagesByChat: {
         ...messagesByChat,
         [targetChatId]: updatedList,
       },
+      activeReactionDetailsMessage: nextDetails,
     });
   },
 

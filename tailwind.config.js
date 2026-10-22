@@ -30,7 +30,16 @@ module.exports = {
         },
       },
       fontFamily: {
-        sans: ['"Segoe UI"', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+        sans: [
+          '"Segoe UI"',
+          'Roboto',
+          'Helvetica',
+          'Arial',
+          '"Segoe UI Emoji"',
+          '"Apple Color Emoji"',
+          '"Noto Color Emoji"',
+          'sans-serif',
+        ],
       },
     },
   },

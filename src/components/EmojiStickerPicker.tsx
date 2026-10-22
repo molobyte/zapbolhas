@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { StickerItem } from '../types/whatsapp';
 import { useBubbleStore } from '../store/useBubbleStore';
+import { Emoji } from './Emoji';
 
 export type PickerTab = 'emoji' | 'sticker' | 'attachment';
 
@@ -915,9 +916,9 @@ export const EmojiStickerPicker: React.FC<EmojiStickerPickerProps> = ({
                     key={item.char}
                     type="button"
                     onClick={() => handleEmojiClick(item.char)}
-                    className="h-8 rounded-[6px] hover:bg-white/10 active:scale-90 flex items-center justify-center text-[20px] transition-transform select-none"
+                    className="h-8 rounded-[6px] hover:bg-white/10 active:scale-90 flex items-center justify-center transition-transform select-none"
                   >
-                    {item.char}
+                    <Emoji char={item.char} className="w-5 h-5 pointer-events-none" />
                   </button>
                 ))}
               </div>

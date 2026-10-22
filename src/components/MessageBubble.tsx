@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { createPortal } from 'react-dom';
 import {
   CornerUpLeft,
   Maximize2,
@@ -25,6 +24,7 @@ import {
   EmojiEntry,
 } from './EmojiStickerPicker';
 import { FormattedText } from './FormattedText';
+import { Emoji } from './Emoji';
 import { isRawMediaBase64OrKey } from '../utils/textUtils';
 
 interface MessageBubbleProps {
@@ -73,7 +73,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     isHdLoaded,
   } = message;
 
-  const { updateMessageMedia, setViewingImage, sendReaction } = useBubbleStore();
+  const {
+    updateMessageMedia,
+    setViewingImage,
+    sendReaction,
+    setActiveReactionDetailsMessage,
+  } = useBubbleStore();
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [autoPlayVideo, setAutoPlayVideo] = useState(false);
   const [savedSticker, setSavedSticker] = useState(false);
@@ -81,8 +86,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // Reaction State
   const [showQuickReactions, setShowQuickReactions] = useState(false);
   const [showFullPicker, setShowFullPicker] = useState(false);
-  const [showReactionDetails, setShowReactionDetails] = useState(false);
-  const [selectedDetailTab, setSelectedDetailTab] = useState<'all' | string>('all');
   const [selectedCategory, setSelectedCategory] = useState<EmojiCategoryId>('smileys');
   const [emojiSearch, setEmojiSearch] = useState('');
   const [placementAbove, setPlacementAbove] = useState(true);
@@ -161,61 +164,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return EMOJI_DATA[cat] || [];
   }, [emojiSearch, selectedCategory]);
 
-  const displayedSenders = useMemo(() => {
-    const result: Array<{
-      id: string;
-      name?: string;
-      avatar?: string;
-      fromMe?: boolean;
-      emoji: string;
-      timestamp?: number;
-    }> = [];
-
-    for (const r of reactionsList) {
-      if (selectedDetailTab !== 'all' && r.emoji !== selectedDetailTab) {
-        continue;
-      }
-      if (r.senders && r.senders.length > 0) {
-        for (const s of r.senders) {
-          result.push({
-            id: s.id,
-            name: s.name,
-            avatar: s.avatar,
-            fromMe: s.fromMe,
-            emoji: r.emoji,
-            timestamp: s.timestamp,
-          });
-        }
-      } else {
-        if (r.fromMe) {
-          result.push({
-            id: 'me',
-            name: 'Você',
-            fromMe: true,
-            emoji: r.emoji,
-          });
-        }
-        const otherCount = r.fromMe ? r.count - 1 : r.count;
-        for (let i = 0; i < otherCount; i++) {
-          result.push({
-            id: `other-${r.emoji}-${i}`,
-            name: isGroupChat
-              ? (senderName || 'Membro do grupo')
-              : (fromMe ? 'Destinatário' : senderName || 'Contato'),
-            avatar: senderAvatar,
-            fromMe: false,
-            emoji: r.emoji,
-          });
-        }
-      }
-    }
-
-    result.sort((a, b) => (a.fromMe ? -1 : b.fromMe ? 1 : 0));
-    return result;
-  }, [reactionsList, selectedDetailTab, isGroupChat, senderName, fromMe, senderAvatar]);
-
   useEffect(() => {
-    if (!showQuickReactions && !showFullPicker && !showReactionDetails) return;
+    if (!showQuickReactions && !showFullPicker) return;
 
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
@@ -240,7 +190,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       if (e.key === 'Escape') {
         setShowQuickReactions(false);
         setShowFullPicker(false);
-        setShowReactionDetails(false);
       }
     };
 
@@ -250,7 +199,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [showQuickReactions, showFullPicker, showReactionDetails]);
+  }, [showQuickReactions, showFullPicker]);
 
   const displayCaption = text && !isRawMediaBase64OrKey(text) ? text : '';
   // Mensagem de visualização única protegida pelo WhatsApp
@@ -798,13 +747,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       setShowQuickReactions(false);
                     }}
                     title={isSelected ? 'Remover reação' : `Reagir com ${emoji}`}
-                    className={`w-7 h-7 flex items-center justify-center text-[19px] leading-none rounded-full transition-transform duration-100 hover:scale-135 cursor-pointer ${
+                    className={`w-7 h-7 flex items-center justify-center rounded-full transition-transform duration-100 hover:scale-135 cursor-pointer ${
                       isSelected
                         ? 'bg-[#005C4B]/70 ring-1.5 ring-[#00A884]'
                         : 'hover:bg-white/10'
                     }`}
                   >
-                    <span>{emoji}</span>
+                    <Emoji char={emoji} className="w-[19px] h-[19px]" />
                   </button>
                 );
               })}
@@ -889,11 +838,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           setShowFullPicker(false);
                         }}
                         title={e.keywords}
-                        className={`w-8 h-8 flex items-center justify-center text-xl rounded-lg hover:bg-white/10 hover:scale-120 transition-all cursor-pointer ${
+                        className={`w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 hover:scale-120 transition-all cursor-pointer ${
                           isSelected ? 'bg-[#005C4B]/60 ring-1 ring-[#00A884]' : ''
                         }`}
                       >
-                        <span>{e.char}</span>
+                        <Emoji char={e.char} className="w-5 h-5" />
                       </button>
                     );
                   })}
@@ -909,8 +858,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               data-interactive="true"
               onClick={(e) => {
                 e.stopPropagation();
-                setSelectedDetailTab('all');
-                setShowReactionDetails(true);
+                setActiveReactionDetailsMessage(message);
               }}
               title="Ver reações"
               className={`absolute -bottom-[13px] right-2 border rounded-full px-1.5 py-[1px] text-[12px] leading-tight shadow-md select-none z-10 flex items-center gap-1 cursor-pointer transition-colors ${
@@ -921,8 +869,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             >
               <span className="flex items-center -space-x-1">
                 {distinctEmojis.slice(0, 3).map((e, idx) => (
-                  <span key={idx} className="leading-none text-[12px]">
-                    {e}
+                  <span key={idx} className="inline-flex items-center justify-center">
+                    <Emoji char={e} className="w-3.5 h-3.5" />
                   </span>
                 ))}
               </span>
@@ -969,109 +917,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
         )}
       </div>
-
-      {/* Modal de Detalhes das Reações (Quem reagiu) */}
-      {showReactionDetails &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div
-            data-interactive="true"
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px] p-4 select-none animate-in fade-in duration-150"
-            onClick={() => setShowReactionDetails(false)}
-          >
-            <div
-              data-interactive="true"
-              className="w-[320px] max-w-[90vw] max-h-[420px] bg-[#222E35] text-[#E9EDEF] border border-[#313D45] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-150"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08]">
-                <h3 className="text-sm font-semibold text-[#E9EDEF]">Reações</h3>
-                <button
-                  type="button"
-                  onClick={() => setShowReactionDetails(false)}
-                  className="p-1 rounded-full text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Reaction Tabs */}
-              <div className="flex items-center px-2 border-b border-white/[0.08] overflow-x-auto scrollbar-none bg-[#182229]/40">
-                <button
-                  type="button"
-                  onClick={() => setSelectedDetailTab('all')}
-                  className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-                    selectedDetailTab === 'all'
-                      ? 'border-[#00A884] text-[#00A884]'
-                      : 'border-transparent text-[#8696A0] hover:text-[#E9EDEF]'
-                  }`}
-                >
-                  <span>Todas</span>
-                  <span className="text-[11px] opacity-80">{totalReactionCount}</span>
-                </button>
-                {reactionsList.map((r) => (
-                  <button
-                    key={r.emoji}
-                    type="button"
-                    onClick={() => setSelectedDetailTab(r.emoji)}
-                    className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-                      selectedDetailTab === r.emoji
-                        ? 'border-[#00A884] text-[#00A884]'
-                        : 'border-transparent text-[#8696A0] hover:text-[#E9EDEF]'
-                    }`}
-                  >
-                    <span className="text-sm leading-none">{r.emoji}</span>
-                    <span className="text-[11px] opacity-80">{r.count}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Senders List */}
-              <div className="flex-1 overflow-y-auto divide-y divide-white/[0.04] p-1 scrollbar-thin scrollbar-thumb-white/10 max-h-[280px]">
-                {displayedSenders.map((sender, idx) => {
-                  const isMe = sender.fromMe;
-                  return (
-                    <div
-                      key={sender.id || idx}
-                      onClick={() => {
-                        if (isMe) {
-                          handleToggleReaction(sender.emoji);
-                          setShowReactionDetails(false);
-                        }
-                      }}
-                      className={`flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors ${
-                        isMe
-                          ? 'hover:bg-white/[0.06] cursor-pointer group/sender'
-                          : 'hover:bg-white/[0.03]'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <img
-                          src={sender.avatar || DEFAULT_AVATAR}
-                          alt=""
-                          className="w-9 h-9 rounded-full object-cover shrink-0 border border-white/10"
-                        />
-                        <div className="min-w-0 flex flex-col">
-                          <span className="text-xs font-medium truncate text-[#E9EDEF]">
-                            {isMe ? 'Você' : sender.name || 'Contato'}
-                          </span>
-                          {isMe && (
-                            <span className="text-[10.5px] text-[#00A884] group-hover/sender:underline">
-                              Clique para remover
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <span className="text-lg leading-none ml-2 shrink-0">{sender.emoji}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
     </>
   );
 };

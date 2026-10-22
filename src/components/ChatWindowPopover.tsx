@@ -19,6 +19,7 @@ import { GroupParticipant, CHAT_SIZE_CONFIG, ChatBubbleSize, ChatSummary, DEFAUL
 import { MessageBubble } from './MessageBubble';
 import { EmojiStickerPicker, PickerTab } from './EmojiStickerPicker';
 import { FormattedText } from './FormattedText';
+import { ReactionDetailsModal } from './ReactionDetailsModal';
 
 interface ChatWindowPopoverProps {
   onInteractiveEnter: () => void;
@@ -44,10 +45,12 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     unreadBannerByChat,
     replyingTo,
     viewingImage,
+    activeReactionDetailsMessage,
     bubbleScale,
     chatSizes,
     setReplyingTo,
     setViewingImage,
+    setActiveReactionDetailsMessage,
     minimizeActiveChat,
     closeBubble,
     groupParticipantsByChat,
@@ -56,6 +59,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     sendSticker,
     sendMedia,
     sendVoiceNote,
+    sendReaction,
   } = useBubbleStore();
 
   const [inputText, setInputText] = useState('');
@@ -1755,6 +1759,23 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
               </button>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Detalhes das Reações (Scoped dentro do container da janela de conversa) */}
+      <AnimatePresence>
+        {activeReactionDetailsMessage && (
+          <ReactionDetailsModal
+            message={activeReactionDetailsMessage}
+            onClose={() => setActiveReactionDetailsMessage(null)}
+            onToggleReaction={(emoji) => {
+              sendReaction(
+                activeReactionDetailsMessage.chatId,
+                activeReactionDetailsMessage.id,
+                emoji
+              );
+            }}
+          />
         )}
       </AnimatePresence>
       </div>
