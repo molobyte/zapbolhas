@@ -2126,11 +2126,12 @@ export class WhatsAppService {
         limit
       );
 
-      // Pré-decripta em alta definição (HD) as mídias recentes de imagem/figurinha/visualização única que ainda não estão em cache
+      // Pré-decripta em alta definição (HD) as mídias recentes de imagem/figurinha que ainda não estão em cache (ignora visualização única)
       const uncachedMediaIds = rawMsgs
         .filter(
           (m: any) =>
-            (m.rawType === 'image' || m.rawType === 'sticker' || m.isViewOnce) &&
+            !m.isViewOnce &&
+            (m.rawType === 'image' || m.rawType === 'sticker') &&
             m.id &&
             !this.mediaCache.has(m.id)
         )
@@ -2333,33 +2334,9 @@ export class WhatsAppService {
         if (!msg) return null;
 
         const isViewOnce = checkIsViewOnce(msg);
-
         if (isViewOnce) {
-          try {
-            if (msg.mediaData) {
-              msg.mediaData.isViewOnce = false;
-              if (msg.mediaData.attributes) msg.mediaData.attributes.isViewOnce = false;
-              if (msg.mediaData.__x) msg.mediaData.__x.isViewOnce = false;
-            }
-            msg.isViewOnce = false;
-            if (msg.attributes) msg.attributes.isViewOnce = false;
-            if (msg.__x) msg.__x.isViewOnce = false;
-          } catch (_) {}
-        }
-
-        try {
-          if (msg.mediaData && msg.mediaData.mediaStage !== 'RESOLVED') {
-            await Promise.race([
-              msg.downloadMedia({
-                downloadEvenIfExpensive: true,
-                rmrReason: 1,
-                isUserInitiated: true,
-              }),
-              new Promise((r) => setTimeout(r, 15000)),
-            ]);
-          }
-        } catch {
-          // Proceed to downloadAndMaybeDecrypt
+          // Mídias de visualização única são protegidas pelo WhatsApp e não devem ser baixadas na versão Web
+          return null;
         }
 
         const rawType = getProp(msg, 'type');

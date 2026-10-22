@@ -63,7 +63,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const { updateMessageMedia, setViewingImage } = useBubbleStore();
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
   const [autoPlayVideo, setAutoPlayVideo] = useState(false);
   const [savedSticker, setSavedSticker] = useState(false);
 
@@ -73,11 +72,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     (!text?.trim() && !imageUrl && !videoUrl && type !== 'audio')
   );
 
-  // Decripta automaticamente imagens, vídeos, figurinhas e áudios em alta resolução (incluindo visualização única)
+  // Decripta automaticamente imagens, vídeos, figurinhas e áudios em alta resolução (exceto visualização única protegida)
   useEffect(() => {
     let cancelled = false;
     if (
-      (type === 'image' || type === 'sticker' || type === 'audio' || type === 'video' || isViewOnceMsg) &&
+      !isViewOnceMsg &&
+      (type === 'image' || type === 'sticker' || type === 'audio' || type === 'video') &&
       !isHdLoaded &&
       window.electronAPI?.downloadMedia
     ) {
@@ -85,18 +85,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       window.electronAPI
         .downloadMedia(message.id)
         .then((dataUrl) => {
-          if (!cancelled) {
-            if (dataUrl) {
-              updateMessageMedia(message.chatId, message.id, dataUrl);
-              setLoadFailed(false);
-            } else if (isViewOnceMsg) {
-              setLoadFailed(true);
-            }
-          }
-        })
-        .catch(() => {
-          if (!cancelled && isViewOnceMsg) {
-            setLoadFailed(true);
+          if (!cancelled && dataUrl) {
+            updateMessageMedia(message.chatId, message.id, dataUrl);
           }
         })
         .finally(() => {
@@ -119,19 +109,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
     if (!targetVideoUrl && window.electronAPI?.downloadMedia) {
       setIsLoadingMedia(true);
-      setLoadFailed(false);
       try {
         const hd = await window.electronAPI.downloadMedia(message.id);
         if (hd) {
           updateMessageMedia(message.chatId, message.id, hd);
           targetVideoUrl = hd;
-          setLoadFailed(false);
-        } else if (isViewOnceMsg) {
-          setLoadFailed(true);
-        }
-      } catch {
-        if (isViewOnceMsg) {
-          setLoadFailed(true);
         }
       } finally {
         setIsLoadingMedia(false);
@@ -150,7 +132,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           mediaType: 'video',
           imageUrl: imageUrl || '',
           videoUrl: targetVideoUrl,
-          caption: text || (isViewOnceMsg ? 'Vídeo de visualização única' : undefined),
+          caption: text || undefined,
           senderName: fromMe ? 'Você' : senderName || 'Contato',
           timestamp,
         });
@@ -166,21 +148,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
     if (!targetUrl && window.electronAPI?.downloadMedia) {
       setIsLoadingMedia(true);
-      setLoadFailed(false);
       try {
         const hd = await window.electronAPI.downloadMedia(message.id);
         if (hd) {
           updateMessageMedia(message.chatId, message.id, hd);
           targetUrl = hd;
-          setLoadFailed(false);
-        } else if (isViewOnceMsg) {
-          setLoadFailed(true);
         }
       } catch (err) {
-        console.error('Error opening view once image:', err);
-        if (isViewOnceMsg) {
-          setLoadFailed(true);
-        }
+        console.error('Error opening image:', err);
       } finally {
         setIsLoadingMedia(false);
       }
@@ -195,7 +170,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         messageId: message.id,
         mediaType: 'image',
         imageUrl: targetUrl,
-        caption: text || (isViewOnceMsg ? 'Foto de visualização única' : undefined),
+        caption: text || undefined,
         senderName: fromMe ? 'Você' : senderName || 'Contato',
         timestamp,
       });
@@ -377,264 +352,187 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             />
           ) : (
             <div className="text-[13.2px] leading-[18px] break-words">
-              {type === 'video' && (
-                <div className="relative group/vid mb-1.5 overflow-hidden rounded-[6px] min-w-[210px]">
-                  {videoUrl ? (
-                    <div className="relative overflow-hidden rounded-[6px] bg-black/80">
-                      <video
-                        src={videoUrl}
-                        poster={imageUrl}
-                        controls
-                        autoPlay={autoPlayVideo}
-                        playsInline
-                        preload="metadata"
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full min-w-[210px] max-h-[260px] rounded-[6px] bg-black object-contain"
-                      />
-                      {/* Badge de Visualização Única no topo esquerdo */}
-                      {isViewOnceMsg && (
-                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/75 backdrop-blur-md text-white text-[10.5px] font-medium flex items-center gap-1.5 shadow-md border border-white/20 select-none z-10 pointer-events-none">
-                          <span className="w-4 h-4 rounded-full border border-dashed border-[#25D366] text-[#25D366] flex items-center justify-center text-[10px] font-bold leading-none">
-                            1
-                          </span>
-                          <span>Visualização única</span>
-                        </div>
-                      )}
-                      <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/vid:opacity-100 transition-opacity flex items-center gap-1.5 z-10">
-                        <button
-                          type="button"
-                          onClick={(e) => handlePlayOrExpandVideo(e, true)}
-                          title="Ampliar vídeo na janela"
-                          className="p-1.5 rounded-full bg-[#111B21]/85 text-white shadow-md hover:bg-[#00A884] transition-colors"
-                        >
-                          <Maximize2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleOpenExternal}
-                          title="Abrir vídeo no reprodutor do Windows"
-                          className="p-1.5 rounded-full bg-[#111B21]/85 text-white shadow-md hover:bg-[#00A884] transition-colors"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ) : isViewOnceMsg ? (
-                    <div className="flex flex-col gap-1">
-                      <button
-                        type="button"
-                        onClick={(e) => handlePlayOrExpandVideo(e, false)}
-                        className="w-[230px] p-2.5 rounded-[8px] bg-[#182229]/80 hover:bg-[#182229] border border-white/10 flex items-center gap-3 text-left transition-all group/vo select-none cursor-pointer"
-                        title="Clique para reproduzir o vídeo de visualização única"
+              {isViewOnceMsg ? (
+                <div className="w-[245px] p-2.5 rounded-[8px] bg-[#182229]/80 border border-white/10 flex items-center gap-3 text-left select-none mb-1">
+                  <div className="w-10 h-10 rounded-full bg-[#005C4B]/60 border border-[#25D366]/40 flex items-center justify-center shrink-0 text-[#25D366]">
+                    <div className="relative flex items-center justify-center font-bold text-[14px]">
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="w-6 h-6 stroke-current fill-none stroke-[2]"
                       >
-                        <div className="w-10 h-10 rounded-full bg-[#005C4B]/60 border border-[#25D366]/40 flex items-center justify-center shrink-0 text-[#25D366] group-hover/vo:bg-[#005C4B] transition-colors">
-                          {isLoadingMedia ? (
-                            <Loader2 className="w-5 h-5 animate-spin text-[#25D366]" />
-                          ) : (
-                            <div className="relative flex items-center justify-center font-bold text-[14px]">
-                              <svg
-                                viewBox="0 0 24 24"
-                                className="w-6 h-6 stroke-current fill-none stroke-[2]"
-                              >
-                                <circle cx="12" cy="12" r="9" strokeDasharray="3 2" />
-                              </svg>
-                              <span className="absolute text-[11px] font-bold">1</span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[13px] font-medium text-[#E9EDEF] flex items-center gap-1.5">
-                            <span>Vídeo de visualização única</span>
-                          </div>
-                          <div className="text-[11px] text-[#8696A0] mt-0.5">
-                            {isLoadingMedia
-                              ? 'Carregando vídeo...'
-                              : loadFailed
-                              ? 'Protegida • Clique para tentar'
-                              : 'Clique para reproduzir'}
-                          </div>
-                        </div>
-                      </button>
-                      {loadFailed && (
-                        <div className="text-[11px] text-[#8696A0] leading-tight px-1">
-                          🔒 Protegida pelo WhatsApp. Se não abrir aqui, visualize no seu celular.
-                        </div>
-                      )}
+                        <circle cx="12" cy="12" r="9" strokeDasharray="3 2" />
+                      </svg>
+                      <span className="absolute text-[11px] font-bold">1</span>
                     </div>
-                  ) : (
-                    <div
-                      onClick={(e) => handlePlayOrExpandVideo(e, false)}
-                      title="Clique para carregar e reproduzir o vídeo"
-                      className="relative cursor-pointer overflow-hidden rounded-[6px] min-w-[210px] min-h-[140px] flex items-center justify-center bg-[#111B21]"
-                    >
-                      {imageUrl ? (
-                        <img
-                          src={imageUrl}
-                          alt={text || 'Vídeo'}
-                          className={`w-full min-w-[210px] max-h-[240px] object-cover rounded-[6px] ${
-                            isLoadingMedia ? 'blur-[1.5px] brightness-75' : 'brightness-90'
-                          }`}
-                        />
-                      ) : (
-                        <div className="w-[210px] h-[140px] flex flex-col items-center justify-center gap-1.5 text-[#8696A0]">
-                          <VideoIcon className="w-7 h-7 text-[#25D366]" />
-                          <span className="text-[11.5px]">Vídeo</span>
-                        </div>
-                      )}
-
-                      {/* Botão Play Central ou Spinner de Carregamento */}
-                      <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                        <div className="w-11 h-11 rounded-full bg-black/65 border border-white/25 flex items-center justify-center text-white shadow-lg group-hover/vid:scale-105 group-hover/vid:bg-[#00A884] transition-all">
-                          {isLoadingMedia ? (
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                          ) : (
-                            <Play className="w-5 h-5 fill-current ml-0.5" />
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Badge inferior esquerdo com ícone de vídeo e duração */}
-                      <div className="absolute bottom-1.5 left-2 px-1.5 py-0.5 rounded bg-black/60 text-white text-[10.5px] flex items-center gap-1 select-none">
-                        <VideoIcon className="w-3 h-3" />
-                        <span>{mediaDuration || 'Vídeo'}</span>
-                      </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-medium text-[#E9EDEF] flex items-center gap-1.5">
+                      <span>{type === 'video' ? 'Vídeo de visualização única' : 'Foto de visualização única'}</span>
                     </div>
-                  )}
+                    <div className="text-[11px] text-[#8696A0] mt-0.5 leading-tight">
+                      🔒 Protegida pelo WhatsApp. Abra no seu celular para visualizar.
+                    </div>
+                  </div>
                 </div>
-              )}
-
-              {type !== 'video' && (type === 'image' || type === 'sticker' || imageUrl || isViewOnceMsg) && (
-                <div className="relative group/img mb-1.5 overflow-hidden rounded-[6px]">
-                  {imageUrl ? (
-                    <div
-                      onClick={handleOpenImage}
-                      title="Clique para visualizar e ampliar a imagem"
-                      className="relative cursor-pointer overflow-hidden rounded-[6px]"
-                    >
-                      <img
-                        src={imageUrl}
-                        alt={text || (isViewOnceMsg ? 'Foto de visualização única' : 'Imagem')}
-                        className={`w-full rounded-[6px] transition-transform duration-200 group-hover/img:scale-[1.02] ${
-                          type === 'sticker'
-                            ? 'max-w-[130px] max-h-[130px] object-contain'
-                            : 'min-w-[190px] max-h-[240px] object-cover'
-                        } ${!isHdLoaded && isLoadingMedia ? 'blur-[1.5px] brightness-90' : ''}`}
-                      />
-
-                      {/* Badge de Visualização Única no topo esquerdo */}
-                      {isViewOnceMsg && (
-                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/75 backdrop-blur-md text-white text-[10.5px] font-medium flex items-center gap-1.5 shadow-md border border-white/20 select-none z-10 pointer-events-none">
-                          <span className="w-4 h-4 rounded-full border border-dashed border-[#25D366] text-[#25D366] flex items-center justify-center text-[10px] font-bold leading-none">
-                            1
-                          </span>
-                          <span>Visualização única</span>
+              ) : (
+                <>
+                  {type === 'video' && (
+                    <div className="relative group/vid mb-1.5 overflow-hidden rounded-[6px] min-w-[210px]">
+                      {videoUrl ? (
+                        <div className="relative overflow-hidden rounded-[6px] bg-black/80">
+                          <video
+                            src={videoUrl}
+                            poster={imageUrl}
+                            controls
+                            autoPlay={autoPlayVideo}
+                            playsInline
+                            preload="metadata"
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-full min-w-[210px] max-h-[260px] rounded-[6px] bg-black object-contain"
+                          />
+                          <div className="absolute top-1.5 right-1.5 opacity-0 group-hover/vid:opacity-100 transition-opacity flex items-center gap-1.5 z-10">
+                            <button
+                              type="button"
+                              onClick={(e) => handlePlayOrExpandVideo(e, true)}
+                              title="Ampliar vídeo na janela"
+                              className="p-1.5 rounded-full bg-[#111B21]/85 text-white shadow-md hover:bg-[#00A884] transition-colors"
+                            >
+                              <Maximize2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleOpenExternal}
+                              title="Abrir vídeo no reprodutor do Windows"
+                              className="p-1.5 rounded-full bg-[#111B21]/85 text-white shadow-md hover:bg-[#00A884] transition-colors"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
-                      )}
-
-                      {/* Spinner sutil enquanto baixa a versão HD */}
-                      {isLoadingMedia && (
-                        <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                          <Loader2 className="w-6 h-6 text-white animate-spin drop-shadow" />
-                        </div>
-                      )}
-
-                      {/* Overlay em Hover com botões de Ampliar, Favoritar Figurinha e Abrir no Windows */}
-                      <div className="absolute inset-0 bg-black/25 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-                        <span className="p-1.5 rounded-full bg-[#111B21]/85 text-white shadow-md hover:bg-[#00A884] transition-colors">
-                          <Maximize2 className="w-4 h-4" />
-                        </span>
-                        {type === 'sticker' && (
-                          <button
-                            type="button"
-                            onClick={handleSaveStickerToLibrary}
-                            title={
-                              savedSticker
-                                ? 'Salva na sua biblioteca de figurinhas!'
-                                : 'Salvar figurinha na minha biblioteca'
-                            }
-                            className={`p-1.5 rounded-full bg-[#111B21]/85 shadow-md transition-colors ${
-                              savedSticker
-                                ? 'text-[#FBBF24] bg-[#005C4B]'
-                                : 'text-[#FBBF24] hover:bg-[#00A884] hover:text-white'
-                            }`}
-                          >
-                            <Star
-                              className={`w-4 h-4 ${savedSticker ? 'fill-current' : ''}`}
+                      ) : (
+                        <div
+                          onClick={(e) => handlePlayOrExpandVideo(e, false)}
+                          title="Clique para carregar e reproduzir o vídeo"
+                          className="relative cursor-pointer overflow-hidden rounded-[6px] min-w-[210px] min-h-[140px] flex items-center justify-center bg-[#111B21]"
+                        >
+                          {imageUrl ? (
+                            <img
+                              src={imageUrl}
+                              alt={text || 'Vídeo'}
+                              className={`w-full min-w-[210px] max-h-[240px] object-cover rounded-[6px] ${
+                                isLoadingMedia ? 'blur-[1.5px] brightness-75' : 'brightness-90'
+                              }`}
                             />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={handleOpenExternal}
-                          title="Abrir imagem no Visualizador de Fotos do Windows"
-                          className="p-1.5 rounded-full bg-[#111B21]/85 text-white shadow-md hover:bg-[#00A884] transition-colors"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ) : isViewOnceMsg ? (
-                    <div className="flex flex-col gap-1">
-                      <button
-                        type="button"
-                        onClick={handleOpenImage}
-                        className="w-[230px] p-2.5 rounded-[8px] bg-[#182229]/80 hover:bg-[#182229] border border-white/10 flex items-center gap-3 text-left transition-all group/vo select-none cursor-pointer"
-                        title="Clique para visualizar a imagem de visualização única"
-                      >
-                        <div className="w-10 h-10 rounded-full bg-[#005C4B]/60 border border-[#25D366]/40 flex items-center justify-center shrink-0 text-[#25D366] group-hover/vo:bg-[#005C4B] transition-colors">
-                          {isLoadingMedia ? (
-                            <Loader2 className="w-5 h-5 animate-spin text-[#25D366]" />
                           ) : (
-                            <div className="relative flex items-center justify-center font-bold text-[14px]">
-                              <svg
-                                viewBox="0 0 24 24"
-                                className="w-6 h-6 stroke-current fill-none stroke-[2]"
-                              >
-                                <circle cx="12" cy="12" r="9" strokeDasharray="3 2" />
-                              </svg>
-                              <span className="absolute text-[11px] font-bold">1</span>
+                            <div className="w-[210px] h-[140px] flex flex-col items-center justify-center gap-1.5 text-[#8696A0]">
+                              <VideoIcon className="w-7 h-7 text-[#25D366]" />
+                              <span className="text-[11.5px]">Vídeo</span>
                             </div>
                           )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[13px] font-medium text-[#E9EDEF] flex items-center gap-1.5">
-                            <span>Foto de visualização única</span>
+
+                          {/* Botão Play Central ou Spinner de Carregamento */}
+                          <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                            <div className="w-11 h-11 rounded-full bg-black/65 border border-white/25 flex items-center justify-center text-white shadow-lg group-hover/vid:scale-105 group-hover/vid:bg-[#00A884] transition-all">
+                              {isLoadingMedia ? (
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                              ) : (
+                                <Play className="w-5 h-5 fill-current ml-0.5" />
+                              )}
+                            </div>
                           </div>
-                          <div className="text-[11px] text-[#8696A0] mt-0.5">
-                            {isLoadingMedia
-                              ? 'Carregando foto...'
-                              : loadFailed
-                              ? 'Protegida • Clique para tentar'
-                              : 'Clique para visualizar'}
+
+                          {/* Badge inferior esquerdo com ícone de vídeo e duração */}
+                          <div className="absolute bottom-1.5 left-2 px-1.5 py-0.5 rounded bg-black/60 text-white text-[10.5px] flex items-center gap-1 select-none">
+                            <VideoIcon className="w-3 h-3" />
+                            <span>{mediaDuration || 'Vídeo'}</span>
                           </div>
-                        </div>
-                      </button>
-                      {loadFailed && (
-                        <div className="text-[11px] text-[#8696A0] leading-tight px-1">
-                          🔒 Protegida pelo WhatsApp. Se não abrir aqui, visualize no seu celular.
                         </div>
                       )}
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleOpenImage}
-                      className="w-[200px] h-[120px] rounded-[6px] bg-[#182229]/80 hover:bg-[#182229] border border-white/10 flex flex-col items-center justify-center gap-1.5 text-[#8696A0] hover:text-[#E9EDEF] transition-colors"
-                    >
-                      {isLoadingMedia ? (
-                        <>
-                          <Loader2 className="w-5 h-5 text-[#25D366] animate-spin" />
-                          <span className="text-[11.5px]">Carregando foto...</span>
-                        </>
-                      ) : (
-                        <>
-                          <ImageIcon className="w-6 h-6 text-[#25D366]" />
-                          <span className="text-[11.5px]">Clique para abrir a foto</span>
-                        </>
-                      )}
-                    </button>
                   )}
-                </div>
+
+                  {type !== 'video' && (type === 'image' || type === 'sticker' || imageUrl) && (
+                    <div className="relative group/img mb-1.5 overflow-hidden rounded-[6px]">
+                      {imageUrl ? (
+                        <div
+                          onClick={handleOpenImage}
+                          title="Clique para visualizar e ampliar a imagem"
+                          className="relative cursor-pointer overflow-hidden rounded-[6px]"
+                        >
+                          <img
+                            src={imageUrl}
+                            alt={text || 'Imagem'}
+                            className={`w-full rounded-[6px] transition-transform duration-200 group-hover/img:scale-[1.02] ${
+                              type === 'sticker'
+                                ? 'max-w-[130px] max-h-[130px] object-contain'
+                                : 'min-w-[190px] max-h-[240px] object-cover'
+                            } ${!isHdLoaded && isLoadingMedia ? 'blur-[1.5px] brightness-90' : ''}`}
+                          />
+
+                          {/* Spinner sutil enquanto baixa a versão HD */}
+                          {isLoadingMedia && (
+                            <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                              <Loader2 className="w-6 h-6 text-white animate-spin drop-shadow" />
+                            </div>
+                          )}
+
+                          {/* Overlay em Hover com botões de Ampliar, Favoritar Figurinha e Abrir no Windows */}
+                          <div className="absolute inset-0 bg-black/25 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                            <span className="p-1.5 rounded-full bg-[#111B21]/85 text-white shadow-md hover:bg-[#00A884] transition-colors">
+                              <Maximize2 className="w-4 h-4" />
+                            </span>
+                            {type === 'sticker' && (
+                              <button
+                                type="button"
+                                onClick={handleSaveStickerToLibrary}
+                                title={
+                                  savedSticker
+                                    ? 'Salva na sua biblioteca de figurinhas!'
+                                    : 'Salvar figurinha na minha biblioteca'
+                                }
+                                className={`p-1.5 rounded-full bg-[#111B21]/85 shadow-md transition-colors ${
+                                  savedSticker
+                                    ? 'text-[#FBBF24] bg-[#005C4B]'
+                                    : 'text-[#FBBF24] hover:bg-[#00A884] hover:text-white'
+                                }`}
+                              >
+                                <Star
+                                  className={`w-4 h-4 ${savedSticker ? 'fill-current' : ''}`}
+                                />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={handleOpenExternal}
+                              title="Abrir imagem no Visualizador de Fotos do Windows"
+                              className="p-1.5 rounded-full bg-[#111B21]/85 text-white shadow-md hover:bg-[#00A884] transition-colors"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleOpenImage}
+                          className="w-[200px] h-[120px] rounded-[6px] bg-[#182229]/80 hover:bg-[#182229] border border-white/10 flex flex-col items-center justify-center gap-1.5 text-[#8696A0] hover:text-[#E9EDEF] transition-colors"
+                        >
+                          {isLoadingMedia ? (
+                            <>
+                              <Loader2 className="w-5 h-5 text-[#25D366] animate-spin" />
+                              <span className="text-[11.5px]">Carregando foto...</span>
+                            </>
+                          ) : (
+                            <>
+                              <ImageIcon className="w-6 h-6 text-[#25D366]" />
+                              <span className="text-[11.5px]">Clique para abrir a foto</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
 
               {text && <FormattedText text={text} mentions={message.mentions} />}
