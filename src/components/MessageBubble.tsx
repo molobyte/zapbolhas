@@ -67,9 +67,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [autoPlayVideo, setAutoPlayVideo] = useState(false);
   const [savedSticker, setSavedSticker] = useState(false);
 
-  // Mensagem de visualização única protegida pelo WhatsApp
-  const isViewOnceMsg = Boolean(message.isViewOnce);
   const displayCaption = text && !isRawMediaBase64OrKey(text) ? text : '';
+  // Mensagem de visualização única protegida pelo WhatsApp
+  const isViewOnceMsg =
+    Boolean(message.isViewOnce) ||
+    ((type === 'image' || type === 'video') &&
+      !imageUrl &&
+      !videoUrl &&
+      !displayCaption &&
+      !isLoadingMedia &&
+      Boolean(isHdLoaded));
 
   // Decripta automaticamente imagens, vídeos, figurinhas e áudios em alta resolução (exceto visualização única protegida)
   useEffect(() => {
@@ -223,6 +230,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       text:
         type === 'audio'
           ? `🎤 Mensagem de voz (${audioData?.duration || '0:46'})`
+          : isViewOnceMsg
+          ? '📷 Mensagem de visualização única'
           : type === 'video'
           ? text || '🎥 Vídeo'
           : type === 'image'
@@ -352,7 +361,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           ) : (
             <div className="text-[13.2px] leading-[18px] break-words">
               {isViewOnceMsg ? (
-                <div className="w-[245px] p-2.5 rounded-[8px] bg-[#182229]/80 border border-white/10 flex items-center gap-3 text-left select-none mb-1">
+                <div className="w-[260px] p-2.5 rounded-[8px] bg-[#182229]/80 border border-white/10 flex items-center gap-3 text-left select-none mb-1">
                   <div className="w-10 h-10 rounded-full bg-[#005C4B]/60 border border-[#25D366]/40 flex items-center justify-center shrink-0 text-[#25D366]">
                     <div className="relative flex items-center justify-center font-bold text-[14px]">
                       <svg
@@ -366,10 +375,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-[13px] font-medium text-[#E9EDEF] flex items-center gap-1.5">
-                      <span>{type === 'video' ? 'Vídeo de visualização única' : 'Foto de visualização única'}</span>
+                      <span>Mensagem de visualização única</span>
                     </div>
                     <div className="text-[11px] text-[#8696A0] mt-0.5 leading-tight">
-                      🔒 Protegida pelo WhatsApp. Abra no seu celular para visualizar.
+                      Favor utilizar o celular para visualizar essa mensagem.
                     </div>
                   </div>
                 </div>

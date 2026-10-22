@@ -709,22 +709,54 @@ export class WhatsAppService {
 
         const checkIsViewOnce = (m: any): boolean => {
           if (!m) return false;
+
+          const mediaData = getProp(m, 'mediaData') || m.mediaData || m.__x_mediaData;
+          const dataObj = m._data || {};
+
           if (
             getProp(m, 'isViewOnce') ||
             getProp(m, 'viewOnce') ||
+            getProp(m, 'isViewOnceOpened') ||
+            getProp(m, 'viewOnceOpened') ||
             getProp(m, 'isViewOnceV2') ||
             getProp(m, 'viewOnceV2') ||
             getProp(m, 'isViewOnceV1') ||
             getProp(m, 'viewOnceMessage') ||
             getProp(m, 'viewOnceMessageV2') ||
-            getProp(m.mediaData, 'isViewOnce') ||
-            getProp(m.mediaData, 'viewOnce') ||
-            getProp(m.mediaData, 'isViewOnceV2') ||
+            getProp(m, 'viewOnceMessageV2Extension') ||
             getProp(m, 'type') === 'view_once' ||
             getProp(m, 'subtype') === 'view_once' ||
             m.isViewOnce === true ||
             m.viewOnce === true ||
-            (typeof m.isViewOnce === 'function' && m.isViewOnce())
+            m.isViewOnceOpened === true ||
+            m.viewOnceOpened === true ||
+            m.__x_isViewOnce === true ||
+            m.__x_isViewOnceOpened === true ||
+            m.__x_viewOnce === true ||
+            m.__x_viewOnceOpened === true ||
+            (typeof m.isViewOnce === 'function' && m.isViewOnce()) ||
+            (typeof m.isViewOnceOpened === 'function' && m.isViewOnceOpened()) ||
+            (mediaData && (
+              getProp(mediaData, 'isViewOnce') ||
+              getProp(mediaData, 'viewOnce') ||
+              getProp(mediaData, 'isViewOnceOpened') ||
+              getProp(mediaData, 'viewOnceOpened') ||
+              getProp(mediaData, 'isViewOnceV2') ||
+              mediaData.isViewOnce === true ||
+              mediaData.viewOnce === true ||
+              mediaData.isViewOnceOpened === true ||
+              mediaData.viewOnceOpened === true
+            )) ||
+            (dataObj && (
+              dataObj.isViewOnce === true ||
+              dataObj.viewOnce === true ||
+              dataObj.isViewOnceOpened === true ||
+              dataObj.viewOnceOpened === true ||
+              dataObj.type === 'view_once' ||
+              dataObj.subtype === 'view_once' ||
+              dataObj.viewOnceMessage ||
+              dataObj.viewOnceMessageV2
+            ))
           ) {
             return true;
           }
@@ -732,10 +764,39 @@ export class WhatsAppService {
           if (typeof m.serialize === 'function') {
             try {
               const s = m.serialize();
-              if (s?.isViewOnce || s?.viewOnce || s?.type === 'view_once' || s?.mediaData?.isViewOnce) {
+              if (
+                s?.isViewOnce ||
+                s?.viewOnce ||
+                s?.isViewOnceOpened ||
+                s?.viewOnceOpened ||
+                s?.type === 'view_once' ||
+                s?.subtype === 'view_once' ||
+                s?.viewOnceMessage ||
+                s?.viewOnceMessageV2 ||
+                s?.mediaData?.isViewOnce ||
+                s?.mediaData?.isViewOnceOpened
+              ) {
                 return true;
               }
             } catch (_) {}
+          }
+
+          const rawType = String(getProp(m, 'type') || '');
+          const directPath = getProp(m, 'directPath') || (mediaData && getProp(mediaData, 'directPath'));
+          const body = String(getProp(m, 'body') || '');
+
+          // Se for mídia de imagem/vídeo sem directPath e o body for uma mediaKey pura em base64 (40 a 70 caracteres terminada em =)
+          const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body.trim()) && body.trim().endsWith('=');
+
+          if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
+            if (isMediaKey) {
+              return true;
+            }
+          }
+
+          const hasMediaKeyProp = Boolean(getProp(m, 'mediaKey') || (mediaData && getProp(mediaData, 'mediaKey')));
+          if (hasMediaKeyProp && !directPath && isMediaKey) {
+            return true;
           }
 
           return false;
@@ -1308,7 +1369,9 @@ export class WhatsAppService {
             rawType = mime.startsWith('video/') ? 'video' : 'image';
           }
           const isChat = rawType === 'chat';
-          const rawBody = isChat
+          const rawBody = isViewOnce
+            ? String(getProp(lastMsg, 'caption') || '')
+            : isChat
             ? String(getProp(lastMsg, 'body') || '')
             : String(getProp(lastMsg, 'caption') || '');
           const formattedLastMsg = formatMentionsInText(rawBody, lastMsg);
@@ -1361,7 +1424,7 @@ export class WhatsAppService {
         } else if (raw.lastMsgType === 'image' || isViewOnce) {
           mediaType = 'photo';
           text = isViewOnce
-            ? (raw.lastMsgBody ? `📷 Foto (1x): ${raw.lastMsgBody}` : '📷 Foto de visualização única')
+            ? (raw.lastMsgBody ? `📷 Foto (1x): ${raw.lastMsgBody}` : '📷 Mensagem de visualização única')
             : (raw.lastMsgBody || 'Foto');
         } else if (
           raw.lastMsgType === 'video' ||
@@ -1370,7 +1433,7 @@ export class WhatsAppService {
         ) {
           mediaType = 'video';
           text = isViewOnce
-            ? (raw.lastMsgBody ? `🎥 Vídeo (1x): ${raw.lastMsgBody}` : '🎥 Vídeo de visualização única')
+            ? (raw.lastMsgBody ? `🎥 Vídeo (1x): ${raw.lastMsgBody}` : '🎥 Mensagem de visualização única')
             : (raw.lastMsgBody || 'Vídeo');
         } else if (raw.lastMsgType === 'ptt' || raw.lastMsgType === 'audio') {
           mediaType = 'audio';
@@ -1448,22 +1511,54 @@ export class WhatsAppService {
 
           const checkIsViewOnce = (m: any): boolean => {
             if (!m) return false;
+
+            const mediaData = getProp(m, 'mediaData') || m.mediaData || m.__x_mediaData;
+            const dataObj = m._data || {};
+
             if (
               getProp(m, 'isViewOnce') ||
               getProp(m, 'viewOnce') ||
+              getProp(m, 'isViewOnceOpened') ||
+              getProp(m, 'viewOnceOpened') ||
               getProp(m, 'isViewOnceV2') ||
               getProp(m, 'viewOnceV2') ||
               getProp(m, 'isViewOnceV1') ||
               getProp(m, 'viewOnceMessage') ||
               getProp(m, 'viewOnceMessageV2') ||
-              getProp(m.mediaData, 'isViewOnce') ||
-              getProp(m.mediaData, 'viewOnce') ||
-              getProp(m.mediaData, 'isViewOnceV2') ||
+              getProp(m, 'viewOnceMessageV2Extension') ||
               getProp(m, 'type') === 'view_once' ||
               getProp(m, 'subtype') === 'view_once' ||
               m.isViewOnce === true ||
               m.viewOnce === true ||
-              (typeof m.isViewOnce === 'function' && m.isViewOnce())
+              m.isViewOnceOpened === true ||
+              m.viewOnceOpened === true ||
+              m.__x_isViewOnce === true ||
+              m.__x_isViewOnceOpened === true ||
+              m.__x_viewOnce === true ||
+              m.__x_viewOnceOpened === true ||
+              (typeof m.isViewOnce === 'function' && m.isViewOnce()) ||
+              (typeof m.isViewOnceOpened === 'function' && m.isViewOnceOpened()) ||
+              (mediaData && (
+                getProp(mediaData, 'isViewOnce') ||
+                getProp(mediaData, 'viewOnce') ||
+                getProp(mediaData, 'isViewOnceOpened') ||
+                getProp(mediaData, 'viewOnceOpened') ||
+                getProp(mediaData, 'isViewOnceV2') ||
+                mediaData.isViewOnce === true ||
+                mediaData.viewOnce === true ||
+                mediaData.isViewOnceOpened === true ||
+                mediaData.viewOnceOpened === true
+              )) ||
+              (dataObj && (
+                dataObj.isViewOnce === true ||
+                dataObj.viewOnce === true ||
+                dataObj.isViewOnceOpened === true ||
+                dataObj.viewOnceOpened === true ||
+                dataObj.type === 'view_once' ||
+                dataObj.subtype === 'view_once' ||
+                dataObj.viewOnceMessage ||
+                dataObj.viewOnceMessageV2
+              ))
             ) {
               return true;
             }
@@ -1471,10 +1566,39 @@ export class WhatsAppService {
             if (typeof m.serialize === 'function') {
               try {
                 const s = m.serialize();
-                if (s?.isViewOnce || s?.viewOnce || s?.type === 'view_once' || s?.mediaData?.isViewOnce) {
+                if (
+                  s?.isViewOnce ||
+                  s?.viewOnce ||
+                  s?.isViewOnceOpened ||
+                  s?.viewOnceOpened ||
+                  s?.type === 'view_once' ||
+                  s?.subtype === 'view_once' ||
+                  s?.viewOnceMessage ||
+                  s?.viewOnceMessageV2 ||
+                  s?.mediaData?.isViewOnce ||
+                  s?.mediaData?.isViewOnceOpened
+                ) {
                   return true;
                 }
               } catch (_) {}
+            }
+
+            const rawType = String(getProp(m, 'type') || '');
+            const directPath = getProp(m, 'directPath') || (mediaData && getProp(mediaData, 'directPath'));
+            const body = String(getProp(m, 'body') || '');
+
+            // Se for mídia de imagem/vídeo sem directPath e o body for uma mediaKey pura em base64 (40 a 70 caracteres terminada em =)
+            const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body.trim()) && body.trim().endsWith('=');
+
+            if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
+              if (isMediaKey) {
+                return true;
+              }
+            }
+
+            const hasMediaKeyProp = Boolean(getProp(m, 'mediaKey') || (mediaData && getProp(mediaData, 'mediaKey')));
+            if (hasMediaKeyProp && !directPath && isMediaKey) {
+              return true;
             }
 
             return false;
@@ -2120,15 +2244,15 @@ export class WhatsAppService {
               };
             }
 
-            // Extrai preview imediato de m.body ou m.mediaData.preview
+            // Extrai preview imediato de m.body ou m.mediaData.preview (exceto para visualização única)
             let thumbBase64 = '';
             if (
-              rawType === 'image' ||
-              rawType === 'video' ||
-              rawType === 'ptv' ||
-              rawType === 'gif' ||
-              rawType === 'sticker' ||
-              isViewOnce
+              !isViewOnce &&
+              (rawType === 'image' ||
+                rawType === 'video' ||
+                rawType === 'ptv' ||
+                rawType === 'gif' ||
+                rawType === 'sticker')
             ) {
               const rawPreview =
                 (typeof getProp(m, 'body') === 'string' && (getProp(m, 'body') as string).length > 20 ? (getProp(m, 'body') as string) : '') ||
@@ -2167,7 +2291,10 @@ export class WhatsAppService {
 
             const isChat = rawType === 'chat';
             let rawBodyText = '';
-            if (isChat) {
+            if (isViewOnce) {
+              const c = String(getProp(m, 'caption') || '');
+              rawBodyText = isRawMediaBase64OrKey(c) ? '' : c;
+            } else if (isChat) {
               const b = String(getProp(m, 'body') || '');
               rawBodyText = isRawMediaBase64OrKey(b) ? '' : b;
             } else if (rawType === 'revoked') {
@@ -2378,22 +2505,54 @@ export class WhatsAppService {
 
         const checkIsViewOnce = (m: any): boolean => {
           if (!m) return false;
+
+          const mediaData = getProp(m, 'mediaData') || m.mediaData || m.__x_mediaData;
+          const dataObj = m._data || {};
+
           if (
             getProp(m, 'isViewOnce') ||
             getProp(m, 'viewOnce') ||
+            getProp(m, 'isViewOnceOpened') ||
+            getProp(m, 'viewOnceOpened') ||
             getProp(m, 'isViewOnceV2') ||
             getProp(m, 'viewOnceV2') ||
             getProp(m, 'isViewOnceV1') ||
             getProp(m, 'viewOnceMessage') ||
             getProp(m, 'viewOnceMessageV2') ||
-            getProp(m.mediaData, 'isViewOnce') ||
-            getProp(m.mediaData, 'viewOnce') ||
-            getProp(m.mediaData, 'isViewOnceV2') ||
+            getProp(m, 'viewOnceMessageV2Extension') ||
             getProp(m, 'type') === 'view_once' ||
             getProp(m, 'subtype') === 'view_once' ||
             m.isViewOnce === true ||
             m.viewOnce === true ||
-            (typeof m.isViewOnce === 'function' && m.isViewOnce())
+            m.isViewOnceOpened === true ||
+            m.viewOnceOpened === true ||
+            m.__x_isViewOnce === true ||
+            m.__x_isViewOnceOpened === true ||
+            m.__x_viewOnce === true ||
+            m.__x_viewOnceOpened === true ||
+            (typeof m.isViewOnce === 'function' && m.isViewOnce()) ||
+            (typeof m.isViewOnceOpened === 'function' && m.isViewOnceOpened()) ||
+            (mediaData && (
+              getProp(mediaData, 'isViewOnce') ||
+              getProp(mediaData, 'viewOnce') ||
+              getProp(mediaData, 'isViewOnceOpened') ||
+              getProp(mediaData, 'viewOnceOpened') ||
+              getProp(mediaData, 'isViewOnceV2') ||
+              mediaData.isViewOnce === true ||
+              mediaData.viewOnce === true ||
+              mediaData.isViewOnceOpened === true ||
+              mediaData.viewOnceOpened === true
+            )) ||
+            (dataObj && (
+              dataObj.isViewOnce === true ||
+              dataObj.viewOnce === true ||
+              dataObj.isViewOnceOpened === true ||
+              dataObj.viewOnceOpened === true ||
+              dataObj.type === 'view_once' ||
+              dataObj.subtype === 'view_once' ||
+              dataObj.viewOnceMessage ||
+              dataObj.viewOnceMessageV2
+            ))
           ) {
             return true;
           }
@@ -2401,10 +2560,39 @@ export class WhatsAppService {
           if (typeof m.serialize === 'function') {
             try {
               const s = m.serialize();
-              if (s?.isViewOnce || s?.viewOnce || s?.type === 'view_once' || s?.mediaData?.isViewOnce) {
+              if (
+                s?.isViewOnce ||
+                s?.viewOnce ||
+                s?.isViewOnceOpened ||
+                s?.viewOnceOpened ||
+                s?.type === 'view_once' ||
+                s?.subtype === 'view_once' ||
+                s?.viewOnceMessage ||
+                s?.viewOnceMessageV2 ||
+                s?.mediaData?.isViewOnce ||
+                s?.mediaData?.isViewOnceOpened
+              ) {
                 return true;
               }
             } catch (_) {}
+          }
+
+          const rawType = String(getProp(m, 'type') || '');
+          const directPath = getProp(m, 'directPath') || (mediaData && getProp(mediaData, 'directPath'));
+          const body = String(getProp(m, 'body') || '');
+
+          // Se for mídia de imagem/vídeo sem directPath e o body for uma mediaKey pura em base64 (40 a 70 caracteres terminada em =)
+          const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body.trim()) && body.trim().endsWith('=');
+
+          if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
+            if (isMediaKey) {
+              return true;
+            }
+          }
+
+          const hasMediaKeyProp = Boolean(getProp(m, 'mediaKey') || (mediaData && getProp(mediaData, 'mediaKey')));
+          if (hasMediaKeyProp && !directPath && isMediaKey) {
+            return true;
           }
 
           return false;
