@@ -2,6 +2,8 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Pin } from 'lucide-react';
 import { BubbleItem } from '../types/whatsapp';
+import { useBubbleStore } from '../store/useBubbleStore';
+import { hexToRgba } from '../utils/colorUtils';
 
 interface ContactBubbleProps {
   bubble: BubbleItem;
@@ -18,6 +20,18 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
   onClose,
   onOpenContextMenu,
 }) => {
+  const {
+    bubbleBorderMode,
+    bubbleBorderColor,
+    bubbleBorderOpacity,
+    bubbleBorderWidth,
+  } = useBubbleStore();
+
+  const isCustomBorder = bubbleBorderMode === 'custom';
+  const customBorderRgba = isCustomBorder
+    ? hexToRgba(bubbleBorderColor, bubbleBorderOpacity)
+    : undefined;
+
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -50,10 +64,23 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
         onContextMenu={handleContextMenu}
         onAuxClick={handleAuxClick}
         title={`${bubble.name}${bubble.isPinned ? ' (Fixada)' : ''} (Clique direito para opções)`}
+        style={
+          isCustomBorder
+            ? {
+                borderColor: customBorderRgba,
+                borderWidth: `${bubbleBorderWidth || 1.5}px`,
+                borderStyle: 'solid',
+              }
+            : undefined
+        }
         className={`relative w-[48px] h-[48px] rounded-full overflow-hidden shrink-0 block shadow-[0_4px_14px_rgba(0,0,0,0.65)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none ${
           isActive
-            ? 'ring-2 ring-[#25D366] border border-white/30'
-            : 'border-[1.5px] border-white/15'
+            ? isCustomBorder
+              ? 'ring-2 ring-[#25D366]'
+              : 'ring-2 ring-[#25D366] border border-white/30'
+            : isCustomBorder
+              ? ''
+              : 'border-[1.5px] border-white/15'
         }`}
       >
         <img

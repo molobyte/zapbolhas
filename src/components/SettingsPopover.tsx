@@ -9,10 +9,25 @@ import {
   FolderOpen,
   Play,
   Layers,
+  Palette,
+  Pipette,
+  RotateCcw,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
 import { DisplayInfo, SoundPreset } from '../types/whatsapp';
 import { previewNotificationSound } from '../utils/notificationSound';
+import { hexToRgba } from '../utils/colorUtils';
+
+const PRESET_BORDER_COLORS = [
+  { name: 'Branco', hex: '#FFFFFF' },
+  { name: 'Verde WhatsApp', hex: '#25D366' },
+  { name: 'Ciano Neon', hex: '#00F0FF' },
+  { name: 'Azul', hex: '#3B82F6' },
+  { name: 'Amarelo', hex: '#FBBF24' },
+  { name: 'Roxo', hex: '#A855F7' },
+  { name: 'Laranja', hex: '#F97316' },
+  { name: 'Vermelho', hex: '#EF4444' },
+];
 
 interface SettingsPopoverProps {
   onInteractiveEnter: () => void;
@@ -33,11 +48,19 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     groupSoundPreset,
     customUserSoundName,
     customGroupSoundName,
+    bubbleBorderMode,
+    bubbleBorderColor,
+    bubbleBorderOpacity,
+    bubbleBorderWidth,
     setBubbleScale,
     setMaxBubbles,
     setSoundMuted,
     setUserSoundPreset,
     setGroupSoundPreset,
+    setBubbleBorderMode,
+    setBubbleBorderColor,
+    setBubbleBorderOpacity,
+    setBubbleBorderWidth,
     minimizeActiveChat,
   } = useBubbleStore();
 
@@ -196,7 +219,207 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           </div>
         </div>
 
-        {/* 3. Escolha do Monitor / Tela */}
+        {/* 3. Borda das Bubbles (Cor, Transparência ou Padrão Atual) */}
+        <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Palette className="w-3.5 h-3.5 text-[#25D366]" />
+              <span className="text-[12.5px] font-medium text-[#E9EDEF]">
+                Borda das Bubbles
+              </span>
+            </div>
+            {/* Alternador: Usar Atual vs Personalizada */}
+            <div className="flex items-center gap-1 bg-[#202C33] p-0.5 rounded-[6px] border border-white/10">
+              <button
+                type="button"
+                onClick={() => setBubbleBorderMode('default')}
+                className={`px-2 py-0.5 text-[11px] rounded-[4px] font-medium transition-colors ${
+                  bubbleBorderMode === 'default'
+                    ? 'bg-[#25D366] text-[#111B21] font-bold'
+                    : 'text-[#8696A0] hover:text-[#E9EDEF]'
+                }`}
+              >
+                Padrão Atual
+              </button>
+              <button
+                type="button"
+                onClick={() => setBubbleBorderMode('custom')}
+                className={`px-2 py-0.5 text-[11px] rounded-[4px] font-medium transition-colors ${
+                  bubbleBorderMode === 'custom'
+                    ? 'bg-[#25D366] text-[#111B21] font-bold'
+                    : 'text-[#8696A0] hover:text-[#E9EDEF]'
+                }`}
+              >
+                Personalizada
+              </button>
+            </div>
+          </div>
+
+          {bubbleBorderMode === 'default' ? (
+            <div className="text-[11px] text-[#8696A0] bg-[#202C33]/60 px-2.5 py-2 rounded-[6px] flex items-center justify-between">
+              <span>Borda original ativa: <strong>Branca com 15% de opacidade</strong>.</span>
+              <button
+                type="button"
+                onClick={() => setBubbleBorderMode('custom')}
+                className="text-[11px] text-[#25D366] hover:underline font-semibold ml-2 shrink-0"
+              >
+                Personalizar
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3 pt-1">
+              {/* Seletor de Cores (Paleta rápida + Color Picker Nativo) */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11.5px] text-[#8696A0]">
+                  <span>Cor da Borda</span>
+                  <div className="flex items-center gap-2">
+                    <label className="relative flex items-center gap-1.5 cursor-pointer group" title="Escolher cor personalizada">
+                      <input
+                        type="color"
+                        value={bubbleBorderColor}
+                        onChange={(e) => setBubbleBorderColor(e.target.value.toUpperCase())}
+                        className="sr-only"
+                      />
+                      <div
+                        style={{ backgroundColor: bubbleBorderColor }}
+                        className="w-4 h-4 rounded-full border border-white/40 shadow-xs flex items-center justify-center group-hover:scale-110 transition-transform"
+                      />
+                      <span className="text-[11px] text-[#E9EDEF] font-mono font-medium">{bubbleBorderColor}</span>
+                      <Pipette className="w-3 h-3 text-[#25D366]" />
+                    </label>
+                  </div>
+                </div>
+
+                {/* Swatches de Cores Rápidas */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {PRESET_BORDER_COLORS.map((p) => {
+                    const isSelected = bubbleBorderColor.toUpperCase() === p.hex.toUpperCase();
+                    return (
+                      <button
+                        key={p.hex}
+                        type="button"
+                        onClick={() => setBubbleBorderColor(p.hex)}
+                        title={p.name}
+                        className={`w-6 h-6 rounded-full transition-transform flex items-center justify-center ${
+                          isSelected ? 'scale-110 ring-2 ring-[#25D366] ring-offset-1 ring-offset-[#111B21]' : 'hover:scale-105'
+                        }`}
+                        style={{ backgroundColor: p.hex }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Slider de Transparência / Opacidade (0% a 100%) */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11.5px]">
+                  <span className="text-[#8696A0]">Transparência / Opacidade</span>
+                  <span className="font-semibold text-[#25D366]">
+                    {bubbleBorderOpacity}%
+                    {bubbleBorderOpacity === 15 && ' (Igual atual)'}
+                    {bubbleBorderOpacity === 100 && ' (Sólida)'}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={5}
+                  max={100}
+                  step={5}
+                  value={bubbleBorderOpacity}
+                  onChange={(e) => setBubbleBorderOpacity(parseInt(e.target.value, 10))}
+                  className="w-full accent-[#25D366] cursor-pointer h-1.5 bg-[#2A3942] rounded-lg"
+                />
+                <div className="flex justify-between text-[10px] text-[#8696A0]">
+                  <span>5% (Discreta)</span>
+                  <button
+                    type="button"
+                    onClick={() => setBubbleBorderOpacity(15)}
+                    className="hover:text-[#25D366] underline cursor-pointer"
+                  >
+                    15% (Atual)
+                  </button>
+                  <span>50%</span>
+                  <button
+                    type="button"
+                    onClick={() => setBubbleBorderOpacity(100)}
+                    className="hover:text-[#25D366] underline cursor-pointer"
+                  >
+                    100% (Sólida)
+                  </button>
+                </div>
+              </div>
+
+              {/* Espessura da Borda */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11.5px]">
+                  <span className="text-[#8696A0]">Espessura da Borda</span>
+                  <span className="font-semibold text-[#25D366]">{bubbleBorderWidth}px</span>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[
+                    { label: '1px', value: 1 },
+                    { label: '1.5px (Atual)', value: 1.5 },
+                    { label: '2px', value: 2 },
+                    { label: '3px', value: 3 },
+                  ].map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => setBubbleBorderWidth(item.value)}
+                      className={`py-1 text-[11px] rounded-[5px] font-medium transition-colors ${
+                        bubbleBorderWidth === item.value
+                          ? 'bg-[#25D366] text-[#111B21] font-bold'
+                          : 'bg-[#202C33] text-[#8696A0] hover:bg-[#2A3942] hover:text-[#E9EDEF]'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Pré-visualização em tempo real */}
+              <div className="bg-[#182229] rounded-[8px] p-2.5 border border-white/5 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="relative w-[36px] h-[36px] rounded-full overflow-hidden shadow-md shrink-0 flex items-center justify-center bg-[#202C33]"
+                    style={{
+                      borderColor: hexToRgba(bubbleBorderColor, bubbleBorderOpacity),
+                      borderWidth: `${bubbleBorderWidth}px`,
+                      borderStyle: 'solid',
+                    }}
+                  >
+                    <div className="w-full h-full bg-gradient-to-tr from-[#005C4B] to-[#25D366] flex items-center justify-center text-white text-[11px] font-bold">
+                      WA
+                    </div>
+                  </div>
+                  <div className="text-[11px] leading-snug">
+                    <div className="text-[#E9EDEF] font-medium">Prévia da bolha</div>
+                    <div className="text-[#8696A0] font-mono text-[10px]">
+                      {hexToRgba(bubbleBorderColor, bubbleBorderOpacity)} • {bubbleBorderWidth}px
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBubbleBorderMode('default');
+                    setBubbleBorderColor('#FFFFFF');
+                    setBubbleBorderOpacity(15);
+                    setBubbleBorderWidth(1.5);
+                  }}
+                  title="Restaurar padrão atual da borda"
+                  className="flex items-center gap-1 text-[10.5px] px-2 py-1 rounded bg-[#202C33] hover:bg-[#2A3942] text-[#8696A0] hover:text-[#E9EDEF] transition-colors"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Resetar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 4. Escolha do Monitor / Tela */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05]">
           <div className="flex items-center gap-1.5 mb-2">
             <Monitor className="w-3.5 h-3.5 text-[#25D366]" />
@@ -236,7 +459,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           )}
         </div>
 
-        {/* 4. Áudio das Notificações (Mutar ou Mudar Som) */}
+        {/* 5. Áudio das Notificações (Mutar ou Mudar Som) */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">

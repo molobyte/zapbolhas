@@ -49,6 +49,10 @@ interface SavedUserSettings {
   groupSoundPreset: SoundPreset;
   customUserSoundName?: string;
   customGroupSoundName?: string;
+  bubbleBorderMode: 'default' | 'custom';
+  bubbleBorderColor: string;
+  bubbleBorderOpacity: number;
+  bubbleBorderWidth: number;
 }
 
 const SETTINGS_STORAGE_KEY = 'whatsapp-bubbles-settings-v1';
@@ -72,6 +76,19 @@ function loadUserSettings(): SavedUserSettings {
         groupSoundPreset: parsed.groupSoundPreset || 'default',
         customUserSoundName: parsed.customUserSoundName,
         customGroupSoundName: parsed.customGroupSoundName,
+        bubbleBorderMode: parsed.bubbleBorderMode === 'custom' ? 'custom' : 'default',
+        bubbleBorderColor:
+          typeof parsed.bubbleBorderColor === 'string' && parsed.bubbleBorderColor.startsWith('#')
+            ? parsed.bubbleBorderColor
+            : '#FFFFFF',
+        bubbleBorderOpacity:
+          typeof parsed.bubbleBorderOpacity === 'number'
+            ? Math.min(100, Math.max(0, parsed.bubbleBorderOpacity))
+            : 15,
+        bubbleBorderWidth:
+          typeof parsed.bubbleBorderWidth === 'number'
+            ? Math.min(6, Math.max(0.5, parsed.bubbleBorderWidth))
+            : 1.5,
       };
     }
   } catch {
@@ -83,6 +100,10 @@ function loadUserSettings(): SavedUserSettings {
     soundMuted: false,
     userSoundPreset: 'default',
     groupSoundPreset: 'default',
+    bubbleBorderMode: 'default',
+    bubbleBorderColor: '#FFFFFF',
+    bubbleBorderOpacity: 15,
+    bubbleBorderWidth: 1.5,
   };
 }
 
@@ -218,6 +239,10 @@ interface BubbleStoreState {
   groupSoundPreset: SoundPreset;
   customUserSoundName?: string;
   customGroupSoundName?: string;
+  bubbleBorderMode: 'default' | 'custom';
+  bubbleBorderColor: string;
+  bubbleBorderOpacity: number;
+  bubbleBorderWidth: number;
 
   chats: ChatSummary[];
   activeBubbles: BubbleItem[];
@@ -255,6 +280,10 @@ interface BubbleStoreState {
   setSoundMuted: (muted: boolean) => void;
   setUserSoundPreset: (preset: SoundPreset, customFileName?: string) => void;
   setGroupSoundPreset: (preset: SoundPreset, customFileName?: string) => void;
+  setBubbleBorderMode: (mode: 'default' | 'custom') => void;
+  setBubbleBorderColor: (color: string) => void;
+  setBubbleBorderOpacity: (opacity: number) => void;
+  setBubbleBorderWidth: (width: number) => void;
   applyExternalSettingsUpdate: (patch: Record<string, unknown>) => void;
   openSettings: () => void;
   logoutWhatsApp: () => Promise<void>;
@@ -313,6 +342,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   groupSoundPreset: initialSettings.groupSoundPreset,
   customUserSoundName: initialSettings.customUserSoundName,
   customGroupSoundName: initialSettings.customGroupSoundName,
+  bubbleBorderMode: initialSettings.bubbleBorderMode,
+  bubbleBorderColor: initialSettings.bubbleBorderColor,
+  bubbleBorderOpacity: initialSettings.bubbleBorderOpacity,
+  bubbleBorderWidth: initialSettings.bubbleBorderWidth,
 
   chats: [],
   activeBubbles: [],
@@ -643,6 +676,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset: s.groupSoundPreset,
       customUserSoundName: s.customUserSoundName,
       customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
     });
     set({ bubbleScale: clamped });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleScale: clamped });
@@ -659,6 +696,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset: s.groupSoundPreset,
       customUserSoundName: s.customUserSoundName,
       customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
     });
     const trimmedBubbles = organizeBubbles(s.activeBubbles, clamped, s.pinnedChatIds);
     const activeStillExists =
@@ -685,6 +726,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset: s.groupSoundPreset,
       customUserSoundName: s.customUserSoundName,
       customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
     });
     set({ soundMuted });
     window.electronAPI?.broadcastSettingsUpdate?.({ soundMuted });
@@ -702,6 +747,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset: s.groupSoundPreset,
       customUserSoundName: updatedCustomName,
       customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
     });
     set({ userSoundPreset, customUserSoundName: updatedCustomName });
     window.electronAPI?.broadcastSettingsUpdate?.({
@@ -722,12 +771,94 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset,
       customUserSoundName: s.customUserSoundName,
       customGroupSoundName: updatedCustomName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
     });
     set({ groupSoundPreset, customGroupSoundName: updatedCustomName });
     window.electronAPI?.broadcastSettingsUpdate?.({
       groupSoundPreset,
       customGroupSoundName: updatedCustomName,
     });
+  },
+
+  setBubbleBorderMode: (bubbleBorderMode: 'default' | 'custom') => {
+    const s = get();
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+    });
+    set({ bubbleBorderMode });
+    window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderMode });
+  },
+
+  setBubbleBorderColor: (bubbleBorderColor: string) => {
+    const s = get();
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+    });
+    set({ bubbleBorderColor });
+    window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderColor });
+  },
+
+  setBubbleBorderOpacity: (bubbleBorderOpacity: number) => {
+    const clamped = Math.min(100, Math.max(0, Math.round(bubbleBorderOpacity)));
+    const s = get();
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: clamped,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+    });
+    set({ bubbleBorderOpacity: clamped });
+    window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderOpacity: clamped });
+  },
+
+  setBubbleBorderWidth: (bubbleBorderWidth: number) => {
+    const clamped = Math.min(6, Math.max(0.5, Number(bubbleBorderWidth.toFixed(1))));
+    const s = get();
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: clamped,
+    });
+    set({ bubbleBorderWidth: clamped });
+    window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderWidth: clamped });
   },
 
   applyExternalSettingsUpdate: (patch) => {
@@ -750,10 +881,38 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       typeof patch.customGroupSoundName === 'string'
         ? patch.customGroupSoundName
         : s.customGroupSoundName;
+    const nextBorderMode =
+      patch.bubbleBorderMode === 'custom' || patch.bubbleBorderMode === 'default'
+        ? patch.bubbleBorderMode
+        : s.bubbleBorderMode;
+    const nextBorderColor =
+      typeof patch.bubbleBorderColor === 'string' ? patch.bubbleBorderColor : s.bubbleBorderColor;
+    const nextBorderOpacity =
+      typeof patch.bubbleBorderOpacity === 'number'
+        ? patch.bubbleBorderOpacity
+        : s.bubbleBorderOpacity;
+    const nextBorderWidth =
+      typeof patch.bubbleBorderWidth === 'number'
+        ? patch.bubbleBorderWidth
+        : s.bubbleBorderWidth;
 
     const trimmedBubbles = organizeBubbles(s.activeBubbles, nextMaxBubbles, s.pinnedChatIds);
     const activeStillExists =
       !s.activeChatId || trimmedBubbles.some((b) => b.chatId === s.activeChatId);
+
+    saveUserSettings({
+      bubbleScale: nextScale,
+      maxBubbles: nextMaxBubbles,
+      soundMuted: nextSoundMuted,
+      userSoundPreset: nextUserPreset,
+      groupSoundPreset: nextGroupPreset,
+      customUserSoundName: nextCustomUser,
+      customGroupSoundName: nextCustomGroup,
+      bubbleBorderMode: nextBorderMode,
+      bubbleBorderColor: nextBorderColor,
+      bubbleBorderOpacity: nextBorderOpacity,
+      bubbleBorderWidth: nextBorderWidth,
+    });
 
     set({
       bubbleScale: nextScale,
@@ -763,6 +922,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset: nextGroupPreset,
       customUserSoundName: nextCustomUser,
       customGroupSoundName: nextCustomGroup,
+      bubbleBorderMode: nextBorderMode,
+      bubbleBorderColor: nextBorderColor,
+      bubbleBorderOpacity: nextBorderOpacity,
+      bubbleBorderWidth: nextBorderWidth,
       activeBubbles: trimmedBubbles,
       activeChatId: activeStillExists ? s.activeChatId : null,
       activePopover:
