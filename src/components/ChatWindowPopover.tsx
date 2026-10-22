@@ -80,6 +80,8 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const unreadDividerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const userHasScrolledUpRef = useRef<boolean>(false);
+  const isAtBottomRef = useRef<boolean>(true);
+  const initialUnreadScrolledForChatRef = useRef<string | null>(null);
   const isLoadingOlderRef = useRef<boolean>(false);
 
   // Estados e Refs para Gravação de Áudio / Nota de Voz (Visual WhatsApp Web)
@@ -187,27 +189,69 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    const divider = unreadDividerRef.current;
-    if (divider && unreadBanner && unreadBanner.count > 0) {
-      // Posiciona a visualização na barra de mensagens não lidas, deixando a última mensagem lida acima como contexto
-      container.scrollTop = Math.max(0, divider.offsetTop - 68);
-    } else {
-      container.scrollTop = container.scrollHeight;
-    }
-  }, [unreadBanner]);
+    const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
 
-  // Sempre que trocar de conversa (ou abrir a janela), reseta a trava de rolagem manual do usuário
+    if (!hasInitialScrolled) {
+      const divider = unreadDividerRef.current;
+      const isWaitingFullFetch = Boolean(
+        unreadBanner &&
+          unreadBanner.count > 0 &&
+          !unreadBanner.resolvedFromFullFetch &&
+          messages.length < unreadBanner.count
+      );
+
+      if (divider && unreadBanner && unreadBanner.count > 0) {
+        // Posiciona a visualização na barra de mensagens não lidas apenas na abertura inicial
+        container.scrollTop = Math.max(0, divider.offsetTop - 68);
+        if (!isWaitingFullFetch) {
+          initialUnreadScrolledForChatRef.current = currentChatId;
+        }
+        const distanceToBottom =
+          container.scrollHeight - container.scrollTop - container.clientHeight;
+        const atBottom = distanceToBottom <= 40;
+        isAtBottomRef.current = atBottom;
+        userHasScrolledUpRef.current = !atBottom;
+        return;
+      }
+
+      if (!isWaitingFullFetch) {
+        // Se não há mensagens não lidas ou não há divider após carregamento, rola até o final
+        if (!unreadBanner || unreadBanner.count === 0 || messages.length > 0) {
+          container.scrollTop = container.scrollHeight;
+          initialUnreadScrolledForChatRef.current = currentChatId;
+          isAtBottomRef.current = true;
+          userHasScrolledUpRef.current = false;
+          return;
+        }
+      }
+    } else {
+      // Se a rolagem inicial da conversa já ocorreu, NUNCA volta para a barra de não lidas.
+      // Rola para o rodapé apenas se o usuário já estiver no final da conversa acompanhando mensagens novas.
+      if (isAtBottomRef.current && !userHasScrolledUpRef.current) {
+        container.scrollTop = container.scrollHeight;
+      }
+    }
+  }, [currentChatId, unreadBanner, messages.length]);
+
+  // Sempre que trocar de conversa (ou abrir a janela), reseta a trava e o estado de rolagem inicial
   useLayoutEffect(() => {
+    initialUnreadScrolledForChatRef.current = null;
     userHasScrolledUpRef.current = false;
     isLoadingOlderRef.current = false;
-  }, [currentChatId]);
+    isAtBottomRef.current = true;
+  }, [currentChatId, activeChatId]);
 
   // Sincroniza o scroll imediatamente antes da pintura e no próximo frame quando mensagens ou banner mudam
   useLayoutEffect(() => {
-    if (userHasScrolledUpRef.current) return;
+    const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
+    // Se a rolagem inicial já ocorreu e o usuário não está no final (está descendo/lendo mensagens anteriores), não rola
+    if (hasInitialScrolled && (userHasScrolledUpRef.current || !isAtBottomRef.current)) {
+      return;
+    }
+
     scrollToTarget();
     const rafId = requestAnimationFrame(() => {
-      if (!userHasScrolledUpRef.current) {
+      if (!hasInitialScrolled || (isAtBottomRef.current && !userHasScrolledUpRef.current)) {
         scrollToTarget();
       }
     });
@@ -215,13 +259,14 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   }, [currentChatId, messages, unreadBanner?.firstUnreadMsgId, unreadBanner?.count, scrollToTarget]);
 
   // Observa mudanças de altura do conteúdo (ex: decodificação assíncrona de <img> base64 ou download HD)
-  // para impedir que o scroll fique perdido no meio do chat após o carregamento das imagens
+  // para manter a rolagem correta sem atrapalhar quem está lendo mensagens anteriores
   useEffect(() => {
     const contentEl = messagesContentRef.current;
     if (!contentEl) return;
 
     const observer = new ResizeObserver(() => {
-      if (!userHasScrolledUpRef.current) {
+      const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
+      if (!hasInitialScrolled || (isAtBottomRef.current && !userHasScrolledUpRef.current)) {
         scrollToTarget();
       }
     });
@@ -320,8 +365,12 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   };
 
   const handleSendSticker = async (stickerDataUrl: string) => {
+    isAtBottomRef.current = true;
     userHasScrolledUpRef.current = false;
     setPickerOpen(false);
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
     await sendSticker(stickerDataUrl);
   };
 
@@ -401,7 +450,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     setPendingMedia(null);
     setPendingCaption('');
     setInputText('');
+    isAtBottomRef.current = true;
     userHasScrolledUpRef.current = false;
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
     await sendMedia(toSend);
   }, [pendingMedia, pendingCaption, trackedMentions, isGroupChat, groupParticipants, sendMedia]);
 
@@ -719,7 +772,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     reader.onload = async () => {
       if (typeof reader.result === 'string') {
         const audioDataUrl = reader.result;
+        isAtBottomRef.current = true;
         userHasScrolledUpRef.current = false;
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
         await sendVoiceNote({
           audioDataUrl,
           durationSeconds: Math.max(1, duration),
@@ -987,7 +1044,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     setPickerOpen(false);
     setShowMentionPopover(false);
     setTrackedMentions(new Map());
+    isAtBottomRef.current = true;
     userHasScrolledUpRef.current = false;
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
 
     const mentionList = Array.from(mentionJids);
     await sendMessage(
@@ -1034,6 +1095,61 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     }
     window.electronAPI?.openExternalImage(urlToOpen);
   };
+
+  const maybeLoadOlderMessages = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    if (
+      initialUnreadScrolledForChatRef.current === currentChatId &&
+      container.scrollTop <= 20 &&
+      !isLoadingOlderRef.current &&
+      messages.length >= 25 &&
+      messages.length < 500 &&
+      window.electronAPI?.getMessages
+    ) {
+      isLoadingOlderRef.current = true;
+      const prevHeight = container.scrollHeight;
+      const targetChatId = currentChatId;
+      if (targetChatId) {
+        window.electronAPI
+          .getMessages(targetChatId, Math.min(500, messages.length + 80))
+          .then((olderMsgs) => {
+            if (olderMsgs && olderMsgs.length > messages.length) {
+              useBubbleStore.getState().setMessagesForChat(targetChatId, olderMsgs);
+              requestAnimationFrame(() => {
+                if (scrollContainerRef.current) {
+                  const newHeight = scrollContainerRef.current.scrollHeight;
+                  scrollContainerRef.current.scrollTop = Math.max(
+                    0,
+                    newHeight - prevHeight
+                  );
+                }
+              });
+            }
+          })
+          .finally(() => {
+            isLoadingOlderRef.current = false;
+          });
+      } else {
+        isLoadingOlderRef.current = false;
+      }
+    }
+  }, [currentChatId, messages.length]);
+
+  const handleScroll = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const distanceToBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    const atBottom = distanceToBottom <= 40;
+
+    isAtBottomRef.current = atBottom;
+    userHasScrolledUpRef.current = !atBottom;
+
+    maybeLoadOlderMessages();
+  }, [maybeLoadOlderMessages]);
 
   if (!currentChat) return null;
 
@@ -1109,56 +1225,16 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       {/* Área de Histórico de Mensagens */}
       <div
         ref={scrollContainerRef}
+        onScroll={handleScroll}
         onLoadCapture={() => {
-          if (!userHasScrolledUpRef.current) {
+          const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
+          if (!hasInitialScrolled || (isAtBottomRef.current && !userHasScrolledUpRef.current)) {
             scrollToTarget();
           }
         }}
         onWheel={(e) => {
-          const container = scrollContainerRef.current;
-          if (!container) return;
           if (e.deltaY < 0) {
-            userHasScrolledUpRef.current = true;
-            // Se o usuário chegou ao topo da conversa, carrega mais mensagens anteriores do WhatsApp
-            if (
-              container.scrollTop <= 20 &&
-              !isLoadingOlderRef.current &&
-              messages.length >= 25 &&
-              messages.length < 500 &&
-              window.electronAPI?.getMessages
-            ) {
-              isLoadingOlderRef.current = true;
-              const prevHeight = container.scrollHeight;
-              const targetChatId = currentChatId;
-              if (targetChatId) {
-                window.electronAPI
-                  .getMessages(targetChatId, Math.min(500, messages.length + 80))
-                  .then((olderMsgs) => {
-                    if (olderMsgs && olderMsgs.length > messages.length) {
-                      useBubbleStore.getState().setMessagesForChat(targetChatId, olderMsgs);
-                      requestAnimationFrame(() => {
-                        if (scrollContainerRef.current) {
-                          const newHeight = scrollContainerRef.current.scrollHeight;
-                          scrollContainerRef.current.scrollTop = Math.max(
-                            0,
-                            newHeight - prevHeight
-                          );
-                        }
-                      });
-                    }
-                  })
-                  .finally(() => {
-                    isLoadingOlderRef.current = false;
-                  });
-              } else {
-                isLoadingOlderRef.current = false;
-              }
-            }
-          } else if (
-            !unreadBanner &&
-            container.scrollHeight - container.scrollTop - container.clientHeight <= 40
-          ) {
-            userHasScrolledUpRef.current = false;
+            maybeLoadOlderMessages();
           }
         }}
         onPointerDown={(e) => {
@@ -1167,7 +1243,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
           const rect = container.getBoundingClientRect();
           // Se o usuário clicou na barra de rolagem à direita para arrastar manualmente
           if (e.clientX >= rect.right - 14) {
-            userHasScrolledUpRef.current = true;
+            const distanceToBottom =
+              container.scrollHeight - container.scrollTop - container.clientHeight;
+            const atBottom = distanceToBottom <= 40;
+            isAtBottomRef.current = atBottom;
+            userHasScrolledUpRef.current = !atBottom;
           }
         }}
         className="relative z-10 flex-1 overflow-y-auto px-3 pt-2 pb-2 wa-scrollbar"
