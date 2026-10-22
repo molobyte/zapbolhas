@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { useBubbleStore } from './store/useBubbleStore';
 import { BubbleDock } from './components/BubbleDock';
-import { BubbleVignette } from './components/BubbleVignette';
 import { ChatListPopover } from './components/ChatListPopover';
 import { ChatWindowPopover } from './components/ChatWindowPopover';
 import { QRCodePopover } from './components/QRCodePopover';
@@ -185,16 +184,11 @@ export const App: React.FC = () => {
         </ErrorBoundary>
       </div>
 
-      {/* Vinheta / Gradiente de Fundo no Canto Inferior Direito atrás das bolhas */}
-      <BubbleVignette />
-
       {/* Dock Inferior Direito com as Bolhas de Contatos e o Botão Fixo do WhatsApp */}
-      <div className="relative z-10">
-        <BubbleDock
-          onInteractiveEnter={handleInteractiveEnter}
-          onInteractiveLeave={handleInteractiveLeave}
-        />
-      </div>
+      <BubbleDock
+        onInteractiveEnter={handleInteractiveEnter}
+        onInteractiveLeave={handleInteractiveLeave}
+      />
     </div>
   );
 };

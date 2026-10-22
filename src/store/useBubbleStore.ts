@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import {
   ActivePopover,
   BubbleItem,
-  BubbleVignetteStyle,
   ChatBubbleSize,
   ChatSummary,
   ConnectionMode,
@@ -54,9 +53,6 @@ interface SavedUserSettings {
   bubbleBorderColor: string;
   bubbleBorderOpacity: number;
   bubbleBorderWidth: number;
-  bubbleVignetteEnabled: boolean;
-  bubbleVignetteOpacity: number;
-  bubbleVignetteStyle: BubbleVignetteStyle;
 }
 
 const SETTINGS_STORAGE_KEY = 'whatsapp-bubbles-settings-v1';
@@ -93,15 +89,6 @@ function loadUserSettings(): SavedUserSettings {
           typeof parsed.bubbleBorderWidth === 'number'
             ? Math.min(6, Math.max(0.5, parsed.bubbleBorderWidth))
             : 1.5,
-        bubbleVignetteEnabled: Boolean(parsed.bubbleVignetteEnabled),
-        bubbleVignetteOpacity:
-          typeof parsed.bubbleVignetteOpacity === 'number'
-            ? Math.min(100, Math.max(10, Math.round(parsed.bubbleVignetteOpacity)))
-            : 80,
-        bubbleVignetteStyle:
-          parsed.bubbleVignetteStyle === 'radial' || parsed.bubbleVignetteStyle === 'emerald'
-            ? parsed.bubbleVignetteStyle
-            : 'classic',
       };
     }
   } catch {
@@ -117,9 +104,6 @@ function loadUserSettings(): SavedUserSettings {
     bubbleBorderColor: '#FFFFFF',
     bubbleBorderOpacity: 15,
     bubbleBorderWidth: 1.5,
-    bubbleVignetteEnabled: false,
-    bubbleVignetteOpacity: 80,
-    bubbleVignetteStyle: 'classic',
   };
 }
 
@@ -129,40 +113,6 @@ function saveUserSettings(settings: SavedUserSettings) {
   } catch {
     // Ignore localStorage error
   }
-}
-
-function extractSavedSettings(s: {
-  bubbleScale: number;
-  maxBubbles: number;
-  soundMuted: boolean;
-  userSoundPreset: SoundPreset;
-  groupSoundPreset: SoundPreset;
-  customUserSoundName?: string;
-  customGroupSoundName?: string;
-  bubbleBorderMode: 'default' | 'custom';
-  bubbleBorderColor: string;
-  bubbleBorderOpacity: number;
-  bubbleBorderWidth: number;
-  bubbleVignetteEnabled: boolean;
-  bubbleVignetteOpacity: number;
-  bubbleVignetteStyle: BubbleVignetteStyle;
-}): SavedUserSettings {
-  return {
-    bubbleScale: s.bubbleScale,
-    maxBubbles: s.maxBubbles,
-    soundMuted: s.soundMuted,
-    userSoundPreset: s.userSoundPreset,
-    groupSoundPreset: s.groupSoundPreset,
-    customUserSoundName: s.customUserSoundName,
-    customGroupSoundName: s.customGroupSoundName,
-    bubbleBorderMode: s.bubbleBorderMode,
-    bubbleBorderColor: s.bubbleBorderColor,
-    bubbleBorderOpacity: s.bubbleBorderOpacity,
-    bubbleBorderWidth: s.bubbleBorderWidth,
-    bubbleVignetteEnabled: s.bubbleVignetteEnabled,
-    bubbleVignetteOpacity: s.bubbleVignetteOpacity,
-    bubbleVignetteStyle: s.bubbleVignetteStyle,
-  };
 }
 
 const PINNED_STORAGE_KEY = 'whatsapp-bubbles-pinned-chats-v1';
@@ -293,9 +243,6 @@ interface BubbleStoreState {
   bubbleBorderColor: string;
   bubbleBorderOpacity: number;
   bubbleBorderWidth: number;
-  bubbleVignetteEnabled: boolean;
-  bubbleVignetteOpacity: number;
-  bubbleVignetteStyle: BubbleVignetteStyle;
 
   chats: ChatSummary[];
   activeBubbles: BubbleItem[];
@@ -337,9 +284,6 @@ interface BubbleStoreState {
   setBubbleBorderColor: (color: string) => void;
   setBubbleBorderOpacity: (opacity: number) => void;
   setBubbleBorderWidth: (width: number) => void;
-  setBubbleVignetteEnabled: (enabled: boolean) => void;
-  setBubbleVignetteOpacity: (opacity: number) => void;
-  setBubbleVignetteStyle: (style: BubbleVignetteStyle) => void;
   applyExternalSettingsUpdate: (patch: Record<string, unknown>) => void;
   openSettings: () => void;
   logoutWhatsApp: () => Promise<void>;
@@ -402,9 +346,6 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   bubbleBorderColor: initialSettings.bubbleBorderColor,
   bubbleBorderOpacity: initialSettings.bubbleBorderOpacity,
   bubbleBorderWidth: initialSettings.bubbleBorderWidth,
-  bubbleVignetteEnabled: initialSettings.bubbleVignetteEnabled,
-  bubbleVignetteOpacity: initialSettings.bubbleVignetteOpacity,
-  bubbleVignetteStyle: initialSettings.bubbleVignetteStyle,
 
   chats: [],
   activeBubbles: [],
@@ -727,7 +668,19 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   setBubbleScale: (scale) => {
     const clamped = Math.min(1.45, Math.max(0.65, Number(scale.toFixed(2))));
     const s = get();
-    saveUserSettings(extractSavedSettings({ ...s, bubbleScale: clamped }));
+    saveUserSettings({
+      bubbleScale: clamped,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+    });
     set({ bubbleScale: clamped });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleScale: clamped });
   },
@@ -735,7 +688,19 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   setMaxBubbles: (max) => {
     const clamped = Math.min(15, Math.max(1, Math.round(max)));
     const s = get();
-    saveUserSettings(extractSavedSettings({ ...s, maxBubbles: clamped }));
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: clamped,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+    });
     const trimmedBubbles = organizeBubbles(s.activeBubbles, clamped, s.pinnedChatIds);
     const activeStillExists =
       !s.activeChatId || trimmedBubbles.some((b) => b.chatId === s.activeChatId);
@@ -753,7 +718,19 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   setSoundMuted: (soundMuted) => {
     const s = get();
-    saveUserSettings(extractSavedSettings({ ...s, soundMuted }));
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+    });
     set({ soundMuted });
     window.electronAPI?.broadcastSettingsUpdate?.({ soundMuted });
   },
@@ -762,13 +739,19 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const s = get();
     const updatedCustomName =
       customFileName !== undefined ? customFileName : s.customUserSoundName;
-    saveUserSettings(
-      extractSavedSettings({
-        ...s,
-        userSoundPreset,
-        customUserSoundName: updatedCustomName,
-      })
-    );
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: updatedCustomName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+    });
     set({ userSoundPreset, customUserSoundName: updatedCustomName });
     window.electronAPI?.broadcastSettingsUpdate?.({
       userSoundPreset,
@@ -780,13 +763,19 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const s = get();
     const updatedCustomName =
       customFileName !== undefined ? customFileName : s.customGroupSoundName;
-    saveUserSettings(
-      extractSavedSettings({
-        ...s,
-        groupSoundPreset,
-        customGroupSoundName: updatedCustomName,
-      })
-    );
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: updatedCustomName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+    });
     set({ groupSoundPreset, customGroupSoundName: updatedCustomName });
     window.electronAPI?.broadcastSettingsUpdate?.({
       groupSoundPreset,
@@ -796,14 +785,38 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   setBubbleBorderMode: (bubbleBorderMode: 'default' | 'custom') => {
     const s = get();
-    saveUserSettings(extractSavedSettings({ ...s, bubbleBorderMode }));
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+    });
     set({ bubbleBorderMode });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderMode });
   },
 
   setBubbleBorderColor: (bubbleBorderColor: string) => {
     const s = get();
-    saveUserSettings(extractSavedSettings({ ...s, bubbleBorderColor }));
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+    });
     set({ bubbleBorderColor });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderColor });
   },
@@ -811,7 +824,19 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   setBubbleBorderOpacity: (bubbleBorderOpacity: number) => {
     const clamped = Math.min(100, Math.max(0, Math.round(bubbleBorderOpacity)));
     const s = get();
-    saveUserSettings(extractSavedSettings({ ...s, bubbleBorderOpacity: clamped }));
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: clamped,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+    });
     set({ bubbleBorderOpacity: clamped });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderOpacity: clamped });
   },
@@ -819,31 +844,21 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   setBubbleBorderWidth: (bubbleBorderWidth: number) => {
     const clamped = Math.min(6, Math.max(0.5, Number(bubbleBorderWidth.toFixed(1))));
     const s = get();
-    saveUserSettings(extractSavedSettings({ ...s, bubbleBorderWidth: clamped }));
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: clamped,
+    });
     set({ bubbleBorderWidth: clamped });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderWidth: clamped });
-  },
-
-  setBubbleVignetteEnabled: (bubbleVignetteEnabled: boolean) => {
-    const s = get();
-    saveUserSettings(extractSavedSettings({ ...s, bubbleVignetteEnabled }));
-    set({ bubbleVignetteEnabled });
-    window.electronAPI?.broadcastSettingsUpdate?.({ bubbleVignetteEnabled });
-  },
-
-  setBubbleVignetteOpacity: (bubbleVignetteOpacity: number) => {
-    const clamped = Math.min(100, Math.max(10, Math.round(bubbleVignetteOpacity)));
-    const s = get();
-    saveUserSettings(extractSavedSettings({ ...s, bubbleVignetteOpacity: clamped }));
-    set({ bubbleVignetteOpacity: clamped });
-    window.electronAPI?.broadcastSettingsUpdate?.({ bubbleVignetteOpacity: clamped });
-  },
-
-  setBubbleVignetteStyle: (bubbleVignetteStyle: BubbleVignetteStyle) => {
-    const s = get();
-    saveUserSettings(extractSavedSettings({ ...s, bubbleVignetteStyle }));
-    set({ bubbleVignetteStyle });
-    window.electronAPI?.broadcastSettingsUpdate?.({ bubbleVignetteStyle });
   },
 
   applyExternalSettingsUpdate: (patch) => {
@@ -880,20 +895,6 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       typeof patch.bubbleBorderWidth === 'number'
         ? patch.bubbleBorderWidth
         : s.bubbleBorderWidth;
-    const nextVignetteEnabled =
-      typeof patch.bubbleVignetteEnabled === 'boolean'
-        ? patch.bubbleVignetteEnabled
-        : s.bubbleVignetteEnabled;
-    const nextVignetteOpacity =
-      typeof patch.bubbleVignetteOpacity === 'number'
-        ? patch.bubbleVignetteOpacity
-        : s.bubbleVignetteOpacity;
-    const nextVignetteStyle =
-      patch.bubbleVignetteStyle === 'radial' ||
-      patch.bubbleVignetteStyle === 'emerald' ||
-      patch.bubbleVignetteStyle === 'classic'
-        ? patch.bubbleVignetteStyle
-        : s.bubbleVignetteStyle;
 
     const trimmedBubbles = organizeBubbles(s.activeBubbles, nextMaxBubbles, s.pinnedChatIds);
     const activeStillExists =
@@ -911,9 +912,6 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderColor: nextBorderColor,
       bubbleBorderOpacity: nextBorderOpacity,
       bubbleBorderWidth: nextBorderWidth,
-      bubbleVignetteEnabled: nextVignetteEnabled,
-      bubbleVignetteOpacity: nextVignetteOpacity,
-      bubbleVignetteStyle: nextVignetteStyle,
     });
 
     set({
@@ -928,9 +926,6 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderColor: nextBorderColor,
       bubbleBorderOpacity: nextBorderOpacity,
       bubbleBorderWidth: nextBorderWidth,
-      bubbleVignetteEnabled: nextVignetteEnabled,
-      bubbleVignetteOpacity: nextVignetteOpacity,
-      bubbleVignetteStyle: nextVignetteStyle,
       activeBubbles: trimmedBubbles,
       activeChatId: activeStillExists ? s.activeChatId : null,
       activePopover:
