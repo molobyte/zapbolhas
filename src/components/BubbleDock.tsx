@@ -382,7 +382,7 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
         onMouseEnter={onInteractiveEnter}
         onMouseLeave={onInteractiveLeave}
         style={{ zoom: bubbleScale }}
-        className="flex items-center justify-end gap-[12px] pointer-events-auto h-[48px]"
+        id="bubble-dock-row" className="flex items-center justify-end gap-[12px] pointer-events-auto h-[48px]"
       >
         <AnimatePresence mode="popLayout">
           {activeBubbles.map((bubble) => (

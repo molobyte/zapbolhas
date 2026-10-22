@@ -125,6 +125,8 @@ export interface ViewingImageState {
 
 export type ActivePopover = 'none' | 'chat-list' | 'chat-window' | 'qr-code' | 'settings';
 
+export type BubbleVignetteStyle = 'classic' | 'radial' | 'emerald';
+
 export type SoundPreset = 'default' | 'crystal' | 'pop' | 'custom';
 
 export const DEFAULT_AVATAR =

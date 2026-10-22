@@ -12,9 +12,10 @@ import {
   Palette,
   Pipette,
   RotateCcw,
+  Contrast,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
-import { DisplayInfo, SoundPreset } from '../types/whatsapp';
+import { BubbleVignetteStyle, DisplayInfo, SoundPreset } from '../types/whatsapp';
 import { previewNotificationSound } from '../utils/notificationSound';
 import { hexToRgba } from '../utils/colorUtils';
 
@@ -52,6 +53,9 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     bubbleBorderColor,
     bubbleBorderOpacity,
     bubbleBorderWidth,
+    bubbleVignetteEnabled,
+    bubbleVignetteOpacity,
+    bubbleVignetteStyle,
     setBubbleScale,
     setMaxBubbles,
     setSoundMuted,
@@ -61,6 +65,9 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     setBubbleBorderColor,
     setBubbleBorderOpacity,
     setBubbleBorderWidth,
+    setBubbleVignetteEnabled,
+    setBubbleVignetteOpacity,
+    setBubbleVignetteStyle,
     minimizeActiveChat,
   } = useBubbleStore();
 
@@ -419,7 +426,191 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           )}
         </div>
 
-        {/* 4. Escolha do Monitor / Tela */}
+        {/* 4. Vinheta / Gradiente de Fundo no Canto Inferior Direito */}
+        <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Contrast className="w-3.5 h-3.5 text-[#25D366]" />
+              <span className="text-[12.5px] font-medium text-[#E9EDEF]">
+                Vinheta de Fundo (Canto Inferior)
+              </span>
+            </div>
+            {/* Alternador Ativar / Desativar */}
+            <button
+              type="button"
+              onClick={() => setBubbleVignetteEnabled(!bubbleVignetteEnabled)}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
+                bubbleVignetteEnabled
+                  ? 'bg-[#25D366] text-[#111B21] shadow-xs'
+                  : 'bg-[#202C33] text-[#8696A0] hover:text-[#E9EDEF]'
+              }`}
+            >
+              {bubbleVignetteEnabled ? 'Ativada' : 'Desativada'}
+            </button>
+          </div>
+
+          <p className="text-[11px] text-[#8696A0] leading-snug">
+            Cria um gradiente escuro suave no canto inferior direito atrás das bolhas para que as cores não se misturem com o seu papel de parede ou janelas abertas. O efeito se expande automaticamente até o último contato aberto.
+          </p>
+
+          {bubbleVignetteEnabled ? (
+            <div className="space-y-3 pt-1 border-t border-white/[0.06]">
+              {/* Estilo do Gradiente */}
+              <div className="space-y-1.5">
+                <span className="text-[11.5px] text-[#8696A0]">Estilo da Vinheta</span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { key: 'classic', label: 'Clássico', desc: 'Escuro Suave' },
+                    { key: 'emerald', label: 'WhatsApp', desc: 'Nuance Verde' },
+                    { key: 'radial', label: 'Radial', desc: 'Spotlight' },
+                  ].map((styleOpt) => {
+                    const isSelected = bubbleVignetteStyle === styleOpt.key;
+                    return (
+                      <button
+                        key={styleOpt.key}
+                        type="button"
+                        onClick={() => setBubbleVignetteStyle(styleOpt.key as BubbleVignetteStyle)}
+                        className={`py-1.5 px-2 rounded-[6px] text-left transition-colors flex flex-col ${
+                          isSelected
+                            ? 'bg-[#005C4B] border border-[#25D366]/40 text-[#E9EDEF]'
+                            : 'bg-[#202C33] text-[#8696A0] hover:bg-[#2A3942] hover:text-[#E9EDEF]'
+                        }`}
+                      >
+                        <span className={`text-[11.5px] font-semibold ${isSelected ? 'text-[#25D366]' : ''}`}>
+                          {styleOpt.label}
+                        </span>
+                        <span className="text-[9.5px] opacity-75">{styleOpt.desc}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Slider de Intensidade / Opacidade */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-[11.5px]">
+                  <span className="text-[#8696A0]">Intensidade / Opacidade</span>
+                  <span className="font-semibold text-[#25D366]">{bubbleVignetteOpacity}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={15}
+                  max={100}
+                  step={5}
+                  value={bubbleVignetteOpacity}
+                  onChange={(e) => setBubbleVignetteOpacity(parseInt(e.target.value, 10))}
+                  className="w-full accent-[#25D366] cursor-pointer h-1.5 bg-[#2A3942] rounded-lg"
+                />
+                <div className="flex justify-between text-[10px] text-[#8696A0]">
+                  <button
+                    type="button"
+                    onClick={() => setBubbleVignetteOpacity(30)}
+                    className="hover:text-[#25D366] underline cursor-pointer"
+                  >
+                    30% (Suave)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBubbleVignetteOpacity(60)}
+                    className="hover:text-[#25D366] underline cursor-pointer"
+                  >
+                    60% (Médio)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBubbleVignetteOpacity(80)}
+                    className="hover:text-[#25D366] underline cursor-pointer font-medium text-[#E9EDEF]"
+                  >
+                    80% (Padrão)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBubbleVignetteOpacity(100)}
+                    className="hover:text-[#25D366] underline cursor-pointer"
+                  >
+                    100% (Forte)
+                  </button>
+                </div>
+              </div>
+
+              {/* Pré-visualização Interativa do Efeito no Canto */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] text-[#8696A0]">
+                  <span>Prévia do Canto da Tela</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBubbleVignetteOpacity(80);
+                      setBubbleVignetteStyle('classic');
+                    }}
+                    title="Restaurar padrão da vinheta"
+                    className="flex items-center gap-1 text-[10.5px] text-[#8696A0] hover:text-[#25D366]"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    Resetar
+                  </button>
+                </div>
+
+                {/* Caixa simulando wallpaper desktop com a vinheta no canto */}
+                <div className="relative h-[68px] rounded-[8px] overflow-hidden border border-white/10 bg-gradient-to-tr from-[#3b82f6]/30 via-[#ec4899]/30 to-[#eab308]/30 flex items-end justify-end p-2 select-none">
+                  {/* Padrão quadriculado sutil de fundo para evidenciar o contraste */}
+                  <div
+                    className="absolute inset-0 opacity-20 pointer-events-none"
+                    style={{
+                      backgroundImage:
+                        'radial-gradient(circle, #ffffff 1px, transparent 1px)',
+                      backgroundSize: '10px 10px',
+                    }}
+                  />
+
+                  {/* Gradiente da vinheta na prévia */}
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{
+                      background:
+                        bubbleVignetteStyle === 'radial'
+                          ? `radial-gradient(circle at 100% 100%, rgba(5,7,10,${0.98 * (bubbleVignetteOpacity / 100)}) 0%, rgba(8,11,15,${0.85 * (bubbleVignetteOpacity / 100)}) 40%, transparent 100%)`
+                          : bubbleVignetteStyle === 'emerald'
+                          ? `radial-gradient(ellipse 100% 100% at 100% 100%, rgba(3,24,18,${0.96 * (bubbleVignetteOpacity / 100)}) 0%, rgba(9,24,20,${0.75 * (bubbleVignetteOpacity / 100)}) 50%, transparent 100%), linear-gradient(to top, rgba(0,0,0,${0.5 * (bubbleVignetteOpacity / 100)}) 0%, transparent 80%)`
+                          : `radial-gradient(ellipse 100% 100% at 100% 100%, rgba(6,9,12,${0.95 * (bubbleVignetteOpacity / 100)}) 0%, rgba(10,15,20,${0.80 * (bubbleVignetteOpacity / 100)}) 55%, transparent 100%), linear-gradient(to top, rgba(0,0,0,${0.45 * (bubbleVignetteOpacity / 100)}) 0%, transparent 75%)`,
+                    }}
+                  />
+
+                  {/* Mini bolhas de exemplo sobrepostas na vinheta */}
+                  <div className="relative z-10 flex items-center gap-1.5">
+                    {/* Bolha de exemplo 1 */}
+                    <div className="w-[28px] h-[28px] rounded-full border border-white/20 bg-[#2A3942] flex items-center justify-center text-[10px] text-white font-bold shadow-md">
+                      Ana
+                    </div>
+                    {/* Bolha de exemplo 2 */}
+                    <div className="w-[28px] h-[28px] rounded-full border border-white/20 bg-[#005C4B] flex items-center justify-center text-[10px] text-white font-bold shadow-md">
+                      João
+                    </div>
+                    {/* Botão WhatsApp exemplo */}
+                    <div className="w-[28px] h-[28px] rounded-full bg-[#25D366] text-white flex items-center justify-center shadow-md">
+                      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current">
+                        <path d="M12.031 2c-5.516 0-9.969 4.453-9.969 9.969 0 1.766.469 3.484 1.359 5.016L2 22l5.156-1.359c1.484.813 3.156 1.25 4.875 1.25 5.516 0 9.969-4.453 9.969-9.969S17.547 2 12.031 2z" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-[11px] text-[#8696A0] bg-[#202C33]/60 px-2.5 py-2 rounded-[6px] flex items-center justify-between">
+              <span>A vinheta está desativada no momento.</span>
+              <button
+                type="button"
+                onClick={() => setBubbleVignetteEnabled(true)}
+                className="text-[11px] text-[#25D366] hover:underline font-semibold ml-2 shrink-0"
+              >
+                Ativar agora
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* 5. Escolha do Monitor / Tela */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05]">
           <div className="flex items-center gap-1.5 mb-2">
             <Monitor className="w-3.5 h-3.5 text-[#25D366]" />
@@ -459,7 +650,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           )}
         </div>
 
-        {/* 5. Áudio das Notificações (Mutar ou Mudar Som) */}
+        {/* 6. Áudio das Notificações (Mutar ou Mudar Som) */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
