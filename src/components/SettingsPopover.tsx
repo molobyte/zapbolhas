@@ -14,7 +14,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
-import { DisplayInfo, SoundPreset } from '../types/whatsapp';
+import { BubbleBorderMode, DisplayInfo, SoundPreset } from '../types/whatsapp';
 import { previewNotificationSound } from '../utils/notificationSound';
 import { hexToRgba } from '../utils/colorUtils';
 
@@ -219,7 +219,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           </div>
         </div>
 
-        {/* 3. Borda das Bubbles (Cor, Transparência ou Padrão Atual) */}
+        {/* 3. Borda das Bubbles (Modos: Padrão, Minimalista, Avançado, Personalizada) */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
@@ -228,45 +228,198 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                 Borda das Bubbles
               </span>
             </div>
-            {/* Alternador: Usar Atual vs Personalizada */}
-            <div className="flex items-center gap-1 bg-[#202C33] p-0.5 rounded-[6px] border border-white/10">
-              <button
-                type="button"
-                onClick={() => setBubbleBorderMode('default')}
-                className={`px-2 py-0.5 text-[11px] rounded-[4px] font-medium transition-colors ${
-                  bubbleBorderMode === 'default'
-                    ? 'bg-[#25D366] text-[#111B21] font-bold'
-                    : 'text-[#8696A0] hover:text-[#E9EDEF]'
-                }`}
-              >
-                Padrão Atual
-              </button>
-              <button
-                type="button"
-                onClick={() => setBubbleBorderMode('custom')}
-                className={`px-2 py-0.5 text-[11px] rounded-[4px] font-medium transition-colors ${
-                  bubbleBorderMode === 'custom'
-                    ? 'bg-[#25D366] text-[#111B21] font-bold'
-                    : 'text-[#8696A0] hover:text-[#E9EDEF]'
-                }`}
-              >
-                Personalizada
-              </button>
-            </div>
           </div>
 
-          {bubbleBorderMode === 'default' ? (
-            <div className="text-[11px] text-[#8696A0] bg-[#202C33]/60 px-2.5 py-2 rounded-[6px] flex items-center justify-between">
-              <span>Borda original ativa: <strong>Branca com 15% de opacidade</strong>.</span>
-              <button
-                type="button"
-                onClick={() => setBubbleBorderMode('custom')}
-                className="text-[11px] text-[#25D366] hover:underline font-semibold ml-2 shrink-0"
-              >
-                Personalizar
-              </button>
+          {/* Seletor de Modo: Padrão, Minimalista, Avançado, Personalizada */}
+          <div className="grid grid-cols-4 gap-1 bg-[#202C33] p-1 rounded-[8px] border border-white/10">
+            {[
+              { key: 'default', label: 'Padrão' },
+              { key: 'minimal', label: 'Minimalista' },
+              { key: 'advanced', label: 'Avançado' },
+              { key: 'custom', label: 'Personalizada' },
+            ].map((opt) => {
+              const isSelected = bubbleBorderMode === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setBubbleBorderMode(opt.key as BubbleBorderMode)}
+                  className={`py-1 text-[11px] rounded-[5px] font-semibold transition-colors text-center ${
+                    isSelected
+                      ? 'bg-[#25D366] text-[#111B21] shadow-xs'
+                      : 'text-[#8696A0] hover:text-[#E9EDEF]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Conteúdo específico de cada modo */}
+          {bubbleBorderMode === 'default' && (
+            <div className="space-y-2.5 pt-0.5">
+              <div className="text-[11px] text-[#8696A0] leading-snug bg-[#202C33]/60 p-2.5 rounded-[6px]">
+                <strong className="text-[#E9EDEF]">Modo Padrão:</strong> Borda branca com <strong>80% de opacidade</strong> e espessura de <strong>1.5px</strong>. Garante contraste nítido e visual refinado.
+              </div>
+              <div className="bg-[#182229] rounded-[8px] p-2.5 border border-white/5 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="w-[34px] h-[34px] rounded-full overflow-hidden shrink-0 flex items-center justify-center bg-[#202C33]"
+                    style={{
+                      borderColor: hexToRgba('#FFFFFF', 80),
+                      borderWidth: '1.5px',
+                      borderStyle: 'solid',
+                    }}
+                  >
+                    <div className="w-full h-full bg-gradient-to-tr from-[#005C4B] to-[#25D366] flex items-center justify-center text-white text-[10px] font-bold">
+                      WA
+                    </div>
+                  </div>
+                  <div className="text-[11px] leading-snug">
+                    <div className="text-[#E9EDEF] font-medium">Borda Branca 80%</div>
+                    <div className="text-[#8696A0] text-[10px]">Quando aberta em foco, fica exclusivamente verde</div>
+                  </div>
+                </div>
+              </div>
             </div>
-          ) : (
+          )}
+
+          {bubbleBorderMode === 'minimal' && (
+            <div className="space-y-2.5 pt-0.5">
+              <div className="text-[11px] text-[#8696A0] leading-snug bg-[#202C33]/60 p-2.5 rounded-[6px]">
+                <strong className="text-[#E9EDEF]">Modo Minimalista:</strong> Borda branca ultra discreta com <strong>15% de opacidade</strong> e espessura de <strong>1.5px</strong>.
+              </div>
+              <div className="bg-[#182229] rounded-[8px] p-2.5 border border-white/5 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="w-[34px] h-[34px] rounded-full overflow-hidden shrink-0 flex items-center justify-center bg-[#202C33]"
+                    style={{
+                      borderColor: hexToRgba('#FFFFFF', 15),
+                      borderWidth: '1.5px',
+                      borderStyle: 'solid',
+                    }}
+                  >
+                    <div className="w-full h-full bg-gradient-to-tr from-[#005C4B] to-[#25D366] flex items-center justify-center text-white text-[10px] font-bold">
+                      WA
+                    </div>
+                  </div>
+                  <div className="text-[11px] leading-snug">
+                    <div className="text-[#E9EDEF] font-medium">Borda Branca 15%</div>
+                    <div className="text-[#8696A0] text-[10px]">Quando aberta em foco, fica exclusivamente verde</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {bubbleBorderMode === 'advanced' && (
+            <div className="space-y-2.5 pt-0.5">
+              <div className="text-[11px] text-[#8696A0] leading-snug bg-[#202C33]/60 p-2.5 rounded-[6px] space-y-1">
+                <div>
+                  <strong className="text-[#E9EDEF]">Modo Avançado (Cores Dinâmicas):</strong> Opacidade de <strong>80%</strong> e <strong>1.5px</strong> com cores que reagem ao status da conversa:
+                </div>
+                <div className="grid grid-cols-2 gap-1 pt-1 text-[10.5px]">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-white shrink-0" />
+                    <span>Lidas: <strong>Branca</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#F04444] shrink-0" />
+                    <span>Não lidas: <strong>Vermelha</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#32CAED] shrink-0" />
+                    <span>Menção (@): <strong>Azul</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#25D366] shrink-0" />
+                    <span>Aberta: <strong>Apenas verde</strong></span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Prévia dos 4 estados do modo avançado */}
+              <div className="bg-[#182229] rounded-[8px] p-2.5 border border-white/5 space-y-1.5">
+                <span className="text-[10.5px] text-[#8696A0] font-medium block">
+                  Exemplo visual dos estados:
+                </span>
+                <div className="flex items-center justify-around pt-0.5">
+                  {/* Estado 1: Lida */}
+                  <div className="flex flex-col items-center gap-1">
+                    <div
+                      className="w-[30px] h-[30px] rounded-full overflow-hidden flex items-center justify-center bg-[#2A3942]"
+                      style={{
+                        borderColor: hexToRgba('#FFFFFF', 80),
+                        borderWidth: '1.5px',
+                        borderStyle: 'solid',
+                      }}
+                    >
+                      <span className="text-[9px] text-white font-bold">Ana</span>
+                    </div>
+                    <span className="text-[9.5px] text-[#8696A0]">Lida</span>
+                  </div>
+
+                  {/* Estado 2: Não lida */}
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="relative">
+                      <div
+                        className="w-[30px] h-[30px] rounded-full overflow-hidden flex items-center justify-center bg-[#2A3942]"
+                        style={{
+                          borderColor: hexToRgba('#F04444', 80),
+                          borderWidth: '1.5px',
+                          borderStyle: 'solid',
+                        }}
+                      >
+                        <span className="text-[9px] text-white font-bold">João</span>
+                      </div>
+                      <span className="absolute -bottom-1 -right-1 min-w-[12px] h-[12px] px-1 rounded-[3px] bg-[#F04444] text-[8px] text-white font-bold flex items-center justify-center">
+                        2
+                      </span>
+                    </div>
+                    <span className="text-[9.5px] text-[#F04444]">Nova</span>
+                  </div>
+
+                  {/* Estado 3: Menção */}
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="relative">
+                      <div
+                        className="w-[30px] h-[30px] rounded-full overflow-hidden flex items-center justify-center bg-[#2A3942]"
+                        style={{
+                          borderColor: hexToRgba('#32CAED', 80),
+                          borderWidth: '1.5px',
+                          borderStyle: 'solid',
+                        }}
+                      >
+                        <span className="text-[9px] text-white font-bold">Grupo</span>
+                      </div>
+                      <span className="absolute -bottom-1 -left-1 w-[12px] h-[12px] rounded-full bg-[#32CAED] text-[#111B21] text-[8px] font-black flex items-center justify-center">
+                        @
+                      </span>
+                    </div>
+                    <span className="text-[9.5px] text-[#32CAED]">Menção</span>
+                  </div>
+
+                  {/* Estado 4: Aberta em foco (exclusivamente verde) */}
+                  <div className="flex flex-col items-center gap-1">
+                    <div
+                      className="w-[30px] h-[30px] rounded-full overflow-hidden flex items-center justify-center bg-[#2A3942]"
+                      style={{
+                        borderColor: '#25D366',
+                        borderWidth: '2px',
+                        borderStyle: 'solid',
+                      }}
+                    >
+                      <span className="text-[9px] text-[#25D366] font-bold">Ativa</span>
+                    </div>
+                    <span className="text-[9.5px] text-[#25D366] font-medium">Aberta</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {bubbleBorderMode === 'custom' && (
             <div className="space-y-3 pt-1">
               {/* Seletor de Cores (Paleta rápida + Color Picker Nativo) */}
               <div className="space-y-1.5">
@@ -316,7 +469,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                   <span className="text-[#8696A0]">Transparência / Opacidade</span>
                   <span className="font-semibold text-[#25D366]">
                     {bubbleBorderOpacity}%
-                    {bubbleBorderOpacity === 15 && ' (Igual atual)'}
+                    {bubbleBorderOpacity === 80 && ' (Padrão)'}
                     {bubbleBorderOpacity === 100 && ' (Sólida)'}
                   </span>
                 </div>
@@ -336,9 +489,15 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                     onClick={() => setBubbleBorderOpacity(15)}
                     className="hover:text-[#25D366] underline cursor-pointer"
                   >
-                    15% (Atual)
+                    15% (Minimal)
                   </button>
-                  <span>50%</span>
+                  <button
+                    type="button"
+                    onClick={() => setBubbleBorderOpacity(80)}
+                    className="hover:text-[#25D366] underline cursor-pointer font-medium text-[#E9EDEF]"
+                  >
+                    80% (Padrão)
+                  </button>
                   <button
                     type="button"
                     onClick={() => setBubbleBorderOpacity(100)}
@@ -358,7 +517,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                 <div className="grid grid-cols-4 gap-1.5">
                   {[
                     { label: '1px', value: 1 },
-                    { label: '1.5px (Atual)', value: 1.5 },
+                    { label: '1.5px (Padrão)', value: 1.5 },
                     { label: '2px', value: 2 },
                     { label: '3px', value: 3 },
                   ].map((item) => (
@@ -394,7 +553,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                     </div>
                   </div>
                   <div className="text-[11px] leading-snug">
-                    <div className="text-[#E9EDEF] font-medium">Prévia da bolha</div>
+                    <div className="text-[#E9EDEF] font-medium">Prévia personalizada</div>
                     <div className="text-[#8696A0] font-mono text-[10px]">
                       {hexToRgba(bubbleBorderColor, bubbleBorderOpacity)} • {bubbleBorderWidth}px
                     </div>
@@ -405,10 +564,10 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                   onClick={() => {
                     setBubbleBorderMode('default');
                     setBubbleBorderColor('#FFFFFF');
-                    setBubbleBorderOpacity(15);
+                    setBubbleBorderOpacity(80);
                     setBubbleBorderWidth(1.5);
                   }}
-                  title="Restaurar padrão atual da borda"
+                  title="Restaurar modo padrão da borda"
                   className="flex items-center gap-1 text-[10.5px] px-2 py-1 rounded bg-[#202C33] hover:bg-[#2A3942] text-[#8696A0] hover:text-[#E9EDEF] transition-colors"
                 >
                   <RotateCcw className="w-3 h-3" />

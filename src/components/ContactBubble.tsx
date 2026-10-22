@@ -27,10 +27,59 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
     bubbleBorderWidth,
   } = useBubbleStore();
 
-  const isCustomBorder = bubbleBorderMode === 'custom';
-  const customBorderRgba = isCustomBorder
-    ? hexToRgba(bubbleBorderColor, bubbleBorderOpacity)
-    : undefined;
+  let borderStyle: React.CSSProperties;
+
+  if (isActive) {
+    // Quando a conversa está aberta/ativa:
+    // Apenas a borda verde oficial (sem borda branca ou colorida concorrente)
+    borderStyle = {
+      borderColor: '#25D366',
+      borderWidth: '2px',
+      borderStyle: 'solid',
+    };
+  } else if (bubbleBorderMode === 'minimal') {
+    // Modo minimalista: Cor branca com 15% de opacidade e espessura de 1.5
+    borderStyle = {
+      borderColor: hexToRgba('#FFFFFF', 15),
+      borderWidth: '1.5px',
+      borderStyle: 'solid',
+    };
+  } else if (bubbleBorderMode === 'advanced') {
+    // Modo avançado: Opacidade de 80% e espessura de 1.5, cores reativas ao status
+    const isUnread = Boolean(
+      bubble.unreadCount > 0 || bubble.isMarkedUnread || bubble.unreadCount === -1
+    );
+    const hasMention = Boolean(bubble.hasMention && isUnread);
+
+    let hexColor = '#FFFFFF'; // Branca para conversas lidas / sem notificação
+    if (hasMention) {
+      hexColor = '#32CAED'; // Mesma cor azul usada no quadrado/badge de marcação
+    } else if (bubble.isMarkedUnread || bubble.unreadCount === -1) {
+      hexColor = '#25D366'; // Mesma cor verde usada no badge de marcado como não lido
+    } else if (bubble.unreadCount > 0) {
+      hexColor = '#F04444'; // Mesma cor do quadrado de mensagens não lidas
+    }
+
+    borderStyle = {
+      borderColor: hexToRgba(hexColor, 80),
+      borderWidth: '1.5px',
+      borderStyle: 'solid',
+    };
+  } else if (bubbleBorderMode === 'custom') {
+    // Modo personalizado: Cor, opacidade e espessura livres
+    borderStyle = {
+      borderColor: hexToRgba(bubbleBorderColor || '#FFFFFF', bubbleBorderOpacity ?? 80),
+      borderWidth: `${bubbleBorderWidth || 1.5}px`,
+      borderStyle: 'solid',
+    };
+  } else {
+    // Modo padrão: Cor branca com 80% de opacidade e espessura de 1.5
+    borderStyle = {
+      borderColor: hexToRgba('#FFFFFF', 80),
+      borderWidth: '1.5px',
+      borderStyle: 'solid',
+    };
+  }
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -64,24 +113,8 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
         onContextMenu={handleContextMenu}
         onAuxClick={handleAuxClick}
         title={`${bubble.name}${bubble.isPinned ? ' (Fixada)' : ''} (Clique direito para opções)`}
-        style={
-          isCustomBorder
-            ? {
-                borderColor: customBorderRgba,
-                borderWidth: `${bubbleBorderWidth || 1.5}px`,
-                borderStyle: 'solid',
-              }
-            : undefined
-        }
-        className={`relative w-[48px] h-[48px] rounded-full overflow-hidden shrink-0 block shadow-[0_4px_14px_rgba(0,0,0,0.65)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none ${
-          isActive
-            ? isCustomBorder
-              ? 'ring-2 ring-[#25D366]'
-              : 'ring-2 ring-[#25D366] border border-white/30'
-            : isCustomBorder
-              ? ''
-              : 'border-[1.5px] border-white/15'
-        }`}
+        style={borderStyle}
+        className="relative w-[48px] h-[48px] rounded-full overflow-hidden shrink-0 block shadow-[0_4px_14px_rgba(0,0,0,0.65)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none"
       >
         <img
           src={bubble.avatar}

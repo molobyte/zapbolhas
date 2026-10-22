@@ -124,6 +124,7 @@ export interface ViewingImageState {
 }
 
 export type ActivePopover = 'none' | 'chat-list' | 'chat-window' | 'qr-code' | 'settings';
+export type BubbleBorderMode = 'default' | 'minimal' | 'advanced' | 'custom';
 
 export type SoundPreset = 'default' | 'crystal' | 'pop' | 'custom';
 

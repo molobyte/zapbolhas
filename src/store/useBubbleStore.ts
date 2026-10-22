@@ -10,6 +10,7 @@ import {
   IncomingMessagePayload,
   QuotedMessage,
   SavedContact,
+  BubbleBorderMode,
   SoundPreset,
   ViewingImageState,
   WaConnectionState,
@@ -49,7 +50,7 @@ interface SavedUserSettings {
   groupSoundPreset: SoundPreset;
   customUserSoundName?: string;
   customGroupSoundName?: string;
-  bubbleBorderMode: 'default' | 'custom';
+  bubbleBorderMode: BubbleBorderMode;
   bubbleBorderColor: string;
   bubbleBorderOpacity: number;
   bubbleBorderWidth: number;
@@ -76,7 +77,13 @@ function loadUserSettings(): SavedUserSettings {
         groupSoundPreset: parsed.groupSoundPreset || 'default',
         customUserSoundName: parsed.customUserSoundName,
         customGroupSoundName: parsed.customGroupSoundName,
-        bubbleBorderMode: parsed.bubbleBorderMode === 'custom' ? 'custom' : 'default',
+        bubbleBorderMode:
+          parsed.bubbleBorderMode === 'minimal' ||
+          parsed.bubbleBorderMode === 'advanced' ||
+          parsed.bubbleBorderMode === 'custom' ||
+          parsed.bubbleBorderMode === 'default'
+            ? parsed.bubbleBorderMode
+            : 'default',
         bubbleBorderColor:
           typeof parsed.bubbleBorderColor === 'string' && parsed.bubbleBorderColor.startsWith('#')
             ? parsed.bubbleBorderColor
@@ -102,7 +109,7 @@ function loadUserSettings(): SavedUserSettings {
     groupSoundPreset: 'default',
     bubbleBorderMode: 'default',
     bubbleBorderColor: '#FFFFFF',
-    bubbleBorderOpacity: 15,
+    bubbleBorderOpacity: 80,
     bubbleBorderWidth: 1.5,
   };
 }
@@ -239,7 +246,7 @@ interface BubbleStoreState {
   groupSoundPreset: SoundPreset;
   customUserSoundName?: string;
   customGroupSoundName?: string;
-  bubbleBorderMode: 'default' | 'custom';
+  bubbleBorderMode: BubbleBorderMode;
   bubbleBorderColor: string;
   bubbleBorderOpacity: number;
   bubbleBorderWidth: number;
@@ -280,7 +287,7 @@ interface BubbleStoreState {
   setSoundMuted: (muted: boolean) => void;
   setUserSoundPreset: (preset: SoundPreset, customFileName?: string) => void;
   setGroupSoundPreset: (preset: SoundPreset, customFileName?: string) => void;
-  setBubbleBorderMode: (mode: 'default' | 'custom') => void;
+  setBubbleBorderMode: (mode: BubbleBorderMode) => void;
   setBubbleBorderColor: (color: string) => void;
   setBubbleBorderOpacity: (opacity: number) => void;
   setBubbleBorderWidth: (width: number) => void;
@@ -783,7 +790,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     });
   },
 
-  setBubbleBorderMode: (bubbleBorderMode: 'default' | 'custom') => {
+  setBubbleBorderMode: (bubbleBorderMode: BubbleBorderMode) => {
     const s = get();
     saveUserSettings({
       bubbleScale: s.bubbleScale,
@@ -882,7 +889,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         ? patch.customGroupSoundName
         : s.customGroupSoundName;
     const nextBorderMode =
-      patch.bubbleBorderMode === 'custom' || patch.bubbleBorderMode === 'default'
+      patch.bubbleBorderMode === 'custom' || patch.bubbleBorderMode === 'default' || patch.bubbleBorderMode === 'minimal' || patch.bubbleBorderMode === 'advanced'
         ? patch.bubbleBorderMode
         : s.bubbleBorderMode;
     const nextBorderColor =
