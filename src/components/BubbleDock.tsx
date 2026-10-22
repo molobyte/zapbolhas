@@ -34,6 +34,8 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
     waStatus,
     hasSyncedRealChats,
     bubbleScale,
+    dockBackdrop,
+    bubbleContrast,
     toggleMainButton,
     toggleBubbleChat,
     closeBubble,
@@ -382,8 +384,20 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
         onMouseEnter={onInteractiveEnter}
         onMouseLeave={onInteractiveLeave}
         style={{ zoom: bubbleScale }}
-        className="flex items-center justify-end gap-[12px] pointer-events-auto h-[48px]"
+        className="relative flex items-center justify-end gap-[12px] pointer-events-auto h-[48px]"
       >
+        {/* Cápsula de Vidro Fosco atrás das bolhas para alto contraste */}
+        {dockBackdrop && (
+          <div
+            className={`absolute ${
+              activeBubbles.length === 0
+                ? '-inset-1.5'
+                : '-inset-x-2.5 -inset-y-1.5'
+            } rounded-full bg-[#111B21]/85 backdrop-blur-xl border border-white/15 shadow-[0_8px_32px_rgba(0,0,0,0.85)] pointer-events-none -z-10 transition-all duration-200`}
+            aria-hidden="true"
+          />
+        )}
+
         <AnimatePresence mode="popLayout">
           {activeBubbles.map((bubble) => (
             <ContactBubble
@@ -415,7 +429,11 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
               ? 'Sincronizando conversas do WhatsApp... (Clique direito para opções)'
               : 'WhatsApp Bubbles (Clique esquerdo: conversas | Clique direito: opções)'
           }
-          className="relative w-[48px] h-[48px] shrink-0 rounded-full bg-[#25D366] hover:bg-[#22c55e] text-white shadow-[0_4px_14px_rgba(0,0,0,0.65)] flex items-center justify-center transition-transform duration-150 hover:scale-105 focus:outline-none"
+          className={`relative w-[48px] h-[48px] shrink-0 rounded-full bg-[#25D366] hover:bg-[#22c55e] text-white flex items-center justify-center transition-transform duration-150 hover:scale-105 focus:outline-none ${
+            bubbleContrast === 'high'
+              ? 'border-2 border-white/95 shadow-[0_0_0_1.5px_rgba(0,0,0,0.85),0_4px_14px_rgba(0,0,0,0.85)]'
+              : 'shadow-[0_4px_14px_rgba(0,0,0,0.65)]'
+          }`}
         >
           {/* Ícone Oficial do WhatsApp */}
           <svg

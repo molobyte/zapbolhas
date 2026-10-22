@@ -49,6 +49,8 @@ interface SavedUserSettings {
   groupSoundPreset: SoundPreset;
   customUserSoundName?: string;
   customGroupSoundName?: string;
+  dockBackdrop: boolean;
+  bubbleContrast: 'high' | 'subtle';
 }
 
 const SETTINGS_STORAGE_KEY = 'whatsapp-bubbles-settings-v1';
@@ -72,6 +74,8 @@ function loadUserSettings(): SavedUserSettings {
         groupSoundPreset: parsed.groupSoundPreset || 'default',
         customUserSoundName: parsed.customUserSoundName,
         customGroupSoundName: parsed.customGroupSoundName,
+        dockBackdrop: parsed.dockBackdrop !== undefined ? Boolean(parsed.dockBackdrop) : true,
+        bubbleContrast: parsed.bubbleContrast === 'subtle' ? 'subtle' : 'high',
       };
     }
   } catch {
@@ -83,6 +87,8 @@ function loadUserSettings(): SavedUserSettings {
     soundMuted: false,
     userSoundPreset: 'default',
     groupSoundPreset: 'default',
+    dockBackdrop: true,
+    bubbleContrast: 'high',
   };
 }
 
@@ -218,6 +224,8 @@ interface BubbleStoreState {
   groupSoundPreset: SoundPreset;
   customUserSoundName?: string;
   customGroupSoundName?: string;
+  dockBackdrop: boolean;
+  bubbleContrast: 'high' | 'subtle';
 
   chats: ChatSummary[];
   activeBubbles: BubbleItem[];
@@ -255,6 +263,8 @@ interface BubbleStoreState {
   setSoundMuted: (muted: boolean) => void;
   setUserSoundPreset: (preset: SoundPreset, customFileName?: string) => void;
   setGroupSoundPreset: (preset: SoundPreset, customFileName?: string) => void;
+  setDockBackdrop: (enabled: boolean) => void;
+  setBubbleContrast: (contrast: 'high' | 'subtle') => void;
   applyExternalSettingsUpdate: (patch: Record<string, unknown>) => void;
   openSettings: () => void;
   logoutWhatsApp: () => Promise<void>;
@@ -313,6 +323,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   groupSoundPreset: initialSettings.groupSoundPreset,
   customUserSoundName: initialSettings.customUserSoundName,
   customGroupSoundName: initialSettings.customGroupSoundName,
+  dockBackdrop: initialSettings.dockBackdrop,
+  bubbleContrast: initialSettings.bubbleContrast,
 
   chats: [],
   activeBubbles: [],
@@ -643,6 +655,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset: s.groupSoundPreset,
       customUserSoundName: s.customUserSoundName,
       customGroupSoundName: s.customGroupSoundName,
+      dockBackdrop: s.dockBackdrop,
+      bubbleContrast: s.bubbleContrast,
     });
     set({ bubbleScale: clamped });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleScale: clamped });
@@ -659,6 +673,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset: s.groupSoundPreset,
       customUserSoundName: s.customUserSoundName,
       customGroupSoundName: s.customGroupSoundName,
+      dockBackdrop: s.dockBackdrop,
+      bubbleContrast: s.bubbleContrast,
     });
     const trimmedBubbles = organizeBubbles(s.activeBubbles, clamped, s.pinnedChatIds);
     const activeStillExists =
@@ -685,6 +701,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset: s.groupSoundPreset,
       customUserSoundName: s.customUserSoundName,
       customGroupSoundName: s.customGroupSoundName,
+      dockBackdrop: s.dockBackdrop,
+      bubbleContrast: s.bubbleContrast,
     });
     set({ soundMuted });
     window.electronAPI?.broadcastSettingsUpdate?.({ soundMuted });
@@ -702,6 +720,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset: s.groupSoundPreset,
       customUserSoundName: updatedCustomName,
       customGroupSoundName: s.customGroupSoundName,
+      dockBackdrop: s.dockBackdrop,
+      bubbleContrast: s.bubbleContrast,
     });
     set({ userSoundPreset, customUserSoundName: updatedCustomName });
     window.electronAPI?.broadcastSettingsUpdate?.({
@@ -722,12 +742,48 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset,
       customUserSoundName: s.customUserSoundName,
       customGroupSoundName: updatedCustomName,
+      dockBackdrop: s.dockBackdrop,
+      bubbleContrast: s.bubbleContrast,
     });
     set({ groupSoundPreset, customGroupSoundName: updatedCustomName });
     window.electronAPI?.broadcastSettingsUpdate?.({
       groupSoundPreset,
       customGroupSoundName: updatedCustomName,
     });
+  },
+
+  setDockBackdrop: (dockBackdrop: boolean) => {
+    const s = get();
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      dockBackdrop,
+      bubbleContrast: s.bubbleContrast,
+    });
+    set({ dockBackdrop });
+    window.electronAPI?.broadcastSettingsUpdate?.({ dockBackdrop });
+  },
+
+  setBubbleContrast: (bubbleContrast: 'high' | 'subtle') => {
+    const s = get();
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      dockBackdrop: s.dockBackdrop,
+      bubbleContrast,
+    });
+    set({ bubbleContrast });
+    window.electronAPI?.broadcastSettingsUpdate?.({ bubbleContrast });
   },
 
   applyExternalSettingsUpdate: (patch) => {
@@ -750,10 +806,28 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       typeof patch.customGroupSoundName === 'string'
         ? patch.customGroupSoundName
         : s.customGroupSoundName;
+    const nextDockBackdrop =
+      typeof patch.dockBackdrop === 'boolean' ? patch.dockBackdrop : s.dockBackdrop;
+    const nextBubbleContrast =
+      patch.bubbleContrast === 'subtle' || patch.bubbleContrast === 'high'
+        ? patch.bubbleContrast
+        : s.bubbleContrast;
 
     const trimmedBubbles = organizeBubbles(s.activeBubbles, nextMaxBubbles, s.pinnedChatIds);
     const activeStillExists =
       !s.activeChatId || trimmedBubbles.some((b) => b.chatId === s.activeChatId);
+
+    saveUserSettings({
+      bubbleScale: nextScale,
+      maxBubbles: nextMaxBubbles,
+      soundMuted: nextSoundMuted,
+      userSoundPreset: nextUserPreset,
+      groupSoundPreset: nextGroupPreset,
+      customUserSoundName: nextCustomUser,
+      customGroupSoundName: nextCustomGroup,
+      dockBackdrop: nextDockBackdrop,
+      bubbleContrast: nextBubbleContrast,
+    });
 
     set({
       bubbleScale: nextScale,
@@ -763,6 +837,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       groupSoundPreset: nextGroupPreset,
       customUserSoundName: nextCustomUser,
       customGroupSoundName: nextCustomGroup,
+      dockBackdrop: nextDockBackdrop,
+      bubbleContrast: nextBubbleContrast,
       activeBubbles: trimmedBubbles,
       activeChatId: activeStillExists ? s.activeChatId : null,
       activePopover:

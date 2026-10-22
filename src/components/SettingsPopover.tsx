@@ -9,6 +9,7 @@ import {
   FolderOpen,
   Play,
   Layers,
+  Eye,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
 import { DisplayInfo, SoundPreset } from '../types/whatsapp';
@@ -33,11 +34,15 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     groupSoundPreset,
     customUserSoundName,
     customGroupSoundName,
+    dockBackdrop,
+    bubbleContrast,
     setBubbleScale,
     setMaxBubbles,
     setSoundMuted,
     setUserSoundPreset,
     setGroupSoundPreset,
+    setDockBackdrop,
+    setBubbleContrast,
     minimizeActiveChat,
   } = useBubbleStore();
 
@@ -196,7 +201,76 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           </div>
         </div>
 
-        {/* 3. Escolha do Monitor / Tela */}
+        {/* 3. Aparência e Visibilidade */}
+        <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-3">
+          <div className="flex items-center gap-1.5 mb-1">
+            <Eye className="w-3.5 h-3.5 text-[#25D366]" />
+            <span className="text-[12.5px] font-medium text-[#E9EDEF]">
+              Aparência e Visibilidade
+            </span>
+          </div>
+
+          {/* Opção A: Cápsula de Fundo da Barra */}
+          <div className="flex items-center justify-between">
+            <div className="pr-2">
+              <div className="text-[12px] font-medium text-[#E9EDEF]">
+                Cápsula de Fundo da Barra
+              </div>
+              <div className="text-[10.5px] text-[#8696A0] leading-snug">
+                Base escura que isola as bolhas contra textos, vídeos ou apps no fundo.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDockBackdrop(!dockBackdrop)}
+              className={`px-2.5 py-1 rounded-full text-[11.5px] font-semibold transition-colors shrink-0 ${
+                dockBackdrop
+                  ? 'bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/40'
+                  : 'bg-[#202C33] text-[#8696A0] border border-white/10'
+              }`}
+            >
+              {dockBackdrop ? 'Ativada' : 'Desativada'}
+            </button>
+          </div>
+
+          {/* Opção B: Contraste das Bordas */}
+          <div className="flex items-center justify-between">
+            <div className="pr-2">
+              <div className="text-[12px] font-medium text-[#E9EDEF]">
+                Contraste das Bordas
+              </div>
+              <div className="text-[10.5px] text-[#8696A0] leading-snug">
+                Borda dupla branca e escura para máxima nitidez em qualquer tema.
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0 bg-[#202C33] p-0.5 rounded-[6px] border border-white/10">
+              <button
+                type="button"
+                onClick={() => setBubbleContrast('high')}
+                className={`px-2 py-0.5 text-[11px] rounded-[4px] font-medium transition-colors ${
+                  bubbleContrast === 'high'
+                    ? 'bg-[#25D366] text-[#111B21] font-bold'
+                    : 'text-[#8696A0] hover:text-[#E9EDEF]'
+                }`}
+              >
+                Alto
+              </button>
+              <button
+                type="button"
+                onClick={() => setBubbleContrast('subtle')}
+                className={`px-2 py-0.5 text-[11px] rounded-[4px] font-medium transition-colors ${
+                  bubbleContrast === 'subtle'
+                    ? 'bg-[#25D366] text-[#111B21] font-bold'
+                    : 'text-[#8696A0] hover:text-[#E9EDEF]'
+                }`}
+              >
+                Sutil
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 4. Escolha do Monitor / Tela */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05]">
           <div className="flex items-center gap-1.5 mb-2">
             <Monitor className="w-3.5 h-3.5 text-[#25D366]" />
@@ -236,7 +310,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           )}
         </div>
 
-        {/* 4. Áudio das Notificações (Mutar ou Mudar Som) */}
+        {/* 5. Áudio das Notificações (Mutar ou Mudar Som) */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
