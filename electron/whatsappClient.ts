@@ -685,6 +685,28 @@ export class WhatsAppService {
           return obj[key] ?? obj.attributes?.[key] ?? obj.__x?.[key] ?? obj._data?.[key];
         };
 
+        const isRawMediaBase64OrKey = (str: any): boolean => {
+          if (!str || typeof str !== 'string') return false;
+          const trimmed = str.trim();
+          if (/\s/.test(trimmed)) return false;
+          if (trimmed.length >= 24) {
+            if (
+              trimmed.startsWith('/9j/') ||
+              trimmed.startsWith('iVBORw0KGgo') ||
+              trimmed.startsWith('R0lGODlh') ||
+              trimmed.startsWith('UklGR') ||
+              trimmed.startsWith('data:image/') ||
+              trimmed.startsWith('data:video/')
+            ) {
+              return true;
+            }
+            if (/^[A-Za-z0-9+/=]{32,}$/.test(trimmed)) {
+              return true;
+            }
+          }
+          return false;
+        };
+
         const checkIsViewOnce = (m: any): boolean => {
           if (!m) return false;
           if (
@@ -2330,6 +2352,28 @@ export class WhatsAppService {
             } catch (_) {}
           }
           return obj[key] ?? obj.attributes?.[key] ?? obj.__x?.[key] ?? obj._data?.[key];
+        };
+
+        const isRawMediaBase64OrKey = (str: any): boolean => {
+          if (!str || typeof str !== 'string') return false;
+          const trimmed = str.trim();
+          if (/\s/.test(trimmed)) return false;
+          if (trimmed.length >= 24) {
+            if (
+              trimmed.startsWith('/9j/') ||
+              trimmed.startsWith('iVBORw0KGgo') ||
+              trimmed.startsWith('R0lGODlh') ||
+              trimmed.startsWith('UklGR') ||
+              trimmed.startsWith('data:image/') ||
+              trimmed.startsWith('data:video/')
+            ) {
+              return true;
+            }
+            if (/^[A-Za-z0-9+/=]{32,}$/.test(trimmed)) {
+              return true;
+            }
+          }
+          return false;
         };
 
         const checkIsViewOnce = (m: any): boolean => {
