@@ -67,11 +67,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [autoPlayVideo, setAutoPlayVideo] = useState(false);
   const [savedSticker, setSavedSticker] = useState(false);
 
+  // Se message.isViewOnce for true OU se a mensagem não tiver texto nem mídia carregada (característica de visualização única no WhatsApp)
+  const isViewOnceMsg = Boolean(
+    message.isViewOnce ||
+    (!text?.trim() && !imageUrl && !videoUrl && type !== 'audio')
+  );
+
   // Decripta automaticamente imagens, vídeos, figurinhas e áudios em alta resolução (incluindo visualização única)
   useEffect(() => {
     let cancelled = false;
     if (
-      (type === 'image' || type === 'sticker' || type === 'audio' || type === 'video' || message.isViewOnce) &&
+      (type === 'image' || type === 'sticker' || type === 'audio' || type === 'video' || isViewOnceMsg) &&
       !isHdLoaded &&
       window.electronAPI?.downloadMedia
     ) {
@@ -83,13 +89,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             if (dataUrl) {
               updateMessageMedia(message.chatId, message.id, dataUrl);
               setLoadFailed(false);
-            } else if (message.isViewOnce) {
+            } else if (isViewOnceMsg) {
               setLoadFailed(true);
             }
           }
         })
         .catch(() => {
-          if (!cancelled && message.isViewOnce) {
+          if (!cancelled && isViewOnceMsg) {
             setLoadFailed(true);
           }
         })
@@ -102,7 +108,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [type, isHdLoaded, message.id, message.chatId, message.isViewOnce, updateMessageMedia]);
+  }, [type, isHdLoaded, message.id, message.chatId, isViewOnceMsg, updateMessageMedia]);
 
   const handlePlayOrExpandVideo = async (
     e: React.MouseEvent,
@@ -120,11 +126,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           updateMessageMedia(message.chatId, message.id, hd);
           targetVideoUrl = hd;
           setLoadFailed(false);
-        } else if (message.isViewOnce) {
+        } else if (isViewOnceMsg) {
           setLoadFailed(true);
         }
       } catch {
-        if (message.isViewOnce) {
+        if (isViewOnceMsg) {
           setLoadFailed(true);
         }
       } finally {
@@ -144,7 +150,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           mediaType: 'video',
           imageUrl: imageUrl || '',
           videoUrl: targetVideoUrl,
-          caption: text || (message.isViewOnce ? 'Vídeo de visualização única' : undefined),
+          caption: text || (isViewOnceMsg ? 'Vídeo de visualização única' : undefined),
           senderName: fromMe ? 'Você' : senderName || 'Contato',
           timestamp,
         });
@@ -167,12 +173,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           updateMessageMedia(message.chatId, message.id, hd);
           targetUrl = hd;
           setLoadFailed(false);
-        } else if (message.isViewOnce) {
+        } else if (isViewOnceMsg) {
           setLoadFailed(true);
         }
       } catch (err) {
         console.error('Error opening view once image:', err);
-        if (message.isViewOnce) {
+        if (isViewOnceMsg) {
           setLoadFailed(true);
         }
       } finally {
@@ -189,7 +195,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         messageId: message.id,
         mediaType: 'image',
         imageUrl: targetUrl,
-        caption: text || (message.isViewOnce ? 'Foto de visualização única' : undefined),
+        caption: text || (isViewOnceMsg ? 'Foto de visualização única' : undefined),
         senderName: fromMe ? 'Você' : senderName || 'Contato',
         timestamp,
       });
@@ -386,7 +392,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         className="w-full min-w-[210px] max-h-[260px] rounded-[6px] bg-black object-contain"
                       />
                       {/* Badge de Visualização Única no topo esquerdo */}
-                      {message.isViewOnce && (
+                      {isViewOnceMsg && (
                         <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/75 backdrop-blur-md text-white text-[10.5px] font-medium flex items-center gap-1.5 shadow-md border border-white/20 select-none z-10 pointer-events-none">
                           <span className="w-4 h-4 rounded-full border border-dashed border-[#25D366] text-[#25D366] flex items-center justify-center text-[10px] font-bold leading-none">
                             1
@@ -413,7 +419,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         </button>
                       </div>
                     </div>
-                  ) : message.isViewOnce ? (
+                  ) : isViewOnceMsg ? (
                     <div className="flex flex-col gap-1">
                       <button
                         type="button"
@@ -497,7 +503,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </div>
               )}
 
-              {type !== 'video' && (type === 'image' || type === 'sticker' || imageUrl || message.isViewOnce) && (
+              {type !== 'video' && (type === 'image' || type === 'sticker' || imageUrl || isViewOnceMsg) && (
                 <div className="relative group/img mb-1.5 overflow-hidden rounded-[6px]">
                   {imageUrl ? (
                     <div
@@ -507,7 +513,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     >
                       <img
                         src={imageUrl}
-                        alt={text || (message.isViewOnce ? 'Foto de visualização única' : 'Imagem')}
+                        alt={text || (isViewOnceMsg ? 'Foto de visualização única' : 'Imagem')}
                         className={`w-full rounded-[6px] transition-transform duration-200 group-hover/img:scale-[1.02] ${
                           type === 'sticker'
                             ? 'max-w-[130px] max-h-[130px] object-contain'
@@ -516,7 +522,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       />
 
                       {/* Badge de Visualização Única no topo esquerdo */}
-                      {message.isViewOnce && (
+                      {isViewOnceMsg && (
                         <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-black/75 backdrop-blur-md text-white text-[10.5px] font-medium flex items-center gap-1.5 shadow-md border border-white/20 select-none z-10 pointer-events-none">
                           <span className="w-4 h-4 rounded-full border border-dashed border-[#25D366] text-[#25D366] flex items-center justify-center text-[10px] font-bold leading-none">
                             1
@@ -567,7 +573,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         </button>
                       </div>
                     </div>
-                  ) : message.isViewOnce ? (
+                  ) : isViewOnceMsg ? (
                     <div className="flex flex-col gap-1">
                       <button
                         type="button"
