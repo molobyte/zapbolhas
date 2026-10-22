@@ -552,7 +552,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                 </div>
 
                 {/* Caixa simulando wallpaper desktop com a vinheta no canto */}
-                <div className="relative h-[68px] rounded-[8px] overflow-hidden border border-white/10 bg-gradient-to-tr from-[#3b82f6]/30 via-[#ec4899]/30 to-[#eab308]/30 flex items-end justify-end p-2 select-none">
+                <div className="relative h-[80px] rounded-[8px] overflow-hidden border border-white/10 bg-gradient-to-tr from-[#3b82f6]/30 via-[#ec4899]/30 to-[#eab308]/30 flex items-end justify-end p-2 select-none">
                   {/* Padrão quadriculado sutil de fundo para evidenciar o contraste */}
                   <div
                     className="absolute inset-0 opacity-20 pointer-events-none"
@@ -577,9 +577,9 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                       className="w-full h-full pointer-events-none"
                       style={{
                         maskImage:
-                          'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 40%, rgba(0,0,0,0.65) 68%, rgba(0,0,0,0.16) 86%, rgba(0,0,0,0) 98%, transparent 100%)',
+                          'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 10%, rgba(0,0,0,0.82) 35%, rgba(0,0,0,0.52) 62%, rgba(0,0,0,0.18) 82%, rgba(0,0,0,0) 98%, transparent 100%)',
                         WebkitMaskImage:
-                          'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 40%, rgba(0,0,0,0.65) 68%, rgba(0,0,0,0.16) 86%, rgba(0,0,0,0) 98%, transparent 100%)',
+                          'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 10%, rgba(0,0,0,0.82) 35%, rgba(0,0,0,0.52) 62%, rgba(0,0,0,0.18) 82%, rgba(0,0,0,0) 98%, transparent 100%)',
                         background:
                           bubbleVignetteStyle === 'radial'
                             ? `radial-gradient(circle at 100% 100%, rgba(5,7,10,${0.98 * (bubbleVignetteOpacity / 100)}) 0%, rgba(8,11,15,${0.92 * (bubbleVignetteOpacity / 100)}) 40%, rgba(12,16,22,${0.84 * (bubbleVignetteOpacity / 100)}) 75%, rgba(15,20,28,${0.72 * (bubbleVignetteOpacity / 100)}) 100%)`

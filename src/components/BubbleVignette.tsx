@@ -22,10 +22,13 @@ export const BubbleVignette: React.FC = () => {
   const featherWidth = Math.round(76 * bubbleScale);
   const calculatedWidth = Math.round(calculatedDockReach + featherWidth);
 
-  // Altura da vinheta: cobre a altura do dock (12px padding + 48px bolha = 60px) + ~56px de fade suave para cima
-  const dockHeightPx = 12 + 48 * bubbleScale;
-  const featherHeight = Math.round(56 * bubbleScale);
-  const calculatedHeight = Math.round(dockHeightPx + featherHeight);
+  // Altura da vinheta:
+  // Começa a esmaecer logo a partir do primeiro pixel horizontal das bolhas (12px da base),
+  // com um degradê vertical mais amplo (~140px * scale de transição suave acima das bolhas).
+  const screenBottomPadding = 12;
+  const bubbleHeightPx = 48 * bubbleScale;
+  const featherHeight = Math.round(140 * bubbleScale);
+  const calculatedHeight = Math.round(screenBottomPadding + bubbleHeightPx + featherHeight);
 
   const [measuredWidth, setMeasuredWidth] = useState<number>(calculatedWidth);
 
@@ -73,11 +76,15 @@ export const BubbleVignette: React.FC = () => {
   );
   const featherPercent = 100 - dockReachPercent;
 
-  const dockHeightPercent = Math.min(
-    56,
-    Math.max(25, Math.round((dockHeightPx / targetHeight) * 100))
+  // Percentuais verticais:
+  // - O esmaecimento inicia exatamente no primeiro pixel horizontal das bolhas (12px da base)
+  // - Transição gradual através da altura das bolhas e ampla extensão superior até 0.000
+  const bubbleBottomPercent = Math.max(3, Math.round((screenBottomPadding / targetHeight) * 100));
+  const bubbleTopPercent = Math.min(
+    40,
+    Math.round(((screenBottomPadding + bubbleHeightPx) / targetHeight) * 100)
   );
-  const featherYPercent = 100 - dockHeightPercent;
+  const aboveDockSpan = 100 - bubbleTopPercent;
 
   // Máscara horizontal com atenuação cúbica/Hermite multi-stop:
   // Zera completamente o alpha (0.000) antes da borda esquerda física do elemento,
@@ -97,18 +104,22 @@ export const BubbleVignette: React.FC = () => {
   )`;
 
   // Máscara vertical com atenuação cúbica/Hermite multi-stop:
-  // Zera completamente o alpha (0.000) antes da borda superior física do elemento.
+  // Começa a esmaecer logo a partir do primeiro pixel horizontal das bolhas (12px),
+  // se estendendo suavemente para cima através de uma altura ampla até zerar o alpha (0.000).
   const verticalMask = `linear-gradient(
     to top,
     rgba(0, 0, 0, 1) 0%,
-    rgba(0, 0, 0, 1) ${dockHeightPercent}%,
-    rgba(0, 0, 0, 0.92) ${dockHeightPercent + featherYPercent * 0.16}%,
-    rgba(0, 0, 0, 0.68) ${dockHeightPercent + featherYPercent * 0.38}%,
-    rgba(0, 0, 0, 0.38) ${dockHeightPercent + featherYPercent * 0.60}%,
-    rgba(0, 0, 0, 0.15) ${dockHeightPercent + featherYPercent * 0.78}%,
-    rgba(0, 0, 0, 0.03) ${dockHeightPercent + featherYPercent * 0.90}%,
-    rgba(0, 0, 0, 0.004) ${dockHeightPercent + featherYPercent * 0.96}%,
-    rgba(0, 0, 0, 0) ${dockHeightPercent + featherYPercent * 0.99}%,
+    rgba(0, 0, 0, 1) ${bubbleBottomPercent}%,
+    rgba(0, 0, 0, 0.94) ${bubbleBottomPercent + Math.round((bubbleTopPercent - bubbleBottomPercent) * 0.32)}%,
+    rgba(0, 0, 0, 0.86) ${bubbleBottomPercent + Math.round((bubbleTopPercent - bubbleBottomPercent) * 0.68)}%,
+    rgba(0, 0, 0, 0.78) ${bubbleTopPercent}%,
+    rgba(0, 0, 0, 0.62) ${bubbleTopPercent + Math.round(aboveDockSpan * 0.18)}%,
+    rgba(0, 0, 0, 0.44) ${bubbleTopPercent + Math.round(aboveDockSpan * 0.38)}%,
+    rgba(0, 0, 0, 0.26) ${bubbleTopPercent + Math.round(aboveDockSpan * 0.58)}%,
+    rgba(0, 0, 0, 0.12) ${bubbleTopPercent + Math.round(aboveDockSpan * 0.74)}%,
+    rgba(0, 0, 0, 0.04) ${bubbleTopPercent + Math.round(aboveDockSpan * 0.86)}%,
+    rgba(0, 0, 0, 0.006) ${bubbleTopPercent + Math.round(aboveDockSpan * 0.94)}%,
+    rgba(0, 0, 0, 0) ${bubbleTopPercent + Math.round(aboveDockSpan * 0.99)}%,
     rgba(0, 0, 0, 0) 100%
   )`;
 
