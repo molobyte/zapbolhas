@@ -2,7 +2,6 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Pin } from 'lucide-react';
 import { BubbleItem } from '../types/whatsapp';
-import { useBubbleStore } from '../store/useBubbleStore';
 
 interface ContactBubbleProps {
   bubble: BubbleItem;
@@ -19,9 +18,6 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
   onClose,
   onOpenContextMenu,
 }) => {
-  const { bubbleContrast } = useBubbleStore();
-  const isHighContrast = bubbleContrast === 'high';
-
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -54,14 +50,10 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
         onContextMenu={handleContextMenu}
         onAuxClick={handleAuxClick}
         title={`${bubble.name}${bubble.isPinned ? ' (Fixada)' : ''} (Clique direito para opções)`}
-        className={`relative w-[48px] h-[48px] rounded-full overflow-hidden shrink-0 block transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none ${
-          isHighContrast
-            ? isActive
-              ? 'border-2 border-white ring-[2.5px] ring-[#25D366] shadow-[0_0_0_2px_rgba(0,0,0,0.85),0_4px_16px_rgba(37,211,102,0.45)]'
-              : 'border-2 border-white/95 shadow-[0_0_0_1.5px_rgba(0,0,0,0.85),0_4px_14px_rgba(0,0,0,0.85)]'
-            : isActive
-              ? 'ring-2 ring-[#25D366] border border-white/30 shadow-[0_4px_14px_rgba(0,0,0,0.65)]'
-              : 'border-[1.5px] border-white/15 shadow-[0_4px_14px_rgba(0,0,0,0.65)]'
+        className={`relative w-[48px] h-[48px] rounded-full overflow-hidden shrink-0 block shadow-[0_4px_14px_rgba(0,0,0,0.65)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none ${
+          isActive
+            ? 'ring-2 ring-[#25D366] border border-white/30'
+            : 'border-[1.5px] border-white/15'
         }`}
       >
         <img
@@ -76,11 +68,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
       {bubble.isPinned ? (
         <div
           title="Conversa fixada (não pode ser fechada até desfixar)"
-          className={`absolute -top-1 -right-1 w-[18px] h-[18px] rounded-full bg-[#182229] text-[#25D366] flex items-center justify-center z-20 pointer-events-none ${
-            isHighContrast
-              ? 'border border-white/80 shadow-[0_0_0_1px_rgba(0,0,0,0.85),0_2px_6px_rgba(0,0,0,0.7)]'
-              : 'border border-[#25D366]/40 shadow-md'
-          }`}
+          className="absolute -top-1 -right-1 w-[18px] h-[18px] rounded-full bg-[#182229] text-[#25D366] border border-[#25D366]/40 shadow-md flex items-center justify-center z-20 pointer-events-none"
         >
           <Pin className="w-2.5 h-2.5 fill-[#25D366] text-[#25D366] rotate-45" />
         </div>
@@ -93,11 +81,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
             onClose(bubble.chatId);
           }}
           title="Fechar bolha"
-          className={`absolute -top-1 -right-1 w-[18px] h-[18px] rounded-full bg-[#182229] text-[#E9EDEF] flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-[#EF4444] hover:border-[#EF4444] transition-all duration-150 z-20 ${
-            isHighContrast
-              ? 'border border-white/80 shadow-[0_0_0_1px_rgba(0,0,0,0.85),0_2px_6px_rgba(0,0,0,0.7)]'
-              : 'border border-white/20 shadow-md'
-          }`}
+          className="absolute -top-1 -right-1 w-[18px] h-[18px] rounded-full bg-[#182229] text-[#E9EDEF] border border-white/20 shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-[#EF4444] hover:border-[#EF4444] transition-all duration-150 z-20"
         >
           <X className="w-3 h-3 stroke-[2.5]" />
         </button>
@@ -113,11 +97,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
             exit={{ scale: 0, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 520, damping: 20 }}
             title="Marcada como não lida"
-            className={`pointer-events-none absolute -bottom-[3px] -right-[2px] w-[18px] h-[18px] rounded-[5px] bg-[#25D366] text-white flex items-center justify-center z-10 ${
-              isHighContrast
-                ? 'border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.85),0_2px_6px_rgba(0,0,0,0.7)]'
-                : 'shadow-[0_2px_6px_rgba(0,0,0,0.55)]'
-            }`}
+            className="pointer-events-none absolute -bottom-[3px] -right-[2px] w-[18px] h-[18px] rounded-[5px] bg-[#25D366] text-white flex items-center justify-center shadow-[0_2px_6px_rgba(0,0,0,0.55)] z-10"
           >
             <span className="w-2 h-2 rounded-full bg-white shadow-xs" />
           </motion.span>
@@ -128,11 +108,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 520, damping: 20 }}
-            className={`pointer-events-none absolute -bottom-[3px] -right-[2px] min-w-[18px] h-[20px] px-[5px] rounded-[5px] bg-[#F04444] text-white text-[12px] font-semibold leading-none flex items-center justify-center z-10 ${
-              isHighContrast
-                ? 'border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.85),0_2px_6px_rgba(0,0,0,0.7)]'
-                : 'shadow-[0_2px_6px_rgba(0,0,0,0.55)]'
-            }`}
+            className="pointer-events-none absolute -bottom-[3px] -right-[2px] min-w-[18px] h-[20px] px-[5px] rounded-[5px] bg-[#F04444] text-white text-[12px] font-semibold leading-none flex items-center justify-center shadow-[0_2px_6px_rgba(0,0,0,0.55)] z-10"
           >
             {bubble.unreadCount}
           </motion.span>
@@ -149,11 +125,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
             exit={{ scale: 0, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 520, damping: 20 }}
             title="Você foi marcado neste grupo"
-            className={`pointer-events-none absolute -bottom-[3px] -left-[2px] w-[19px] h-[19px] rounded-full bg-[#32CAED] text-[#111B21] text-[11.5px] font-black leading-none flex items-center justify-center z-10 select-none ${
-              isHighContrast
-                ? 'border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.85),0_2px_6px_rgba(0,0,0,0.7)]'
-                : 'shadow-[0_2px_6px_rgba(0,0,0,0.55)] border border-[#111B21]/60'
-            }`}
+            className="pointer-events-none absolute -bottom-[3px] -left-[2px] w-[19px] h-[19px] rounded-full bg-[#32CAED] text-[#111B21] text-[11.5px] font-black leading-none flex items-center justify-center shadow-[0_2px_6px_rgba(0,0,0,0.55)] border border-[#111B21]/60 z-10 select-none"
           >
             @
           </motion.span>
