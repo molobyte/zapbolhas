@@ -563,18 +563,32 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                     }}
                   />
 
-                  {/* Gradiente da vinheta na prévia */}
+                  {/* Gradiente da vinheta na prévia com atenuação suave em ambos os eixos */}
                   <div
                     className="absolute inset-0 pointer-events-none"
                     style={{
-                      background:
-                        bubbleVignetteStyle === 'radial'
-                          ? `radial-gradient(circle at 100% 100%, rgba(5,7,10,${0.98 * (bubbleVignetteOpacity / 100)}) 0%, rgba(8,11,15,${0.85 * (bubbleVignetteOpacity / 100)}) 40%, transparent 100%)`
-                          : bubbleVignetteStyle === 'emerald'
-                          ? `radial-gradient(ellipse 100% 100% at 100% 100%, rgba(3,24,18,${0.96 * (bubbleVignetteOpacity / 100)}) 0%, rgba(9,24,20,${0.75 * (bubbleVignetteOpacity / 100)}) 50%, transparent 100%), linear-gradient(to top, rgba(0,0,0,${0.5 * (bubbleVignetteOpacity / 100)}) 0%, transparent 80%)`
-                          : `radial-gradient(ellipse 100% 100% at 100% 100%, rgba(6,9,12,${0.95 * (bubbleVignetteOpacity / 100)}) 0%, rgba(10,15,20,${0.80 * (bubbleVignetteOpacity / 100)}) 55%, transparent 100%), linear-gradient(to top, rgba(0,0,0,${0.45 * (bubbleVignetteOpacity / 100)}) 0%, transparent 75%)`,
+                      maskImage:
+                        'linear-gradient(to left, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 45%, rgba(0,0,0,0.65) 70%, rgba(0,0,0,0.18) 88%, rgba(0,0,0,0) 98%, transparent 100%)',
+                      WebkitMaskImage:
+                        'linear-gradient(to left, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 45%, rgba(0,0,0,0.65) 70%, rgba(0,0,0,0.18) 88%, rgba(0,0,0,0) 98%, transparent 100%)',
                     }}
-                  />
+                  >
+                    <div
+                      className="w-full h-full pointer-events-none"
+                      style={{
+                        maskImage:
+                          'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 40%, rgba(0,0,0,0.65) 68%, rgba(0,0,0,0.16) 86%, rgba(0,0,0,0) 98%, transparent 100%)',
+                        WebkitMaskImage:
+                          'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 40%, rgba(0,0,0,0.65) 68%, rgba(0,0,0,0.16) 86%, rgba(0,0,0,0) 98%, transparent 100%)',
+                        background:
+                          bubbleVignetteStyle === 'radial'
+                            ? `radial-gradient(circle at 100% 100%, rgba(5,7,10,${0.98 * (bubbleVignetteOpacity / 100)}) 0%, rgba(8,11,15,${0.92 * (bubbleVignetteOpacity / 100)}) 40%, rgba(12,16,22,${0.84 * (bubbleVignetteOpacity / 100)}) 75%, rgba(15,20,28,${0.72 * (bubbleVignetteOpacity / 100)}) 100%)`
+                            : bubbleVignetteStyle === 'emerald'
+                            ? `radial-gradient(ellipse at 100% 100%, rgba(3,26,20,${0.98 * (bubbleVignetteOpacity / 100)}) 0%, rgba(6,36,28,${0.90 * (bubbleVignetteOpacity / 100)}) 45%, rgba(9,25,22,${0.82 * (bubbleVignetteOpacity / 100)}) 75%, rgba(11,20,19,${0.75 * (bubbleVignetteOpacity / 100)}) 100%)`
+                            : `radial-gradient(ellipse at 100% 100%, rgba(6,9,12,${0.98 * (bubbleVignetteOpacity / 100)}) 0%, rgba(8,12,16,${0.92 * (bubbleVignetteOpacity / 100)}) 45%, rgba(12,17,23,${0.85 * (bubbleVignetteOpacity / 100)}) 75%, rgba(15,20,26,${0.78 * (bubbleVignetteOpacity / 100)}) 100%)`,
+                      }}
+                    />
+                  </div>
 
                   {/* Mini bolhas de exemplo sobrepostas na vinheta */}
                   <div className="relative z-10 flex items-center gap-1.5">
