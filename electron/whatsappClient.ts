@@ -783,19 +783,33 @@ export class WhatsAppService {
 
           const rawType = String(getProp(m, 'type') || '');
           const directPath = getProp(m, 'directPath') || (mediaData && getProp(mediaData, 'directPath'));
-          const body = String(getProp(m, 'body') || '');
+          const body = String(getProp(m, 'body') || '').trim();
+          const caption = String(getProp(m, 'caption') || '').trim();
 
-          // Se for mídia de imagem/vídeo sem directPath e o body for uma mediaKey pura em base64 (40 a 70 caracteres terminada em =)
-          const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body.trim()) && body.trim().endsWith('=');
-
-          if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
-            if (isMediaKey) {
-              return true;
-            }
+          // 2. Se o body for uma mediaKey pura em base64 (como 'MLFJqi4g1bZ/UbmrH/S/PBh146yzj/jPL+RvuwYUwsUiqLiH/2Q==')
+          // Nenhum texto humano real é uma chave base64 pura de 40 a 70 caracteres terminada em '='
+          const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body) && body.endsWith('=');
+          if (isMediaKey) {
+            return true;
           }
 
-          const hasMediaKeyProp = Boolean(getProp(m, 'mediaKey') || (mediaData && getProp(mediaData, 'mediaKey')));
-          if (hasMediaKeyProp && !directPath && isMediaKey) {
+          // 3. Se for do tipo 'image', 'video' ou 'view_once' e não tiver directPath
+          // Na Web, toda imagem/vídeo normal possui directPath. A ausência de directPath indica visualização única protegida.
+          if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
+            return true;
+          }
+
+          // 4. Se for qualquer mensagem sem texto, sem legenda e sem directPath (exceto reações, áudio, figurinhas normais e revogadas)
+          if (
+            !body &&
+            !caption &&
+            !directPath &&
+            rawType !== 'ptt' &&
+            rawType !== 'audio' &&
+            rawType !== 'sticker' &&
+            rawType !== 'revoked' &&
+            rawType !== 'reaction'
+          ) {
             return true;
           }
 
@@ -1585,19 +1599,33 @@ export class WhatsAppService {
 
             const rawType = String(getProp(m, 'type') || '');
             const directPath = getProp(m, 'directPath') || (mediaData && getProp(mediaData, 'directPath'));
-            const body = String(getProp(m, 'body') || '');
+            const body = String(getProp(m, 'body') || '').trim();
+            const caption = String(getProp(m, 'caption') || '').trim();
 
-            // Se for mídia de imagem/vídeo sem directPath e o body for uma mediaKey pura em base64 (40 a 70 caracteres terminada em =)
-            const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body.trim()) && body.trim().endsWith('=');
-
-            if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
-              if (isMediaKey) {
-                return true;
-              }
+            // 2. Se o body for uma mediaKey pura em base64 (como 'MLFJqi4g1bZ/UbmrH/S/PBh146yzj/jPL+RvuwYUwsUiqLiH/2Q==')
+            // Nenhum texto humano real é uma chave base64 pura de 40 a 70 caracteres terminada em '='
+            const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body) && body.endsWith('=');
+            if (isMediaKey) {
+              return true;
             }
 
-            const hasMediaKeyProp = Boolean(getProp(m, 'mediaKey') || (mediaData && getProp(mediaData, 'mediaKey')));
-            if (hasMediaKeyProp && !directPath && isMediaKey) {
+            // 3. Se for do tipo 'image', 'video' ou 'view_once' e não tiver directPath
+            // Na Web, toda imagem/vídeo normal possui directPath. A ausência de directPath indica visualização única protegida.
+            if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
+              return true;
+            }
+
+            // 4. Se for qualquer mensagem sem texto, sem legenda e sem directPath (exceto reações, áudio, figurinhas normais e revogadas)
+            if (
+              !body &&
+              !caption &&
+              !directPath &&
+              rawType !== 'ptt' &&
+              rawType !== 'audio' &&
+              rawType !== 'sticker' &&
+              rawType !== 'revoked' &&
+              rawType !== 'reaction'
+            ) {
               return true;
             }
 
@@ -2579,19 +2607,33 @@ export class WhatsAppService {
 
           const rawType = String(getProp(m, 'type') || '');
           const directPath = getProp(m, 'directPath') || (mediaData && getProp(mediaData, 'directPath'));
-          const body = String(getProp(m, 'body') || '');
+          const body = String(getProp(m, 'body') || '').trim();
+          const caption = String(getProp(m, 'caption') || '').trim();
 
-          // Se for mídia de imagem/vídeo sem directPath e o body for uma mediaKey pura em base64 (40 a 70 caracteres terminada em =)
-          const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body.trim()) && body.trim().endsWith('=');
-
-          if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
-            if (isMediaKey) {
-              return true;
-            }
+          // 2. Se o body for uma mediaKey pura em base64 (como 'MLFJqi4g1bZ/UbmrH/S/PBh146yzj/jPL+RvuwYUwsUiqLiH/2Q==')
+          // Nenhum texto humano real é uma chave base64 pura de 40 a 70 caracteres terminada em '='
+          const isMediaKey = /^[A-Za-z0-9+/=]{40,70}$/.test(body) && body.endsWith('=');
+          if (isMediaKey) {
+            return true;
           }
 
-          const hasMediaKeyProp = Boolean(getProp(m, 'mediaKey') || (mediaData && getProp(mediaData, 'mediaKey')));
-          if (hasMediaKeyProp && !directPath && isMediaKey) {
+          // 3. Se for do tipo 'image', 'video' ou 'view_once' e não tiver directPath
+          // Na Web, toda imagem/vídeo normal possui directPath. A ausência de directPath indica visualização única protegida.
+          if ((rawType === 'image' || rawType === 'video' || rawType === 'view_once') && !directPath) {
+            return true;
+          }
+
+          // 4. Se for qualquer mensagem sem texto, sem legenda e sem directPath (exceto reações, áudio, figurinhas normais e revogadas)
+          if (
+            !body &&
+            !caption &&
+            !directPath &&
+            rawType !== 'ptt' &&
+            rawType !== 'audio' &&
+            rawType !== 'sticker' &&
+            rawType !== 'revoked' &&
+            rawType !== 'reaction'
+          ) {
             return true;
           }
 

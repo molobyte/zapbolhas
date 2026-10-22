@@ -71,12 +71,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   // Mensagem de visualização única protegida pelo WhatsApp
   const isViewOnceMsg =
     Boolean(message.isViewOnce) ||
-    ((type === 'image' || type === 'video') &&
+    (!displayCaption &&
       !imageUrl &&
       !videoUrl &&
-      !displayCaption &&
-      !isLoadingMedia &&
-      Boolean(isHdLoaded));
+      !audioData &&
+      type !== 'audio' &&
+      type !== 'sticker');
 
   // Decripta automaticamente imagens, vídeos, figurinhas e áudios em alta resolução (exceto visualização única protegida)
   useEffect(() => {
