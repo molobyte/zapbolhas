@@ -274,9 +274,10 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    // Se há um áudio em reprodução deste contato, prioriza o foco na mensagem com áudio
+    // Se há um áudio em reprodução deste contato, prioriza o foco partindo do rodapé (últimas mensagens)
     const currentAudio = useAudioPlaybackStore.getState().activeAudio;
     if (currentAudio && currentAudio.chatId === currentChatId) {
+      container.scrollTop = container.scrollHeight;
       return;
     }
 
@@ -357,6 +358,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   useLayoutEffect(() => {
     const currentAudio = useAudioPlaybackStore.getState().activeAudio;
     if (currentAudio && currentAudio.chatId === currentChatId) {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+      }
       return;
     }
 
@@ -1342,7 +1346,8 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         const allMsgEls = container.querySelectorAll<HTMLElement>('[data-msg-id]');
         let targetEl: HTMLElement | null = null;
 
-        for (let i = 0; i < allMsgEls.length; i++) {
+        // Localiza a mensagem partindo do fim (mais recente) para o início
+        for (let i = allMsgEls.length - 1; i >= 0; i--) {
           const el = allMsgEls[i];
           const elMsgId = el.dataset.msgId;
           if (elMsgId && isMatchingMessageId(elMsgId, idToMatch)) {
@@ -1390,8 +1395,14 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         return;
       }
 
-      // 2. Se não encontrou no DOM mas está presente no array local de mensagens
-      const inMemoryMsg = messages.find((m) => isMatchingMessageId(m.id, targetMsgId));
+      // 2. Se não encontrou no DOM mas está presente no array local de mensagens (busca do fim para o início)
+      let inMemoryMsg = undefined;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (isMatchingMessageId(messages[i].id, targetMsgId)) {
+          inMemoryMsg = messages[i];
+          break;
+        }
+      }
       if (inMemoryMsg) {
         requestAnimationFrame(() => {
           findAndScrollToElement(inMemoryMsg.id);
@@ -1421,7 +1432,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   );
 
   // Se a conversa for aberta/restaurada e houver áudio tocando neste chat,
-  // foca na mensagem que está tocando o áudio com a mesma transição de destaque e rolagem suave
+  // foca na mensagem que está tocando o áudio partindo do rodapé (da última mensagem para cima)
   useEffect(() => {
     const currentAudio = useAudioPlaybackStore.getState().activeAudio;
     if (
@@ -1431,9 +1442,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     ) {
       hasJumpedToActiveAudioRef.current = currentAudio.messageId;
       initialUnreadScrolledForChatRef.current = currentChatId;
-      userInteractedScrollRef.current = true;
-      userHasScrolledUpRef.current = true;
-      isAtBottomRef.current = false;
+
+      // Inicia imediatamente no rodapé (última mensagem) para que a busca e foco venham de baixo para cima
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+      }
 
       const timer = setTimeout(() => {
         handleJumpToMessage(currentAudio.messageId);
