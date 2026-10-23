@@ -94,6 +94,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const [zoom, setZoom] = useState(1);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [showScrollBottomBtn, setShowScrollBottomBtn] = useState(false);
+  const isScrollingToBottomRef = useRef(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Estados para Sidebar do Contato, Pesquisa e Seleção de Mensagens
   const [showContactSidebar, setShowContactSidebar] = useState(false);
@@ -271,6 +274,52 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     return messages[fallbackIdx] || null;
   }, [unreadBanner, messages]);
 
+  const unreadBelowCount = useMemo(() => {
+    return unreadBanner?.count || 0;
+  }, [unreadBanner]);
+
+  const updateScrollBottomVisibility = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const distanceToBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    const atBottom = distanceToBottom <= 40;
+
+    if (isScrollingToBottomRef.current) {
+      if (atBottom) {
+        isScrollingToBottomRef.current = false;
+      }
+      setShowScrollBottomBtn(false);
+      return;
+    }
+
+    if (atBottom) {
+      setShowScrollBottomBtn(false);
+      return;
+    }
+
+    const hasManyUnread = Boolean(unreadBanner && unreadBanner.count >= 15);
+
+    let messagesBelow = 0;
+    const viewportBottom = container.scrollTop + container.clientHeight;
+    const children = messagesContentRef.current?.children;
+
+    if (children && children.length > 0) {
+      for (let i = children.length - 1; i >= 0; i--) {
+        const child = children[i] as HTMLElement;
+        if (child.offsetTop >= viewportBottom - 10) {
+          messagesBelow++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    const isFarUp = messagesBelow >= 15 || distanceToBottom >= 700;
+    setShowScrollBottomBtn(isFarUp || hasManyUnread);
+  }, [unreadBanner]);
+
   const scrollToTarget = useCallback((forceTarget?: 'divider' | 'bottom') => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -305,6 +354,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
           }
           userHasScrolledUpRef.current = true;
           isAtBottomRef.current = false;
+          requestAnimationFrame(() => {
+            updateScrollBottomVisibility();
+          });
           return;
         }
         // Se há mensagens não lidas mas o divider ainda não montou no DOM (fetch da API em trânsito),
@@ -319,6 +371,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       initialUnreadScrolledForChatRef.current = currentChatId;
       isAtBottomRef.current = true;
       userHasScrolledUpRef.current = false;
+      setShowScrollBottomBtn(false);
       return;
     }
 
@@ -327,7 +380,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     if (isAtBottomRef.current && !userHasScrolledUpRef.current) {
       container.scrollTop = container.scrollHeight;
     }
-  }, [currentChatId, unreadBanner, messages.length]);
+  }, [currentChatId, unreadBanner, messages.length, updateScrollBottomVisibility]);
 
   // Sempre que trocar de conversa (ou abrir a janela), reseta a trava e o estado de rolagem inicial
   useLayoutEffect(() => {
@@ -338,6 +391,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     userHasScrolledUpRef.current = false;
     isLoadingOlderRef.current = false;
     isAtBottomRef.current = true;
+    isScrollingToBottomRef.current = false;
+    setShowScrollBottomBtn(false);
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
     setHighlightedMessageId(null);
     setShowContactSidebar(false);
     setIsSearchingInChat(false);
@@ -355,6 +413,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     return () => {
       if (highlightTimerRef.current) {
         clearTimeout(highlightTimerRef.current);
+      }
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
       }
     };
   }, []);
@@ -428,12 +489,14 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         if (container) {
           container.scrollTop = container.scrollHeight;
         }
+      } else if (userHasScrolledUpRef.current) {
+        updateScrollBottomVisibility();
       }
     });
 
     observer.observe(contentEl);
     return () => observer.disconnect();
-  }, [currentChatId, unreadBanner, scrollToTarget]);
+  }, [currentChatId, unreadBanner, scrollToTarget, updateScrollBottomVisibility]);
 
   useEffect(() => {
     if (replyingTo && inputRef.current) {
@@ -1360,6 +1423,28 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     }
   }, [currentChatId, messages.length]);
 
+  const handleScrollToBottomSmooth = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    isScrollingToBottomRef.current = true;
+    userInteractedScrollRef.current = true;
+    userHasScrolledUpRef.current = false;
+    isAtBottomRef.current = true;
+    setShowScrollBottomBtn(false);
+
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    scrollTimeoutRef.current = setTimeout(() => {
+      isScrollingToBottomRef.current = false;
+    }, 1000);
+
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: 'smooth',
+    });
+  }, []);
+
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -1371,8 +1456,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     isAtBottomRef.current = atBottom;
     userHasScrolledUpRef.current = !atBottom;
 
+    updateScrollBottomVisibility();
     maybeLoadOlderMessages();
-  }, [maybeLoadOlderMessages]);
+  }, [maybeLoadOlderMessages, updateScrollBottomVisibility]);
 
   const handleJumpToMessage = useCallback(
     async (targetMsgId: string): Promise<boolean> => {
@@ -1790,100 +1876,134 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       </AnimatePresence>
 
       {/* Área de Histórico de Mensagens */}
-      <div
-        ref={scrollContainerRef}
-        onScroll={handleScroll}
-        onLoadCapture={() => {
-          const hasUnread = Boolean(unreadBanner && unreadBanner.count > 0);
-          if (hasUnread && !userInteractedScrollRef.current) {
-            scrollToTarget('divider');
-            return;
-          }
-          const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
-          if (!hasInitialScrolled || (isAtBottomRef.current && !userHasScrolledUpRef.current)) {
-            scrollToTarget();
-          }
-        }}
-        onWheel={(e) => {
-          userInteractedScrollRef.current = true;
-          if (e.deltaY < 0) {
-            maybeLoadOlderMessages();
-          }
-        }}
-        onPointerDown={(e) => {
-          userInteractedScrollRef.current = true;
-          const container = scrollContainerRef.current;
-          if (!container) return;
-          const rect = container.getBoundingClientRect();
-          // Se o usuário clicou na barra de rolagem à direita para arrastar manualmente
-          if (e.clientX >= rect.right - 14) {
-            const distanceToBottom =
-              container.scrollHeight - container.scrollTop - container.clientHeight;
-            const atBottom = distanceToBottom <= 40;
-            isAtBottomRef.current = atBottom;
-            userHasScrolledUpRef.current = !atBottom;
-          }
-        }}
-        className="relative z-10 flex-1 overflow-y-auto px-3 pt-10 pb-2 wa-scrollbar"
-      >
-        <div ref={messagesContentRef} className="flex flex-col min-h-full justify-end">
-          {messages.map((msg, index) => {
-            const prevMsg = index > 0 ? messages[index - 1] : null;
-            const isFirstUnread = Boolean(firstUnreadMsg && firstUnreadMsg.id === msg.id);
+      <div className="relative flex-1 min-h-0 flex flex-col">
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          onLoadCapture={() => {
+            const hasUnread = Boolean(unreadBanner && unreadBanner.count > 0);
+            if (hasUnread && !userInteractedScrollRef.current) {
+              scrollToTarget('divider');
+              return;
+            }
+            const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
+            if (!hasInitialScrolled || (isAtBottomRef.current && !userHasScrolledUpRef.current)) {
+              scrollToTarget();
+            }
+          }}
+          onWheel={(e) => {
+            userInteractedScrollRef.current = true;
+            if (e.deltaY < 0) {
+              isScrollingToBottomRef.current = false;
+              maybeLoadOlderMessages();
+            }
+          }}
+          onPointerDown={(e) => {
+            userInteractedScrollRef.current = true;
+            const container = scrollContainerRef.current;
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            // Se o usuário clicou na barra de rolagem à direita para arrastar manualmente
+            if (e.clientX >= rect.right - 14) {
+              const distanceToBottom =
+                container.scrollHeight - container.scrollTop - container.clientHeight;
+              const atBottom = distanceToBottom <= 40;
+              isAtBottomRef.current = atBottom;
+              userHasScrolledUpRef.current = !atBottom;
+            }
+          }}
+          className="relative z-10 flex-1 overflow-y-auto px-3 pt-10 pb-2 wa-scrollbar"
+        >
+          <div ref={messagesContentRef} className="flex flex-col min-h-full justify-end">
+            {messages.map((msg, index) => {
+              const prevMsg = index > 0 ? messages[index - 1] : null;
+              const isFirstUnread = Boolean(firstUnreadMsg && firstUnreadMsg.id === msg.id);
 
-            const isSenderChanged = Boolean(
-              prevMsg && (
-                prevMsg.fromMe !== msg.fromMe ||
-                (!msg.fromMe && currentChat.isGroup && (
-                  (prevMsg.senderName || '') !== (msg.senderName || '') ||
-                  (prevMsg.senderAvatar && msg.senderAvatar && prevMsg.senderAvatar !== msg.senderAvatar)
-                ))
-              )
-            );
+              const isSenderChanged = Boolean(
+                prevMsg && (
+                  prevMsg.fromMe !== msg.fromMe ||
+                  (!msg.fromMe && currentChat.isGroup && (
+                    (prevMsg.senderName || '') !== (msg.senderName || '') ||
+                    (prevMsg.senderAvatar && msg.senderAvatar && prevMsg.senderAvatar !== msg.senderAvatar)
+                  ))
+                )
+              );
 
-            const isFirstInGroup =
-              !prevMsg ||
-              isSenderChanged ||
-              Boolean(msg.dateLabel) ||
-              isFirstUnread;
+              const isFirstInGroup =
+                !prevMsg ||
+                isSenderChanged ||
+                Boolean(msg.dateLabel) ||
+                isFirstUnread;
 
-            const hasSenderGap = isSenderChanged && !Boolean(msg.dateLabel) && !isFirstUnread;
+              const hasSenderGap = isSenderChanged && !Boolean(msg.dateLabel) && !isFirstUnread;
 
-            return (
-              <React.Fragment key={msg.id}>
-                {isFirstUnread && unreadBanner && (
-                  <div
-                    ref={unreadDividerRef}
-                    className="my-3.5 -mx-2 py-1 px-2 flex items-center justify-center gap-2.5 select-none"
-                  >
-                    <div className="flex-1 h-[1px] bg-gradient-to-r from-transparent via-[#00A884]/40 to-[#00A884]/65" />
-                    <span className="bg-[#182229] border border-[#00A884]/60 text-[#25D366] text-[11px] font-semibold tracking-wider uppercase px-3.5 py-1 rounded-full shadow-[0_2px_10px_rgba(0,0,0,0.5)] flex items-center gap-1.5 shrink-0">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#25D366] animate-pulse" />
-                      {unreadBanner.count === 1
-                        ? '1 mensagem não lida'
-                        : `${unreadBanner.count} mensagens não lidas`}
-                    </span>
-                    <div className="flex-1 h-[1px] bg-gradient-to-l from-transparent via-[#00A884]/40 to-[#00A884]/65" />
-                  </div>
-                )}
-                <MessageBubble
-                  message={msg}
-                  isFirstInGroup={isFirstInGroup}
-                  isSenderChanged={hasSenderGap}
-                  isGroupChat={currentChat.isGroup}
-                  isHighlighted={Boolean(
-                    highlightedMessageId && isMatchingMessageId(msg.id, highlightedMessageId)
+              return (
+                <React.Fragment key={msg.id}>
+                  {isFirstUnread && unreadBanner && (
+                    <div
+                      ref={unreadDividerRef}
+                      className="my-3.5 -mx-2 py-1 px-2 flex items-center justify-center gap-2.5 select-none"
+                    >
+                      <div className="flex-1 h-[1px] bg-gradient-to-r from-transparent via-[#00A884]/40 to-[#00A884]/65" />
+                      <span className="bg-[#182229] border border-[#00A884]/60 text-[#25D366] text-[11px] font-semibold tracking-wider uppercase px-3.5 py-1 rounded-full shadow-[0_2px_10px_rgba(0,0,0,0.5)] flex items-center gap-1.5 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#25D366] animate-pulse" />
+                        {unreadBanner.count === 1
+                          ? '1 mensagem não lida'
+                          : `${unreadBanner.count} mensagens não lidas`}
+                      </span>
+                      <div className="flex-1 h-[1px] bg-gradient-to-l from-transparent via-[#00A884]/40 to-[#00A884]/65" />
+                    </div>
                   )}
-                  isSelectionMode={isSelectionMode}
-                  isSelected={selectedMessageIds.has(msg.id)}
-                  onReply={(quote) => setReplyingTo(quote)}
-                  onJumpToMessage={handleJumpToMessage}
-                  onToggleSelect={handleToggleSelectMessage}
-                />
-              </React.Fragment>
-            );
-          })}
+                  <MessageBubble
+                    message={msg}
+                    isFirstInGroup={isFirstInGroup}
+                    isSenderChanged={hasSenderGap}
+                    isGroupChat={currentChat.isGroup}
+                    isHighlighted={Boolean(
+                      highlightedMessageId && isMatchingMessageId(msg.id, highlightedMessageId)
+                    )}
+                    isSelectionMode={isSelectionMode}
+                    isSelected={selectedMessageIds.has(msg.id)}
+                    onReply={(quote) => setReplyingTo(quote)}
+                    onJumpToMessage={handleJumpToMessage}
+                    onToggleSelect={handleToggleSelectMessage}
+                  />
+                </React.Fragment>
+              );
+            })}
+          </div>
         </div>
+
+        {/* Botão Flutuante para descer até a última mensagem (estilo WhatsApp Web) */}
+        <AnimatePresence>
+          {showScrollBottomBtn && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 10 }}
+              transition={{ duration: 0.15 }}
+              className="absolute bottom-3.5 right-4 z-30 pointer-events-auto"
+            >
+              <button
+                type="button"
+                onClick={handleScrollToBottomSmooth}
+                title={
+                  unreadBelowCount > 0
+                    ? `${unreadBelowCount} mensagem${unreadBelowCount > 1 ? 's' : ''} não lida${unreadBelowCount > 1 ? 's' : ''} abaixo`
+                    : 'Descer até a última mensagem'
+                }
+                className="relative flex items-center justify-center w-10 h-10 rounded-full bg-[#202C33] hover:bg-[#2A3942] border border-[#2A3942] text-[#8696A0] hover:text-[#E9EDEF] shadow-[0_2px_8px_rgba(0,0,0,0.5)] transition-all cursor-pointer group active:scale-95"
+              >
+                <ChevronDown className="w-5 h-5 transition-transform group-hover:translate-y-0.5" />
+                {unreadBelowCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1 min-w-[18px] h-[18px] px-1 bg-[#00A884] text-[#111B21] text-[10.5px] font-bold rounded-full flex items-center justify-center shadow-md select-none pointer-events-none">
+                    {unreadBelowCount > 99 ? '99+' : unreadBelowCount}
+                  </span>
+                )}
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Preview de Resposta (Quote) acima do Input */}
