@@ -115,6 +115,7 @@ export interface FormattedChatSummary {
   isMuted?: boolean;
   hasMention?: boolean;
   isPinned?: boolean;
+  timestamp?: number;
   lastMessage: {
     text: string;
     senderName?: string;
@@ -123,6 +124,7 @@ export interface FormattedChatSummary {
     ack?: 'sent' | 'delivered' | 'read';
     duration?: string;
     timestamp: string;
+    timestampMs?: number;
   };
 }
 
@@ -1635,6 +1637,14 @@ export class WhatsAppService {
           text = raw.lastMsgBody || '📄 Documento';
         }
 
+        const rawTimestampSec = Number(raw.timestamp || 0);
+        const rawTimestampMs =
+          rawTimestampSec > 0
+            ? rawTimestampSec < 1e11
+              ? rawTimestampSec * 1000
+              : rawTimestampSec
+            : 0;
+
         return {
           id: raw.id,
           name: raw.name,
@@ -1645,6 +1655,7 @@ export class WhatsAppService {
           isMuted: raw.isMuted,
           hasMention: Boolean(raw.hasMention),
           isPinned: Boolean(raw.isPinned),
+          timestamp: rawTimestampMs,
           lastMessage: {
             text,
             senderName: raw.senderName || undefined,
@@ -1653,6 +1664,7 @@ export class WhatsAppService {
             ack: mapAck(raw.lastMsgAck),
             duration,
             timestamp: formatTime(raw.timestamp),
+            timestampMs: rawTimestampMs,
           },
         };
       });

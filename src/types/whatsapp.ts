@@ -8,6 +8,7 @@ export interface LastMessagePreview {
   ack?: 'sent' | 'delivered' | 'read';
   duration?: string;
   timestamp: string;
+  timestampMs?: number;
 }
 
 export interface ChatSummary {
@@ -22,6 +23,7 @@ export interface ChatSummary {
   isMuted?: boolean;
   hasMention?: boolean;
   isPinned?: boolean;
+  timestamp?: number;
   lastMessage: LastMessagePreview;
 }
 

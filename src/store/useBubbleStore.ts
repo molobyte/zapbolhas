@@ -617,12 +617,23 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       const fullChatsList = [...realChats, ...syntheticMissingChats];
 
       // 4. Cria bolhas para as conversas reais não silenciadas com mensagens não lidas que NÃO estejam fixadas
-      const unreadUnpinnedChats = realChats.filter(
-        (c) =>
-          !updatedPinnedIds.includes(c.id) &&
-          (c.unreadCount > 0 || c.isMarkedUnread || c.unreadCount === -1) &&
-          !c.isMuted
-      );
+      // REGRA: Ao abrir o aplicativo, abrir apenas as fixas e as conversas não lidas cuja última interação
+      // (minha ou do outro colaborador) ocorreu nas últimas 48 horas.
+      const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+      const unreadUnpinnedChats = realChats.filter((c) => {
+        if (updatedPinnedIds.includes(c.id)) return false;
+        if (c.isMuted) return false;
+        const isUnread = Boolean(c.unreadCount > 0 || c.isMarkedUnread || c.unreadCount === -1);
+        if (!isUnread) return false;
+
+        const chatTs = c.timestamp || c.lastMessage?.timestampMs;
+        if (!chatTs || typeof chatTs !== 'number' || chatTs <= 0) {
+          return false;
+        }
+        const diff = now - chatTs;
+        // Última interação (minha ou do outro colaborador) dentro das últimas 48 horas
+        return diff >= -600000 && diff <= FORTY_EIGHT_HOURS_MS;
+      });
 
       const unreadBubbles: BubbleItem[] = unreadUnpinnedChats
         .slice(0, Math.max(0, maxBubbles - pinnedBubbles.length))
@@ -725,11 +736,22 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     }
 
     // Se surgiu alguma conversa não silenciada com unreadCount > 0 ou marcada como não lida que ainda não tem bolha, cria a bolha
+    // (respeitando que a interação tenha ocorrido nas últimas 48 horas)
+    const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+    const nowTs = Date.now();
     for (const c of realChats) {
       const isUnread = Boolean(c.unreadCount > 0 || c.isMarkedUnread || c.unreadCount === -1);
+      const chatTs = c.timestamp || c.lastMessage?.timestampMs;
+      const isWithin48h =
+        typeof chatTs === 'number' &&
+        chatTs > 0 &&
+        nowTs - chatTs <= FORTY_EIGHT_HOURS_MS &&
+        nowTs - chatTs >= -600000;
+
       if (
         isUnread &&
         !c.isMuted &&
+        isWithin48h &&
         !updatedBubbles.some((b) => b.chatId === c.id)
       ) {
         const newB: BubbleItem = {
