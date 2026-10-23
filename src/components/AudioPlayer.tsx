@@ -1,33 +1,18 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { AudioData, DEFAULT_AVATAR } from '../types/whatsapp';
+import {
+  useAudioPlaybackStore,
+  getStoredPlaybackRate,
+  PlaybackSpeed,
+} from '../store/useAudioPlaybackStore';
 
 interface AudioPlayerProps {
   audioData: AudioData;
   timestamp: string;
   fromMe: boolean;
   ack?: 'sent' | 'delivered' | 'read';
-}
-
-type PlaybackSpeed = 1 | 1.5 | 2;
-
-const AUDIO_SPEED_STORAGE_KEY = 'whatsapp-bubbles-audio-playback-rate-v1';
-
-function getStoredPlaybackRate(): PlaybackSpeed {
-  try {
-    const saved = localStorage.getItem(AUDIO_SPEED_STORAGE_KEY);
-    if (saved === '1.5') return 1.5;
-    if (saved === '2') return 2;
-    return 1;
-  } catch {
-    return 1;
-  }
-}
-
-function setStoredPlaybackRate(rate: PlaybackSpeed) {
-  try {
-    localStorage.setItem(AUDIO_SPEED_STORAGE_KEY, String(rate));
-    window.dispatchEvent(new CustomEvent('wa:audio-speed-change', { detail: rate }));
-  } catch {}
+  chatId?: string;
+  messageId?: string;
 }
 
 function parseDurationString(str?: string): number {
@@ -82,12 +67,22 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   timestamp,
   fromMe,
   ack,
+  chatId,
+  messageId,
 }) => {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0); // 0 to 1
-  const [playbackRate, setPlaybackRate] = useState<PlaybackSpeed>(getStoredPlaybackRate);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const playerId = useRef(Math.random().toString(36).substring(2));
+  const effectiveChatId = chatId || 'unknown';
+  const effectiveMessageId = messageId || audioData.audioUrl || 'unknown';
+
+  const activeAudio = useAudioPlaybackStore((state) => state.activeAudio);
+  const isThisAudioActive = Boolean(
+    activeAudio && activeAudio.messageId === effectiveMessageId
+  );
+
+  const isPlaying = Boolean(isThisAudioActive && activeAudio?.isPlaying);
+  const progress = isThisAudioActive && activeAudio ? activeAudio.progress : 0;
+  const playbackRate = isThisAudioActive && activeAudio
+    ? activeAudio.playbackRate
+    : getStoredPlaybackRate();
 
   // Calcula com robustez a duração total em segundos
   const fallbackSeconds = useMemo(() => {
@@ -101,187 +96,33 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     return 15;
   }, [audioData.durationSeconds, audioData.duration]);
 
-  // Obtém a duração válida do elemento de áudio, contornando o bug do Chromium
-  // em que gravações WebM/OGG de MediaRecorder reportam duration = Infinity
-  const getEffectiveDuration = (audio?: HTMLAudioElement | null): number => {
-    if (audio && Number.isFinite(audio.duration) && audio.duration > 0) {
-      return audio.duration;
-    }
-    return fallbackSeconds;
-  };
-
-  // Instanciação e ciclo de vida do elemento HTMLAudioElement
-  useEffect(() => {
-    if (audioData.audioUrl) {
-      const audio = new Audio(audioData.audioUrl);
-      audio.playbackRate = playbackRate;
-      audioRef.current = audio;
-
-      audio.onended = () => {
-        setIsPlaying(false);
-        setProgress(0);
-      };
-
-      return () => {
-        audio.pause();
-        audioRef.current = null;
-      };
-    } else {
-      audioRef.current = null;
-    }
-  }, [audioData.audioUrl]);
-
-  // Sincroniza velocidade de reprodução com o elemento de áudio
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = playbackRate;
-    }
-  }, [playbackRate]);
-
-  // Sincroniza preferência de velocidade entre múltiplos players
-  useEffect(() => {
-    const handleSpeedSync = (e: Event) => {
-      const customEvent = e as CustomEvent<PlaybackSpeed>;
-      if (customEvent.detail && [1, 1.5, 2].includes(customEvent.detail)) {
-        setPlaybackRate(customEvent.detail);
-        if (audioRef.current) {
-          audioRef.current.playbackRate = customEvent.detail;
-        }
-      }
-    };
-
-    window.addEventListener('wa:audio-speed-change', handleSpeedSync);
-    return () => {
-      window.removeEventListener('wa:audio-speed-change', handleSpeedSync);
-    };
-  }, []);
-
-  // Pausa este áudio se outro começar a tocar no app
-  useEffect(() => {
-    const handleOtherAudioPlaying = (e: Event) => {
-      const customEvent = e as CustomEvent<string>;
-      if (customEvent.detail !== playerId.current && isPlaying) {
-        if (audioRef.current) {
-          audioRef.current.pause();
-        }
-        setIsPlaying(false);
-      }
-    };
-
-    window.addEventListener('wa:audio-playing', handleOtherAudioPlaying);
-    return () => {
-      window.removeEventListener('wa:audio-playing', handleOtherAudioPlaying);
-    };
-  }, [isPlaying]);
-
-  // Loop de atualização a 60fps enquanto o áudio estiver tocando
-  useEffect(() => {
-    if (!isPlaying) return;
-
-    let animId: number;
-    let lastTime = performance.now();
-
-    const tick = () => {
-      const now = performance.now();
-      const dt = (now - lastTime) / 1000;
-      lastTime = now;
-
-      const audio = audioRef.current;
-      if (audio && audioData.audioUrl) {
-        const dur = getEffectiveDuration(audio);
-        if (dur > 0) {
-          const curTime = audio.currentTime;
-          if (curTime >= dur || audio.ended) {
-            setIsPlaying(false);
-            setProgress(0);
-            return;
-          }
-          setProgress(Math.min(1, Math.max(0, curTime / dur)));
-        }
-      } else {
-        // Modo simulado caso não haja arquivo de áudio carregado
-        setProgress((prev) => {
-          const step = (dt * playbackRate) / Math.max(1, fallbackSeconds);
-          const next = prev + step;
-          if (next >= 1) {
-            setIsPlaying(false);
-            return 0;
-          }
-          return next;
-        });
-      }
-      animId = requestAnimationFrame(tick);
-    };
-
-    animId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animId);
-  }, [isPlaying, audioData.audioUrl, fallbackSeconds, playbackRate]);
-
   const togglePlay = () => {
-    const audio = audioRef.current;
-    if (audio && audioData.audioUrl) {
-      if (isPlaying) {
-        audio.pause();
-        setIsPlaying(false);
-      } else {
-        window.dispatchEvent(
-          new CustomEvent('wa:audio-playing', { detail: playerId.current })
-        );
-        audio.playbackRate = playbackRate;
-        const dur = getEffectiveDuration(audio);
-        // Se já chegou ao final, reinicia do começo
-        if (progress >= 1 || (audio.currentTime >= dur && dur > 0)) {
-          audio.currentTime = 0;
-          setProgress(0);
-        }
-        audio.play().catch(() => {});
-        setIsPlaying(true);
-      }
-    } else {
-      // Simulação quando não há áudio carregado
-      if (isPlaying) {
-        setIsPlaying(false);
-      } else {
-        window.dispatchEvent(
-          new CustomEvent('wa:audio-playing', { detail: playerId.current })
-        );
-        if (progress >= 1) {
-          setProgress(0);
-        }
-        setIsPlaying(true);
-      }
-    }
+    useAudioPlaybackStore.getState().togglePlay({
+      chatId: effectiveChatId,
+      messageId: effectiveMessageId,
+      audioUrl: audioData.audioUrl,
+      duration: fallbackSeconds,
+    });
   };
 
   const cycleSpeed = (e: React.MouseEvent) => {
     e.stopPropagation();
-    let nextRate: PlaybackSpeed = 1;
-    if (playbackRate === 1) {
-      nextRate = 1.5;
-    } else if (playbackRate === 1.5) {
-      nextRate = 2;
-    } else {
-      nextRate = 1;
-    }
-    setPlaybackRate(nextRate);
-    setStoredPlaybackRate(nextRate);
-    if (audioRef.current) {
-      audioRef.current.playbackRate = nextRate;
-    }
+    const nextRate: PlaybackSpeed =
+      playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1;
+    useAudioPlaybackStore.getState().setPlaybackRate(nextRate);
   };
 
   const handleWaveformClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const clickRatio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setProgress(clickRatio);
 
-    const audio = audioRef.current;
-    if (audio && audioData.audioUrl) {
-      const dur = getEffectiveDuration(audio);
-      if (dur > 0) {
-        audio.currentTime = Math.min(dur, Math.max(0, clickRatio * dur));
-      }
-    }
+    useAudioPlaybackStore.getState().seekTo({
+      chatId: effectiveChatId,
+      messageId: effectiveMessageId,
+      audioUrl: audioData.audioUrl,
+      duration: fallbackSeconds,
+      progress: clickRatio,
+    });
   };
 
   const isListening = isPlaying || progress > 0;

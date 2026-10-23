@@ -1,8 +1,9 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Pin } from 'lucide-react';
+import { X, Pin, Play, Pause } from 'lucide-react';
 import { BubbleItem } from '../types/whatsapp';
 import { useBubbleStore } from '../store/useBubbleStore';
+import { useAudioPlaybackStore } from '../store/useAudioPlaybackStore';
 import { hexToRgba } from '../utils/colorUtils';
 
 interface ContactBubbleProps {
@@ -26,6 +27,14 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
     bubbleBorderOpacity,
     bubbleBorderWidth,
   } = useBubbleStore();
+
+  const activeAudio = useAudioPlaybackStore((state) => state.activeAudio);
+  const isAudioActiveForThisChat = Boolean(
+    activeAudio && activeAudio.chatId === bubble.chatId
+  );
+  const isAudioPlaying = Boolean(
+    isAudioActiveForThisChat && activeAudio?.isPlaying
+  );
 
   let borderStyle: React.CSSProperties;
 
@@ -123,6 +132,39 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
           draggable={false}
         />
       </button>
+
+      {/* Botão de Controle de Áudio Tocando no Canto Superior Esquerdo */}
+      <AnimatePresence>
+        {isAudioActiveForThisChat && (
+          <motion.button
+            key="audio-bubble-indicator"
+            type="button"
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 500, damping: 22 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              useAudioPlaybackStore.getState().togglePlay();
+            }}
+            title={
+              isAudioPlaying
+                ? 'Pausar áudio (clique para pausar)'
+                : 'Continuar áudio (clique para reproduzir)'
+            }
+            className="absolute -top-1 -left-1 w-[20px] h-[20px] rounded-full bg-[#00A884] hover:bg-[#00c298] text-white border-2 border-[#111B21] shadow-[0_2px_8px_rgba(0,168,132,0.7)] flex items-center justify-center z-30 transition-transform hover:scale-110 active:scale-90 cursor-pointer"
+          >
+            {isAudioPlaying ? (
+              <span className="relative flex items-center justify-center">
+                <span className="absolute -inset-1 rounded-full bg-[#25D366]/40 animate-ping pointer-events-none" />
+                <Pause className="w-2.5 h-2.5 fill-current" />
+              </span>
+            ) : (
+              <Play className="w-2.5 h-2.5 fill-current ml-[1px]" />
+            )}
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* Ícone de Pin no canto superior direito quando fixada */}
       {bubble.isPinned ? (

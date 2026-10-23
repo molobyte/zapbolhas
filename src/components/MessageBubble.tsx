@@ -585,6 +585,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               timestamp={timestamp}
               fromMe={fromMe}
               ack={ack}
+              chatId={message.chatId}
+              messageId={message.id}
             />
           ) : (
             <div className="text-[13.2px] leading-[18px] break-words text-[#E9EDEF]">

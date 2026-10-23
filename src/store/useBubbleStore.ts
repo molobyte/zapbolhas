@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useAudioPlaybackStore } from './useAudioPlaybackStore';
 import {
   ActivePopover,
   BubbleItem,
@@ -1609,6 +1610,9 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   // 5.4 Fechar a conversa definitivamente (remove a bolha da barra inferior)
   closeBubble: (chatId) => {
+    // Para instantaneamente a reprodução de áudio deste contato se estiver ativa
+    useAudioPlaybackStore.getState().stop(chatId);
+
     const { activeBubbles, activeChatId, activePopover, maxBubbles, pinnedChatIds } = get();
     const bubble = activeBubbles.find((b) => b.chatId === chatId);
     if (bubble?.isPinned) {
