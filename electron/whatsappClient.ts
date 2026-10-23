@@ -257,20 +257,46 @@ function pickSenderColor(seed: string): string {
 }
 
 function createInitialsAvatarDataUrl(name: string): string {
-  const clean = (name || 'WA').replace(/[^\p{L}\p{N}\s]/gu, '').trim() || 'WA';
-  const parts = clean.split(/\s+/);
-  const initials =
-    parts.length >= 2
-      ? (parts[0][0] + parts[1][0]).toUpperCase()
-      : clean.slice(0, 2).toUpperCase();
+  const safeName =
+    typeof name === 'string'
+      ? typeof (name as any).toWellFormed === 'function'
+        ? (name as any).toWellFormed()
+        : name.replace(/[\uD800-\uDFFF]/g, '')
+      : '';
+
+  // Remove diacríticos e mantém apenas letras e números ASCII limpos
+  const clean = safeName
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9\s]/g, '')
+    .trim();
+
+  let initials = 'WA';
+  if (clean) {
+    const parts = clean.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2 && parts[0][0] && parts[1][0]) {
+      initials = (parts[0][0] + parts[1][0]).toUpperCase();
+    } else {
+      initials = clean.slice(0, 2).toUpperCase();
+    }
+  }
+
+  // Garante que initials contenha exclusivamente caracteres alfanuméricos seguros
+  initials = initials.replace(/[^A-Za-z0-9]/g, '').slice(0, 2) || 'WA';
+
   const bgColors = ['#005C4B', '#1F2C34', '#025144', '#2A3942', '#128C7E'];
   let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  for (let i = 0; i < safeName.length; i++) {
+    hash = safeName.charCodeAt(i) + ((hash << 5) - hash);
   }
   const bg = bgColors[Math.abs(hash) % bgColors.length];
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><rect width="80" height="80" rx="40" fill="${bg}"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#E9EDEF" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="600">${initials}</text></svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+
+  try {
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  } catch (_) {
+    return `data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2280%22%20height%3D%2280%22%20viewBox%3D%220%200%2080%2080%22%3E%3Crect%20width%3D%2280%22%20height%3D%2280%22%20rx%3D%2240%22%20fill%3D%22%23005C4B%22%2F%3E%3Ctext%20x%3D%2250%25%22%20y%3D%2254%25%22%20dominant-baseline%3D%22middle%22%20text-anchor%3D%22middle%22%20fill%3D%22%23E9EDEF%22%20font-family%3D%22Segoe%20UI%2C%20Arial%2C%20sans-serif%22%20font-size%3D%2228%22%20font-weight%3D%22600%22%3EWA%3C%2Ftext%3E%3C%2Fsvg%3E`;
+  }
 }
 
 function isRawMediaBase64OrKey(str?: string | null): boolean {
@@ -3727,23 +3753,42 @@ export class WhatsAppService {
       );
 
       return (raw || []).map((p: any) => {
-        const cleanName = (p.name || 'Membro').replace(/^~/, '').trim();
-        const avatar =
-          p.avatar ||
-          this.avatarCache.get(p.id) ||
-          createInitialsAvatarDataUrl(cleanName);
-        if (p.avatar) {
-          this.avatarCache.set(p.id, p.avatar);
+        try {
+          const rawName = p.name || p.pushname || p.user || 'Membro';
+          const cleanName = String(rawName).replace(/^~/, '').trim() || 'Membro';
+          let avatar = p.avatar || this.avatarCache.get(p.id);
+          if (!avatar) {
+            try {
+              avatar = createInitialsAvatarDataUrl(cleanName);
+            } catch {
+              avatar = createInitialsAvatarDataUrl('Membro');
+            }
+          }
+          if (p.avatar) {
+            this.avatarCache.set(p.id, p.avatar);
+          }
+          return {
+            id: p.id,
+            rawId: p.rawId || p.id,
+            user: p.user || (p.rawId || p.id).split('@')[0],
+            name: cleanName,
+            pushname: p.pushname || undefined,
+            avatar,
+            isAdmin: Boolean(p.isAdmin),
+          };
+        } catch (itemErr) {
+          console.warn('[WhatsAppService] Error mapping participant, using fallback:', itemErr);
+          const safeId = p?.id || 'unknown';
+          return {
+            id: safeId,
+            rawId: p?.rawId || safeId,
+            user: p?.user || safeId.split('@')[0],
+            name: 'Membro',
+            pushname: undefined,
+            avatar: createInitialsAvatarDataUrl('Membro'),
+            isAdmin: Boolean(p?.isAdmin),
+          };
         }
-        return {
-          id: p.id,
-          rawId: p.rawId || p.id,
-          user: p.user || (p.rawId || p.id).split('@')[0],
-          name: cleanName,
-          pushname: p.pushname || undefined,
-          avatar,
-          isAdmin: Boolean(p.isAdmin),
-        };
       });
     } catch (err) {
       console.error('[WhatsAppService] Error getting group participants:', err);
@@ -4083,22 +4128,39 @@ export class WhatsAppService {
       }, query);
 
       return (rawList || []).map((c: any) => {
-        const cleanName = (c.name || 'Contato').replace(/^~/, '').trim();
-        const avatar =
-          c.avatar ||
-          this.avatarCache.get(c.id) ||
-          createInitialsAvatarDataUrl(cleanName);
-        if (c.avatar) {
-          this.avatarCache.set(c.id, c.avatar);
+        try {
+          const rawName = c.name || c.pushname || c.phoneNumber || 'Contato';
+          const cleanName = String(rawName).replace(/^~/, '').trim() || 'Contato';
+          let avatar = c.avatar || this.avatarCache.get(c.id);
+          if (!avatar) {
+            try {
+              avatar = createInitialsAvatarDataUrl(cleanName);
+            } catch {
+              avatar = createInitialsAvatarDataUrl('Contato');
+            }
+          }
+          if (c.avatar) {
+            this.avatarCache.set(c.id, c.avatar);
+          }
+          return {
+            id: c.id,
+            name: cleanName,
+            pushname: c.pushname || undefined,
+            phoneNumber: c.phoneNumber || undefined,
+            avatar,
+            isMyContact: Boolean(c.isMyContact),
+          };
+        } catch (itemErr) {
+          console.warn('[WhatsAppService] Error mapping contact, using fallback:', itemErr);
+          return {
+            id: c?.id || 'unknown',
+            name: 'Contato',
+            pushname: undefined,
+            phoneNumber: undefined,
+            avatar: createInitialsAvatarDataUrl('Contato'),
+            isMyContact: Boolean(c?.isMyContact),
+          };
         }
-        return {
-          id: c.id,
-          name: cleanName,
-          pushname: c.pushname || undefined,
-          phoneNumber: c.phoneNumber || undefined,
-          avatar,
-          isMyContact: Boolean(c.isMyContact),
-        };
       });
     } catch (err) {
       console.error('[WhatsAppService] Error getting saved contacts:', err);
