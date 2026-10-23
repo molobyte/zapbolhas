@@ -12,9 +12,10 @@ import {
   Palette,
   Pipette,
   RotateCcw,
+  Pin,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
-import { BubbleBorderMode, DisplayInfo, SoundPreset } from '../types/whatsapp';
+import { BubbleBorderMode, DisplayInfo, SoundPreset, StartupChatFilter } from '../types/whatsapp';
 import { previewNotificationSound } from '../utils/notificationSound';
 import { hexToRgba } from '../utils/colorUtils';
 
@@ -52,6 +53,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     bubbleBorderColor,
     bubbleBorderOpacity,
     bubbleBorderWidth,
+    startupChatFilter,
     setBubbleScale,
     setMaxBubbles,
     setSoundMuted,
@@ -61,6 +63,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     setBubbleBorderColor,
     setBubbleBorderOpacity,
     setBubbleBorderWidth,
+    setStartupChatFilter,
     minimizeActiveChat,
   } = useBubbleStore();
 
@@ -219,7 +222,103 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           </div>
         </div>
 
-        {/* 3. Borda das Bubbles (Modos: Padrão, Minimalista, Avançado, Personalizada) */}
+        {/* 3. Conversas ao Abrir o Zapbolhas */}
+        <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-2.5">
+          <div className="flex items-center gap-1.5">
+            <Pin className="w-3.5 h-3.5 text-[#25D366]" />
+            <span className="text-[12.5px] font-medium text-[#E9EDEF]">
+              Ao Abrir o Zapbolhas
+            </span>
+          </div>
+          <p className="text-[11px] text-[#8696A0] leading-snug">
+            Defina quais conversas devem surgir como bolhas na tela ao iniciar o aplicativo:
+          </p>
+
+          <div className="space-y-1.5">
+            {/* Opção 1: Fixas e não lidas nas últimas 48 horas */}
+            <button
+              type="button"
+              onClick={() => setStartupChatFilter('pinned_and_unread_48h')}
+              className={`w-full text-left p-2.5 rounded-[8px] border transition-all flex items-start gap-2.5 cursor-pointer ${
+                startupChatFilter === 'pinned_and_unread_48h'
+                  ? 'bg-[#005C4B]/20 border-[#25D366]/50 shadow-xs'
+                  : 'bg-[#202C33] border-white/5 hover:border-white/15'
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 transition-colors ${
+                  startupChatFilter === 'pinned_and_unread_48h'
+                    ? 'border-[#25D366] bg-[#25D366]'
+                    : 'border-[#8696A0] bg-transparent'
+                }`}
+              >
+                {startupChatFilter === 'pinned_and_unread_48h' && (
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#111B21]" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <span
+                    className={`text-[12px] font-medium ${
+                      startupChatFilter === 'pinned_and_unread_48h'
+                        ? 'text-[#25D366]'
+                        : 'text-[#E9EDEF]'
+                    }`}
+                  >
+                    Fixas + Não lidas (últimas 48h)
+                  </span>
+                  {startupChatFilter === 'pinned_and_unread_48h' && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#25D366]/20 text-[#25D366] font-semibold">
+                      Padrão
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10.5px] text-[#8696A0] leading-tight mt-0.5">
+                  Abre as fixadas e as conversas com mensagens não lidas recebidas nas últimas 48 horas.
+                </p>
+              </div>
+            </button>
+
+            {/* Opção 2: Apenas as conversas fixadas */}
+            <button
+              type="button"
+              onClick={() => setStartupChatFilter('pinned_only')}
+              className={`w-full text-left p-2.5 rounded-[8px] border transition-all flex items-start gap-2.5 cursor-pointer ${
+                startupChatFilter === 'pinned_only'
+                  ? 'bg-[#005C4B]/20 border-[#25D366]/50 shadow-xs'
+                  : 'bg-[#202C33] border-white/5 hover:border-white/15'
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 transition-colors ${
+                  startupChatFilter === 'pinned_only'
+                    ? 'border-[#25D366] bg-[#25D366]'
+                    : 'border-[#8696A0] bg-transparent'
+                }`}
+              >
+                {startupChatFilter === 'pinned_only' && (
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#111B21]" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <span
+                  className={`text-[12px] font-medium ${
+                    startupChatFilter === 'pinned_only'
+                      ? 'text-[#25D366]'
+                      : 'text-[#E9EDEF]'
+                  }`}
+                >
+                  Apenas as conversas fixadas
+                </span>
+                <p className="text-[10.5px] text-[#8696A0] leading-tight mt-0.5">
+                  Abre exclusivamente com as conversas que você fixou, mantendo a tela limpa e focada.
+                </p>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* 4. Borda das Bubbles (Modos: Padrão, Minimalista, Avançado, Personalizada) */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
@@ -578,7 +677,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           )}
         </div>
 
-        {/* 4. Escolha do Monitor / Tela */}
+        {/* 5. Escolha do Monitor / Tela */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05]">
           <div className="flex items-center gap-1.5 mb-2">
             <Monitor className="w-3.5 h-3.5 text-[#25D366]" />
@@ -618,7 +717,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           )}
         </div>
 
-        {/* 5. Áudio das Notificações (Mutar ou Mudar Som) */}
+        {/* 6. Áudio das Notificações (Mutar ou Mudar Som) */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">

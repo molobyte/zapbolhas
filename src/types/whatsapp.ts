@@ -145,6 +145,7 @@ export interface ViewingImageState {
 
 export type ActivePopover = 'none' | 'chat-list' | 'chat-window' | 'qr-code' | 'settings';
 export type BubbleBorderMode = 'default' | 'minimal' | 'advanced' | 'custom';
+export type StartupChatFilter = 'pinned_and_unread_48h' | 'pinned_only';
 
 export type SoundPreset = 'default' | 'crystal' | 'pop' | 'custom';
 
