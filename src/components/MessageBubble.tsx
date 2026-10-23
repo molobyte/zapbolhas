@@ -455,14 +455,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           data-msg-bubble={message.id}
           className={`relative ${
             !fromMe && isGroupChat ? 'max-w-[76%]' : 'max-w-[82%]'
-          } rounded-[7.5px] px-2.5 py-1.5 shadow-[0_1px_1px_rgba(0,0,0,0.3)] transition-all duration-500 ${
+          } rounded-[7.5px] px-2.5 py-1.5 shadow-[0_1px_1px_rgba(0,0,0,0.3)] text-[#E9EDEF] transition-all duration-500 ${
             isHighlighted
               ? fromMe
                 ? 'bg-[#02735E] ring-2 ring-[#00A884] shadow-[0_0_18px_rgba(0,168,132,0.55)] brightness-110 scale-[1.01]'
                 : 'bg-[#1a3832] ring-2 ring-[#00A884] shadow-[0_0_18px_rgba(0,168,132,0.55)] brightness-110 scale-[1.01]'
               : fromMe
-              ? 'bg-[#005C4B] text-[#E9EDEF]'
-              : 'bg-[#202C33] text-[#E9EDEF]'
+              ? 'bg-[#005C4B]'
+              : 'bg-[#202C33]'
           } ${isFirstInGroup && !fromMe ? 'rounded-tl-none' : ''} ${
             isFirstInGroup && fromMe ? 'rounded-tr-none' : ''
           }`}
@@ -550,7 +550,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               ack={ack}
             />
           ) : (
-            <div className="text-[13.2px] leading-[18px] break-words">
+            <div className="text-[13.2px] leading-[18px] break-words text-[#E9EDEF]">
               {isViewOnceMsg ? (
                 <div className="w-[260px] p-2.5 rounded-[8px] bg-[#182229]/80 border border-white/10 flex items-center gap-3 text-left select-none mb-1">
                   <div className="w-10 h-10 rounded-full bg-[#005C4B]/60 border border-[#25D366]/40 flex items-center justify-center shrink-0 text-[#25D366]">
