@@ -13,6 +13,11 @@ export interface ActiveAudioState {
   playbackRate: PlaybackSpeed;
 }
 
+export interface AudioFocusTarget {
+  chatId: string;
+  messageId: string;
+}
+
 export const AUDIO_SPEED_STORAGE_KEY = 'whatsapp-bubbles-audio-playback-rate-v1';
 
 export function getStoredPlaybackRate(): PlaybackSpeed {
@@ -63,6 +68,7 @@ function stopGlobalAudio() {
 
 interface AudioPlaybackStore {
   activeAudio: ActiveAudioState | null;
+  focusTarget: AudioFocusTarget | null;
 
   play: (params: {
     chatId: string;
@@ -91,7 +97,8 @@ interface AudioPlaybackStore {
   }) => void;
 
   setPlaybackRate: (rate: PlaybackSpeed) => void;
-  stop: (chatId?: string) => void;
+  stop: (chatId?: string | null) => void;
+  clearFocusTarget: (chatId?: string | null) => void;
 }
 
 export const useAudioPlaybackStore = create<AudioPlaybackStore>((set, get) => {
@@ -163,6 +170,7 @@ export const useAudioPlaybackStore = create<AudioPlaybackStore>((set, get) => {
 
   return {
     activeAudio: null,
+    focusTarget: null,
 
     play: (params) => {
       stopGlobalAudio();
@@ -208,6 +216,10 @@ export const useAudioPlaybackStore = create<AudioPlaybackStore>((set, get) => {
           progress: initialProgress,
           isPlaying: true,
           playbackRate: rate,
+        },
+        focusTarget: {
+          chatId: params.chatId,
+          messageId: params.messageId,
         },
       });
 
@@ -319,13 +331,29 @@ export const useAudioPlaybackStore = create<AudioPlaybackStore>((set, get) => {
       }
     },
 
-    stop: (chatId?: string) => {
+    stop: (chatId?: string | null) => {
       const current = get().activeAudio;
-      if (!current) return;
-      if (chatId && current.chatId !== chatId) return;
+      const target = get().focusTarget;
+      if (chatId) {
+        if (current && current.chatId === chatId) {
+          stopGlobalAudio();
+          set({ activeAudio: null });
+        }
+        if (target && target.chatId === chatId) {
+          set({ focusTarget: null });
+        }
+      } else {
+        stopGlobalAudio();
+        set({ activeAudio: null, focusTarget: null });
+      }
+    },
 
-      stopGlobalAudio();
-      set({ activeAudio: null });
+    clearFocusTarget: (chatId?: string | null) => {
+      const target = get().focusTarget;
+      if (!target) return;
+      if (!chatId || target.chatId === chatId) {
+        set({ focusTarget: null });
+      }
     },
   };
 });

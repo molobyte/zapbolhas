@@ -123,6 +123,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const isAtBottomRef = useRef<boolean>(true);
   const initialUnreadScrolledForChatRef = useRef<string | null>(null);
   const hasJumpedToActiveAudioRef = useRef<string | null>(null);
+  const initialPositionedForAudioRef = useRef<string | null>(null);
   const userInteractedScrollRef = useRef<boolean>(false);
   const isLoadingOlderRef = useRef<boolean>(false);
 
@@ -274,10 +275,13 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    // Se há um áudio em reprodução deste contato, prioriza o foco partindo do rodapé (últimas mensagens)
-    const currentAudio = useAudioPlaybackStore.getState().activeAudio;
-    if (currentAudio && currentAudio.chatId === currentChatId) {
-      container.scrollTop = container.scrollHeight;
+    // Se há um áudio em reprodução ou alvo de foco deste contato, NÃO sobrescreve a posição de scroll!
+    const playbackStore = useAudioPlaybackStore.getState();
+    const hasAudioTarget = Boolean(
+      (playbackStore.activeAudio && playbackStore.activeAudio.chatId === currentChatId) ||
+      (playbackStore.focusTarget && playbackStore.focusTarget.chatId === currentChatId)
+    );
+    if (hasAudioTarget) {
       return;
     }
 
@@ -329,6 +333,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   useLayoutEffect(() => {
     initialUnreadScrolledForChatRef.current = null;
     hasJumpedToActiveAudioRef.current = null;
+    initialPositionedForAudioRef.current = null;
     userInteractedScrollRef.current = false;
     userHasScrolledUpRef.current = false;
     isLoadingOlderRef.current = false;
@@ -356,9 +361,14 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
   // Sincroniza o scroll imediatamente antes da pintura e no próximo frame quando mensagens ou banner mudam
   useLayoutEffect(() => {
-    const currentAudio = useAudioPlaybackStore.getState().activeAudio;
-    if (currentAudio && currentAudio.chatId === currentChatId) {
-      if (scrollContainerRef.current) {
+    const playbackStore = useAudioPlaybackStore.getState();
+    const hasAudioTarget = Boolean(
+      (playbackStore.activeAudio && playbackStore.activeAudio.chatId === currentChatId) ||
+      (playbackStore.focusTarget && playbackStore.focusTarget.chatId === currentChatId)
+    );
+    if (hasAudioTarget) {
+      if (!initialPositionedForAudioRef.current && scrollContainerRef.current) {
+        initialPositionedForAudioRef.current = currentChatId;
         scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
       }
       return;
@@ -393,8 +403,12 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     if (!contentEl) return;
 
     const observer = new ResizeObserver(() => {
-      const currentAudio = useAudioPlaybackStore.getState().activeAudio;
-      if (currentAudio && currentAudio.chatId === currentChatId) {
+      const playbackStore = useAudioPlaybackStore.getState();
+      const hasAudioTarget = Boolean(
+        (playbackStore.activeAudio && playbackStore.activeAudio.chatId === currentChatId) ||
+        (playbackStore.focusTarget && playbackStore.focusTarget.chatId === currentChatId)
+      );
+      if (hasAudioTarget) {
         return;
       }
 
@@ -1336,8 +1350,8 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   }, [maybeLoadOlderMessages]);
 
   const handleJumpToMessage = useCallback(
-    async (targetMsgId: string) => {
-      if (!targetMsgId) return;
+    async (targetMsgId: string): Promise<boolean> => {
+      if (!targetMsgId) return false;
 
       const findAndScrollToElement = (idToMatch: string): boolean => {
         const container = scrollContainerRef.current;
@@ -1392,7 +1406,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
       // 1. Tenta encontrar a mensagem diretamente no DOM atual
       if (findAndScrollToElement(targetMsgId)) {
-        return;
+        return true;
       }
 
       // 2. Se não encontrou no DOM mas está presente no array local de mensagens (busca do fim para o início)
@@ -1404,10 +1418,14 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         }
       }
       if (inMemoryMsg) {
-        requestAnimationFrame(() => {
-          findAndScrollToElement(inMemoryMsg.id);
+        return new Promise<boolean>((resolve) => {
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              const res = findAndScrollToElement(inMemoryMsg.id);
+              resolve(res);
+            }, 60);
+          });
         });
-        return;
       }
 
       // 3. Se a mensagem citada é antiga e não foi carregada no lote inicial
@@ -1417,44 +1435,70 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
           const olderMsgs = await window.electronAPI.getMessages(currentChatId, fetchLimit);
           if (olderMsgs && olderMsgs.length > messages.length) {
             useBubbleStore.getState().setMessagesForChat(currentChatId, olderMsgs);
-            requestAnimationFrame(() => {
-              setTimeout(() => {
-                findAndScrollToElement(targetMsgId);
-              }, 80);
+            return new Promise<boolean>((resolve) => {
+              requestAnimationFrame(() => {
+                setTimeout(() => {
+                  const res = findAndScrollToElement(targetMsgId);
+                  resolve(res);
+                }, 100);
+              });
             });
           }
         } catch (err) {
           console.error('[ChatWindowPopover] Erro ao carregar mensagens para ir à citação:', err);
         }
       }
+
+      return false;
     },
     [currentChatId, messages]
   );
 
-  // Se a conversa for aberta/restaurada e houver áudio tocando neste chat,
+  // Se a conversa for aberta/restaurada e houver áudio tocando ou recém-escutado neste chat,
   // foca na mensagem que está tocando o áudio partindo do rodapé (da última mensagem para cima)
   useEffect(() => {
-    const currentAudio = useAudioPlaybackStore.getState().activeAudio;
-    if (
-      currentAudio &&
-      currentAudio.chatId === currentChatId &&
-      hasJumpedToActiveAudioRef.current !== currentAudio.messageId
-    ) {
-      hasJumpedToActiveAudioRef.current = currentAudio.messageId;
-      initialUnreadScrolledForChatRef.current = currentChatId;
+    const playbackStore = useAudioPlaybackStore.getState();
+    const target =
+      playbackStore.activeAudio && playbackStore.activeAudio.chatId === currentChatId
+        ? playbackStore.activeAudio
+        : playbackStore.focusTarget && playbackStore.focusTarget.chatId === currentChatId
+        ? playbackStore.focusTarget
+        : null;
 
-      // Inicia imediatamente no rodapé (última mensagem) para que a busca e foco venham de baixo para cima
-      if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-      }
+    if (!target) return;
 
-      const timer = setTimeout(() => {
-        handleJumpToMessage(currentAudio.messageId);
-      }, 70);
-
-      return () => clearTimeout(timer);
+    if (hasJumpedToActiveAudioRef.current === target.messageId) {
+      return;
     }
-  }, [currentChatId, messages, handleJumpToMessage]);
+
+    // Inicia imediatamente no rodapé (última mensagem) para que a busca e foco venham de baixo para cima
+    if (scrollContainerRef.current && !initialPositionedForAudioRef.current) {
+      initialPositionedForAudioRef.current = currentChatId;
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
+
+    let isDisposed = false;
+    let attempts = 0;
+
+    const doJump = async () => {
+      if (isDisposed) return;
+      attempts++;
+      const jumped = await handleJumpToMessage(target.messageId);
+      if (jumped) {
+        hasJumpedToActiveAudioRef.current = target.messageId;
+        playbackStore.clearFocusTarget(currentChatId);
+      } else if (attempts < 6 && !isDisposed) {
+        setTimeout(doJump, 80);
+      }
+    };
+
+    const timer = setTimeout(doJump, 60);
+
+    return () => {
+      isDisposed = true;
+      clearTimeout(timer);
+    };
+  }, [currentChatId, messages.length, handleJumpToMessage]);
 
   const searchMatches = useMemo(() => {
     if (!searchQuery.trim() || !messages.length) return [];
