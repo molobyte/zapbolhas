@@ -606,20 +606,21 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       };
     }),
 
-  fetchGroupParticipants: async (chatId, query, limit = 10) => {
+  fetchGroupParticipants: async (chatId, query, limit = 1000) => {
     const { initialGroupParticipantsByChat } = get();
     const cleanQuery = (query || '').trim();
-    const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 1000));
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 1000, 1000));
 
-    // Se a busca estiver vazia e já temos a lista inicial de participantes para este grupo, restaura imediatamente
-    if (!cleanQuery && initialGroupParticipantsByChat[chatId]?.length > 0) {
+    // Se a busca estiver vazia e já temos a lista com quantidade suficiente ou completa, restaura imediatamente
+    const currentCached = initialGroupParticipantsByChat[chatId] || [];
+    if (!cleanQuery && currentCached.length >= safeLimit && currentCached.length > 0) {
       set((state) => ({
         groupParticipantsByChat: {
           ...state.groupParticipantsByChat,
-          [chatId]: initialGroupParticipantsByChat[chatId],
+          [chatId]: currentCached,
         },
       }));
-      return initialGroupParticipantsByChat[chatId];
+      return currentCached;
     }
 
     if (window.electronAPI?.getGroupParticipants) {
@@ -638,7 +639,10 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
             ...(!cleanQuery && {
               initialGroupParticipantsByChat: {
                 ...state.initialGroupParticipantsByChat,
-                [chatId]: participants,
+                [chatId]:
+                  participants.length >= (state.initialGroupParticipantsByChat[chatId]?.length || 0)
+                    ? participants
+                    : state.initialGroupParticipantsByChat[chatId],
               },
             }),
           }));

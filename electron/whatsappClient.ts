@@ -3164,7 +3164,7 @@ export class WhatsAppService {
   public async getGroupParticipants(
     chatId: string,
     query: string = '',
-    limit: number = 10
+    limit: number = 1000
   ): Promise<
     Array<{
       id: string;

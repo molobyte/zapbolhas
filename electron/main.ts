@@ -364,7 +364,7 @@ function registerIpcHandlers() {
     'wa:get-group-participants',
     async (_event, chatId: string, query?: string, limit?: number) => {
       if (!waService) return [];
-      return await waService.getGroupParticipants(chatId, query, limit);
+      return await waService.getGroupParticipants(chatId, query, limit || 1000);
     }
   );
 

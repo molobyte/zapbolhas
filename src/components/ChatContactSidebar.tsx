@@ -83,6 +83,16 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
         .then((list) => {
           if (!isCancelled && Array.isArray(list)) {
             setMembers(list);
+            useBubbleStore.setState((state) => ({
+              groupParticipantsByChat: {
+                ...state.groupParticipantsByChat,
+                [chat.id]: list,
+              },
+              initialGroupParticipantsByChat: {
+                ...state.initialGroupParticipantsByChat,
+                [chat.id]: list,
+              },
+            }));
           }
         })
         .catch((err) => {
@@ -97,6 +107,36 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
       isCancelled = true;
     };
   }, [chat.id, chat.isGroup]);
+
+  // Se o usuário entrar na tela de membros e houver 50 ou menos (limite antigo em cache), força refetch de até 1000
+  useEffect(() => {
+    if (viewMode === 'members' && chat.isGroup && chat.id && window.electronAPI?.getGroupParticipants) {
+      if (members.length <= 50) {
+        setIsLoadingMembers(true);
+        window.electronAPI
+          .getGroupParticipants(chat.id, '', 1000)
+          .then((list) => {
+            if (Array.isArray(list) && list.length > 0) {
+              setMembers(list);
+              useBubbleStore.setState((state) => ({
+                groupParticipantsByChat: {
+                  ...state.groupParticipantsByChat,
+                  [chat.id]: list,
+                },
+                initialGroupParticipantsByChat: {
+                  ...state.initialGroupParticipantsByChat,
+                  [chat.id]: list,
+                },
+              }));
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            setIsLoadingMembers(false);
+          });
+      }
+    }
+  }, [viewMode, chat.id, chat.isGroup, members.length]);
 
   // Ao pressionar ESC na visualização de membros, retorna ao menu principal
   useEffect(() => {
