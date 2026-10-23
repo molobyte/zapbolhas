@@ -141,10 +141,10 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
           <motion.button
             key="audio-bubble-indicator"
             type="button"
-            initial={{ scale: 0.4, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.4, opacity: 0 }}
-            transition={{ duration: 0.1, ease: 'easeOut' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
             onClick={(e) => {
               e.stopPropagation();
               useAudioPlaybackStore.getState().togglePlay();
@@ -154,7 +154,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
                 ? 'Pausar áudio (clique para pausar)'
                 : 'Continuar áudio (clique para reproduzir)'
             }
-            className="absolute -top-[3px] -left-[2px] w-[19px] h-[19px] rounded-full bg-[#74E8AC] text-[#111B21] flex items-center justify-center shadow-[0_2px_6px_rgba(0,0,0,0.55)] border border-[#111B21]/60 z-30 select-none cursor-pointer hover:brightness-105 active:scale-90"
+            className="absolute -top-[3px] -left-[2px] w-[19px] h-[19px] rounded-full bg-[#74E8AC] text-[#111B21] flex items-center justify-center shadow-[0_2px_6px_rgba(0,0,0,0.55)] border border-[#111B21]/60 z-30 select-none cursor-pointer hover:brightness-105 active:opacity-80"
           >
             {isAudioPlaying ? (
               <Pause className="w-2.5 h-2.5 fill-current text-[#111B21]" />
