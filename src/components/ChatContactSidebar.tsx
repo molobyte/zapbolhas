@@ -57,13 +57,13 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
 
   return (
     <motion.aside
-      initial={{ opacity: 0, x: 260 }}
+      initial={{ opacity: 0, x: 280 }}
       animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 260 }}
+      exit={{ opacity: 0, x: 280 }}
       transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-      className="absolute right-[calc(100%-24px)] top-3 bottom-5 w-[280px] z-10 bg-[#111B21] rounded-l-[18px] border-y border-l border-white/[0.08] shadow-[-12px_12px_36px_rgba(0,0,0,0.75)] flex flex-col pt-5 pb-4 px-3 overflow-y-auto wa-scrollbar select-none pointer-events-auto"
+      className="absolute right-[calc(100%-24px)] top-3 bottom-5 w-[305px] z-10 bg-[#111B21] rounded-l-[18px] border-y border-l border-white/[0.08] shadow-[-12px_12px_36px_rgba(0,0,0,0.75)] flex flex-col pt-5 pb-4 pl-3.5 pr-[42px] overflow-y-auto wa-scrollbar select-none pointer-events-auto"
     >
-      {/* Botão de Fechar Discreto no Topo Esquerdo (longe da sobreposição com o chat à direita) */}
+      {/* Botão de Fechar Discreto no Topo Esquerdo */}
       <button
         type="button"
         onClick={onClose}
@@ -73,7 +73,7 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
         <X className="w-4 h-4" />
       </button>
 
-      {/* Topo: Foto do Perfil em Alta Resolução Centralizada (Mockup evidencias/39.png) */}
+      {/* Topo: Foto do Perfil em Alta Resolução Centralizada */}
       <div className="flex flex-col items-center text-center mt-1 mb-4">
         <div className="relative group/avatar">
           <img
@@ -101,13 +101,13 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
         </div>
 
         {/* Nome do Contato / Grupo com suporte a Emojis */}
-        <h3 className="mt-3.5 font-medium text-[15px] text-[#E9EDEF] leading-snug px-3 line-clamp-2 break-words">
+        <h3 className="mt-3.5 font-medium text-[15px] text-[#E9EDEF] leading-snug px-2 line-clamp-2 break-words">
           <FormattedText text={chat.name} />
         </h3>
       </div>
 
-      {/* Lista de Opções da Conversa (conforme mockup evidencias/39.png) */}
-      <div className="flex flex-col gap-1 mt-2 px-1">
+      {/* Lista de Opções da Conversa com padding à direita para não ser encoberta pela conversa */}
+      <div className="flex flex-col gap-1 mt-2">
         {/* 1. Pesquisar */}
         <button
           type="button"
@@ -147,7 +147,7 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
             {chat.isMuted ? 'Silenciado' : 'Silenciar'}
           </span>
           {chat.isMuted && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#EF4444]/20 text-[#EF4444] font-medium">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#EF4444]/20 text-[#EF4444] font-medium shrink-0">
               Ativo
             </span>
           )}
@@ -168,7 +168,7 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
             {isPinned ? 'Conversa fixada' : 'Fixar conversa'}
           </span>
           {isPinned && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#00A884]/20 text-[#00A884] font-medium">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#00A884]/20 text-[#00A884] font-medium shrink-0">
               Fixada
             </span>
           )}

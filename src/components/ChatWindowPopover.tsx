@@ -216,7 +216,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     const unconstrainedShift = idealArrowRight - maxArrowRightInWindow;
     const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
     // Margem de segurança de 32px para não vazar a borda esquerda do overlay (+ largura da sidebar se aberta)
-    const extraLeftSpace = showContactSidebar ? 292 : 32;
+    const extraLeftSpace = showContactSidebar ? 320 : 32;
     const maxAllowedShift = Math.max(0, screenWidth - currentSize.width - extraLeftSpace);
     popoverShiftX = Math.min(maxAllowedShift, unconstrainedShift);
     arrowRightPx = idealArrowRight - popoverShiftX;
