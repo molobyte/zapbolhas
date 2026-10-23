@@ -200,32 +200,6 @@ function saveUnpinnedChatIds(ids: string[]): void {
   }
 }
 
-function loadInitialBubbles(
-  pinnedChatIds: string[],
-  pinnedMeta: Record<string, PinnedChatMeta>,
-  maxBubbles: number
-): BubbleItem[] {
-  const initial: BubbleItem[] = [];
-  const now = Date.now();
-
-  pinnedChatIds.forEach((id, idx) => {
-    const meta = pinnedMeta[id];
-    initial.push({
-      chatId: id,
-      name: meta?.name || id.split('@')[0],
-      avatar: meta?.avatar || '',
-      unreadCount: 0,
-      isMarkedUnread: false,
-      isPinned: true,
-      isGroup: meta?.isGroup ?? id.endsWith('@g.us'),
-      hasMention: false,
-      lastActivity: meta?.lastActivity || (now - (pinnedChatIds.length - idx) * 1000),
-    });
-  });
-
-  return organizeBubbles(initial, maxBubbles, pinnedChatIds);
-}
-
 function loadChatSizes(): Record<string, ChatBubbleSize> {
   try {
     const raw = localStorage.getItem(CHAT_SIZES_STORAGE_KEY);
@@ -309,13 +283,7 @@ export function moveBubbleToMostRecent(
 
 const initialSettings = loadUserSettings();
 const initialPinnedChatIds = loadPinnedChatIds();
-const initialPinnedMeta = loadPinnedChatMeta();
 const initialChatSizes = loadChatSizes();
-const initialActiveBubbles = loadInitialBubbles(
-  initialPinnedChatIds,
-  initialPinnedMeta,
-  initialSettings.maxBubbles
-);
 
 interface BubbleStoreState {
   mode: ConnectionMode;
@@ -467,7 +435,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   bubbleBorderWidth: initialSettings.bubbleBorderWidth,
 
   chats: [],
-  activeBubbles: initialActiveBubbles,
+  activeBubbles: [],
   pinnedChatIds: initialPinnedChatIds,
   chatSizes: initialChatSizes,
   activePopover: 'none',
