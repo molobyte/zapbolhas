@@ -531,7 +531,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
     }
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
     await sendSticker(stickerDataUrl);
+    inputRef.current?.focus();
   };
 
   const handleSelectMediaForPreview = (media: {
@@ -615,8 +619,29 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
     }
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
     await sendMedia(toSend);
+    inputRef.current?.focus();
   }, [pendingMedia, pendingCaption, trackedMentions, isGroupChat, groupParticipants, sendMedia]);
+
+  const prevPendingMediaRef = useRef(pendingMedia);
+  useEffect(() => {
+    if (prevPendingMediaRef.current && !pendingMedia) {
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+    prevPendingMediaRef.current = pendingMedia;
+  }, [pendingMedia]);
 
   const processImageFileForPreview = useCallback(
     (file: File | Blob, fallbackName = 'imagem.png') => {
