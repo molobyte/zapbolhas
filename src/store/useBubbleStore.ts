@@ -609,7 +609,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   fetchGroupParticipants: async (chatId, query, limit = 10) => {
     const { initialGroupParticipantsByChat } = get();
     const cleanQuery = (query || '').trim();
-    const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 50));
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 1000));
 
     // Se a busca estiver vazia e já temos a lista inicial de participantes para este grupo, restaura imediatamente
     if (!cleanQuery && initialGroupParticipantsByChat[chatId]?.length > 0) {

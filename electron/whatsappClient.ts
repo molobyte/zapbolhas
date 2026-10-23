@@ -3256,7 +3256,7 @@ export class WhatsAppService {
                 : '';
 
             const q = normalize(queryStr);
-            const safeLimit = Math.max(1, Math.min(Number(maxLimit) || 10, 50));
+            const safeLimit = Math.max(1, Math.min(Number(maxLimit) || 10, 1000));
 
             type Candidate = {
               id: string;
