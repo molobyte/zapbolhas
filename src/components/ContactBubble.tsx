@@ -142,7 +142,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 500, damping: 22 }}
+            transition={{ type: 'spring', stiffness: 520, damping: 20 }}
             onClick={(e) => {
               e.stopPropagation();
               useAudioPlaybackStore.getState().togglePlay();
@@ -152,15 +152,12 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
                 ? 'Pausar áudio (clique para pausar)'
                 : 'Continuar áudio (clique para reproduzir)'
             }
-            className="absolute -top-1 -left-1 w-[20px] h-[20px] rounded-full bg-[#00A884] hover:bg-[#00c298] text-white border-2 border-[#111B21] shadow-[0_2px_8px_rgba(0,168,132,0.7)] flex items-center justify-center z-30 transition-transform hover:scale-110 active:scale-90 cursor-pointer"
+            className="absolute -top-[3px] -left-[2px] w-[19px] h-[19px] rounded-full bg-[#74E8AC] text-[#111B21] flex items-center justify-center shadow-[0_2px_6px_rgba(0,0,0,0.55)] border border-[#111B21]/60 z-30 select-none cursor-pointer hover:brightness-105 active:scale-95 transition-transform"
           >
             {isAudioPlaying ? (
-              <span className="relative flex items-center justify-center">
-                <span className="absolute -inset-1 rounded-full bg-[#25D366]/40 animate-ping pointer-events-none" />
-                <Pause className="w-2.5 h-2.5 fill-current" />
-              </span>
+              <Pause className="w-2.5 h-2.5 fill-current text-[#111B21]" />
             ) : (
-              <Play className="w-2.5 h-2.5 fill-current ml-[1px]" />
+              <Play className="w-2.5 h-2.5 fill-current text-[#111B21] ml-[1px]" />
             )}
           </motion.button>
         )}
