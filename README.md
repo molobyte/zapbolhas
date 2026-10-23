@@ -14,7 +14,7 @@
 
 ![ZapBolhas Showcase](docs/screenshots/hero.jpg)
 
-> **ZapBolhas** traz o conceito consagrado de *Chat Heads* flutuantes diretamente para a área de trabalho do Windows. Uma camada de software translúcida, inteligente e não obstrutiva que repousa sobre qualquer aplicativo — editor de código, navegador, planilhas ou jogos —, permitindo que você visualize e responda mensagens instantaneamente sem alternar janelas com `Alt + Tab`.
+> **ZapBolhas** traz o conceito consagrado de *Chat Heads* flutuantes diretamente para a área de trabalho do Windows. Uma camada translúcida, inteligente e não obstrutiva que repousa sobre qualquer aplicativo — editor de código, navegador, planilhas ou jogos —, permitindo visualizar e responder mensagens instantaneamente sem alternar janelas com `Alt + Tab`.
 
 ---
 
@@ -41,10 +41,13 @@
 
 ---
 
-## 📸 Galeria de Experiência
+## 📸 Galeria de Experiência & Funcionalidades
 
-### 1. Dock Flutuante & Notificações Dinâmicas
-As conversas recentes ou com mensagens pendentes organizam-se automaticamente em uma elegante barra flutuante. Ícones redondos com fotos de perfil, contadores vibrantes de mensagens não lidas e transições suaves com física de molas (*spring physics*).
+### 1. Dock Flutuante, Fixações & Mini Player de Áudio
+As conversas recentes ou com mensagens pendentes organizam-se automaticamente em uma elegante barra flutuante:
+- **Spring Physics:** Transições suaves baseadas em física de molas.
+- **Conversas Fixadas:** Fixe contatos e grupos com indicador de alfinete (*pin*) verde que persistem entre sessões.
+- **Mini Player na Bolha:** Ao minimizar uma conversa com áudio tocando, a reprodução continua sem interrupções! Um botão discreto de **Play/Pause** surge no topo da bolha do contato na dock. Ao reabrir, o chat rola suavemente com destaque visual direto na mensagem de áudio em reprodução.
 
 <p align="center">
   <img src="docs/screenshots/01-dock.png" alt="Dock de Bolhas Flutuantes" width="600" />
@@ -53,7 +56,10 @@ As conversas recentes ou com mensagens pendentes organizam-se automaticamente em
 ---
 
 ### 2. Central de Conversas Instantânea
-Acesse todas as conversas do seu WhatsApp em um popover translúcido com efeito acrílico escuro. Faça buscas instantâneas, visualize status de envio (`✓✓`), prévias de texto e fixações com zero lentidão.
+Acesse todas as conversas do seu WhatsApp em um popover translúcido com efeito acrílico escuro:
+- Busca instantânea com filtragem progressiva de contatos e grupos.
+- **Ícones Clássicos de Confirmação:** `✓` cinza para enviado, `✓✓` cinza para entregue e `✓✓` azul para visualizado, atualizados em tempo real via IPC (`message_ack`).
+- Prévias fiéis de texto, áudios com microfone verde e mídias.
 
 <p align="center">
   <img src="docs/screenshots/02-lista-conversas.png" alt="Lista de Conversas" width="520" />
@@ -61,23 +67,44 @@ Acesse todas as conversas do seu WhatsApp em um popover translúcido com efeito 
 
 ---
 
-### 3. Janela de Conversa Completa & Interativa
+### 3. Janela de Conversa Interativa & Áudio com Velocidade
 Experiência completa de bate-papo sem abrir o navegador:
-- Reprodução de áudios com **forma de onda visual interativa**.
-- Fotos em alta resolução e visualização de mídias enviadas/recebidas.
-- **Reações com emojis** diretamente nas bolhas de mensagem.
-- Citações e respostas encadeadas fiéis ao aplicativo oficial.
-- Barra superior retrátil com controles de minimizar, fechar e dados de presença.
+- **Player de Áudio Avançado:** Forma de onda visual interativa (*waveform*), foto do remetente e seletor de velocidade (`1x`, `1.5x`, `2x`) com memória persistente.
+- **Botão Flutuante de Rolagem Rápida:** Surge discretamente ao subir mais de 15 mensagens ou quando há novas mensagens não lidas abaixo, permitindo descer ao final com um único toque.
+- **Banner de Mensagens Não Lidas:** Linha divisória destacada com contagem precisa de mensagens recebidas.
+- **Fotos de Visualização Única:** Tratamento protegido com indicação clara.
+- **Foco Restaurado:** O cursor retorna imediatamente ao campo *"Digite uma mensagem"* após o envio de fotos ou mídias.
+
+| Player de Áudio & Citações | Banner de Mensagens Não Lidas |
+|:---:|:---:|
+| <img src="docs/screenshots/13-audio-e-respostas.png" alt="Áudio e Respostas" width="460" /> | <img src="docs/screenshots/15-banner-nao-lidas.png" alt="Banner de Não Lidas" width="460" /> |
+
+---
+
+### 4. Sidebar Retrátil de Informações do Contato e Grupo
+Acesse dados detalhados com a nova gaveta lateral que desliza suavemente por trás da conversa:
+- **Para Grupos:** Descrição completa do grupo formatada, lista de participantes pesquisável sem limites com foto e badges de Administrador.
+- **Para Contatos:** Foto em alta resolução, recados, número e ações rápidas.
+- **Ações Imediatas:** Pesquisar no histórico, Selecionar mensagens para encaminhar, Silenciar e Fixar/Desfixar conversa.
 
 <p align="center">
-  <img src="docs/screenshots/03-conversa.png" alt="Conversa Individual" width="600" />
+  <img src="docs/screenshots/12-sidebar-info.png" alt="Sidebar de Informações do Grupo e Contato" width="620" />
 </p>
 
 ---
 
-### 4. Grupos Otimizados & Menções Inteligentes com `@`
-Em grupos corporativos ou comunitários com centenas de membros, a busca de contatos tradicional costuma travar ou sobrecarregar a interface. O ZapBolhas implementa:
-- **Resolução de Contatos com Prioridade:** Prioriza nomes reais salvos na sua agenda em vez de apenas apelidos públicos desconhecidos.
+### 5. Encaminhamento Nativo de Mídias (Vídeos em HD & GIFs Animados)
+Encaminhe mensagens individuais ou múltiplas com precisão:
+- **Encaminhamento Nativo do WhatsApp:** Processamento direto através do motor do WhatsApp Web, sem recompressão ou perda de qualidade.
+- **Vídeos em Resolução Original:** Preserva o arquivo MP4 em alta definição, tamanho e duração.
+- **GIFs Animados:** Mantém a reprodução automática em loop contínuo e metadados nativos de GIF do WhatsApp.
+- **Fotos, Áudios e Figurinhas:** Encaminhamento instantâneo mantendo legendas originais.
+
+---
+
+### 6. Grupos Otimizados & Menções Inteligentes com `@`
+Em grupos corporativos ou comunitários com centenas de participantes:
+- **Resolução Prioritária de Contatos:** Prioriza nomes reais salvos na sua agenda do celular em vez de números puros ou apelidos desconhecidos.
 - **Autocompletar Otimizado de `@`:** Limite inteligente com paginação em memória e filtragem instantânea conforme você digita.
 
 | Conversa em Grupo | Menções com Autocomplete Filtrado |
@@ -86,11 +113,11 @@ Em grupos corporativos ou comunitários com centenas de membros, a busca de cont
 
 ---
 
-### 5. Emojis, Figurinhas & Mídias em Detalhe
+### 7. Emojis, Figurinhas & Visualizador Lightbox
 Expresse-se com a riqueza do WhatsApp tradicional sem perder espaço de tela:
-- **Seletor Nativo de Emojis:** Categorias organizadas, busca rápida e navegação intuitiva.
-- **Biblioteca de Figurinhas (*Stickers*):** Envio instantâneo de stickers favoritos e recentes.
-- **Visualizador Lightbox:** Clique em qualquer imagem para abrir um visualizador focado com fundo escurecido e zoom.
+- **Seletor de Emojis:** Categorias organizadas, busca por texto e reações rápidas sobre mensagens.
+- **Biblioteca de Figurinhas (*Stickers*):** Envio rápido de figurinhas recentes e favoritas.
+- **Visualizador Lightbox:** Clique em qualquer imagem para abrir em tela cheia com zoom, download e abertura externa no seu visualizador padrão.
 
 | Seletor de Emojis | Gaveta de Figurinhas | Visualizador Lightbox |
 |:---:|:---:|:---:|
@@ -98,14 +125,17 @@ Expresse-se com a riqueza do WhatsApp tradicional sem perder espaço de tela:
 
 ---
 
-### 6. Controles Rápidos, Autenticação e Configurações
-- **Menu de Contexto no Botão Principal:** Clique com o botão direito na bolha mestra verde para **Recarregar a sessão** (útil após reconexões de rede), abrir as **Configurações**, **Deslogar** ou **Sair da aplicação**.
-- **Autenticação Descomplicada:** Leitura de QR Code direta na janela de boas-vindas com renovação automática.
-- **Preferências Customizáveis:** Escolha em qual monitor o dock deve ficar, ajuste a posição vertical, defina atalhos e comportamentos de notificação.
+### 8. Painel de Configurações Completo & Personalização
+Controle total sobre o comportamento e visual do aplicativo na sua área de trabalho:
+- **Filtro ao Abrir o Zapbolhas:** Escolha entre abrir com *"Fixas + Não lidas (últimas 48h)"* ou *"Apenas as conversas fixadas"*, mantendo sua tela limpa e focada.
+- **Borda das Bolhas Personalizável:** Escolha entre os modos *Padrão* (borda branca 80%), *Minimalista*, *Avançado* ou *Personalizada* com controle de cor, opacidade e espessura.
+- **Sons de Notificação:** Sons diferenciados para contatos individuais e grupos, com *cooldown* inteligente (30s para usuário, 2min para grupo) e suporte a upload de áudios customizados (`.mp3`, `.wav`, `.ogg`).
+- **Seleção de Monitor:** Em setups com múltiplos monitores, escolha exatamente em qual tela o dock e as janelas devem repousar.
+- **Escala de Zoom:** Redimensione as bolhas de 65% a 145% para qualquer densidade ou resolução de tela.
 
-| Menu de Contexto | Conexão QR Code | Painel de Configurações |
+| Painel de Configurações Atualizado | Conexão por QR Code | Menu de Controle Rápido |
 |:---:|:---:|:---:|
-| <img src="docs/screenshots/09-menu-contexto.png" alt="Menu de Contexto" width="310" /> | <img src="docs/screenshots/10-qrcode.png" alt="Autenticação QR Code" width="310" /> | <img src="docs/screenshots/11-configuracoes.png" alt="Configurações" width="310" /> |
+| <img src="docs/screenshots/11-configuracoes.png" alt="Painel de Configurações" width="310" /> | <img src="docs/screenshots/10-qrcode.png" alt="Autenticação QR Code" width="310" /> | <img src="docs/screenshots/09-menu-contexto.png" alt="Menu de Contexto" width="310" /> |
 
 ---
 
@@ -121,14 +151,15 @@ Expresse-se com a riqueza do WhatsApp tradicional sem perder espaço de tela:
 │  │                                                  │  │
 │  │   ┌──────────────┐         ┌─────────────────┐   │  │
 │  │   │  Chat Head   │         │ Active Chat     │   │  │
-│  │   │  (Bubbles)   │         │ Window Popover  │   │  │
+│  │   │  (Bubbles)   │◄───────►│ Window Popover  │   │  │
 │  │   └──────┬───────┘         └────────┬────────┘   │  │
 │  └──────────┼──────────────────────────┼────────────┘  │
 │             │   IPC (Electron Context) │               │
 │  ┌──────────▼──────────────────────────▼────────────┐  │
 │  │       Electron Main Process (Node.js)            │  │
-│  │  - Window Management & Multi-Monitor Detection   │  │
-│  │  - Context Menus & Tray Integration              │  │
+│  │  - Multi-Monitor WorkArea Detection              │  │
+│  │  - Native Forwarding (WAWebChatForwardMessage)   │  │
+│  │  - Real-time Message ACK & Reaction Listeners    │  │
 │  │  - whatsapp-web.js (Headless Chromium Engine)    │  │
 │  └──────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────┘
@@ -136,8 +167,8 @@ Expresse-se com a riqueza do WhatsApp tradicional sem perder espaço de tela:
 
 - **Pass-Through de Cliques Dinâmico:** O overlay ocupa a tela inteira com transparência nativa. Sempre que o cursor do mouse passa sobre uma bolha ou janela ativa, o renderer emite um evento IPC para ativar a captura de cliques (`setIgnoreMouseEvents(false)`). Ao sair, o evento desativa a captura, permitindo clicar nos aplicativos abaixo sem qualquer barreira.
 - **Front-end Moderno:** Construído em **React 18** com tipagem estrita em **TypeScript**, estilização utilitária com **Tailwind CSS** e animações fluidas baseadas em física via **Framer Motion**.
-- **Gerenciamento de Estado:** **Zustand** para gerenciamento ultraleve de chats ativos, bolhas ancoradas, unread badges e perfil de usuário.
-- **Backend WhatsApp:** Alimentado pela consagrada biblioteca **whatsapp-web.js**, garantindo suporte completo a criptografia, envio de áudios, imagens, reações e grupos.
+- **Gerenciamento de Estado:** **Zustand** para orquestração ultraleve de chats ativos, bolhas ancoradas, badges de mensagens não lidas e preferências do usuário sincronizadas via IPC entre janelas.
+- **Backend WhatsApp:** Alimentado pela biblioteca **whatsapp-web.js**, garantindo criptografia ponta a ponta, envio de áudios em formato de voz OGG Opus, stickers, mídias HD e grupos.
 
 ---
 
@@ -183,12 +214,14 @@ npm run dev
 
 ---
 
-## ⌨️ Atalhos e Dicas
+## ⌨️ Atalhos e Dicas de Produtividade
 
 - **Clique simples na bolha:** Abre ou recolhe a janela de conversa correspondente.
+- **Áudio com bolha minimizada:** Controle a reprodução com o botão Play/Pause que aparece sobre a bolha do contato na dock; ao clicar para reabrir, o chat foca automaticamente na mensagem do áudio.
 - **Clique com o botão direito na bolha verde:** Exibe o menu de controle rápido com as opções **Recarregar**, **Configurações**, **Deslogar** e **Sair**.
-- **Hover na barra superior do chat:** Revela os botões de controle para minimizar ou fechar a janela flutuante.
+- **Clique com o botão direito em uma bolha de contato:** Permite **Fixar/Desfixar**, **Marcar como lido/não lido** e **Alternar tamanho da janela** (Pequeno, Médio, Grande).
 - **Digitar `@` em grupos:** Abre instantaneamente o seletor com pesquisa progressiva dos participantes do grupo, exibindo nomes salvos da sua agenda.
+- **Botão de descer ao final:** Surge automaticamente ao subir no histórico para voltar à mensagem mais recente num instante.
 
 ---
 
