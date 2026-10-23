@@ -235,6 +235,8 @@ export interface ElectronAPI {
   deleteUserSticker?: (stickerId: string) => Promise<boolean>;
   markAsRead: (chatId: string) => Promise<void>;
   markAsUnread?: (chatId: string) => Promise<void>;
+  toggleMute?: (chatId: string, mute?: boolean) => Promise<boolean>;
+  getHighResProfilePic?: (chatId: string) => Promise<string | null>;
   sendReaction?: (chatId: string, messageId: string, reaction: string) => Promise<boolean>;
   onReactionReceived?: (
     callback: (payload: {

@@ -787,6 +787,17 @@ function registerIpcHandlers() {
       return waService.sendReaction(chatId, messageId, reaction);
     }
   );
+
+  ipcMain.handle('wa:get-high-res-pic', async (_event, chatId: string) => {
+    if (!waService) return null;
+    return waService.getHighResProfilePic(chatId);
+  });
+
+  ipcMain.handle('wa:toggle-mute', async (_event, payload: { chatId: string; mute?: boolean }) => {
+    if (!waService) return false;
+    const { chatId, mute } = payload || {};
+    return waService.toggleMute(chatId, mute);
+  });
 }
 
 app.whenReady().then(() => {

@@ -86,6 +86,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:send-reaction', { chatId, messageId, reaction });
   },
 
+  getHighResProfilePic: (chatId: string) => {
+    return ipcRenderer.invoke('wa:get-high-res-pic', chatId);
+  },
+
+  toggleMute: (chatId: string, mute?: boolean) => {
+    return ipcRenderer.invoke('wa:toggle-mute', { chatId, mute });
+  },
+
   downloadMedia: (msgId: string) => {
     return ipcRenderer.invoke('wa:download-media', msgId);
   },

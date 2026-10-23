@@ -4612,6 +4612,90 @@ export class WhatsAppService {
     }
   }
 
+  public async getHighResProfilePic(chatId: string): Promise<string | null> {
+    if (!this.client || this.status !== 'ready') return null;
+    try {
+      if (typeof (this.client as any).getProfilePicUrl === 'function') {
+        const url = await (this.client as any).getProfilePicUrl(chatId).catch(() => null);
+        if (url && typeof url === 'string') return url;
+      }
+      if (this.client.pupPage) {
+        const hdUrl = await this.client.pupPage.evaluate(async (targetChatId: string) => {
+          const w = window as any;
+          try {
+            const ProfilePicThumb = w.require?.('WAWebCollections')?.ProfilePicThumb;
+            const pic = ProfilePicThumb?.get?.(targetChatId);
+            if (pic?.imgFull) return pic.imgFull;
+            if (pic?.eurl) return pic.eurl;
+            if (ProfilePicThumb?.find) {
+              const found = await ProfilePicThumb.find(targetChatId).catch(() => null);
+              if (found?.imgFull) return found.imgFull;
+              if (found?.eurl) return found.eurl;
+            }
+            return pic?.img || null;
+          } catch (_) {
+            return null;
+          }
+        }, chatId);
+        if (hdUrl && typeof hdUrl === 'string') return hdUrl;
+      }
+    } catch (err) {
+      console.warn('[WhatsAppService] Error fetching high res profile pic:', err);
+    }
+    return null;
+  }
+
+  public async toggleMute(chatId: string, mute?: boolean): Promise<boolean> {
+    if (!this.client?.pupPage || this.status !== 'ready') {
+      return false;
+    }
+    try {
+      const chat = await this.client.getChatById(chatId).catch(() => null);
+      if (chat) {
+        const shouldMute = mute !== undefined ? mute : !chat.isMuted;
+        if (shouldMute) {
+          const unmuteDate = new Date();
+          unmuteDate.setFullYear(unmuteDate.getFullYear() + 1);
+          await chat.mute(unmuteDate).catch(() => null);
+        } else {
+          await chat.unmute().catch(() => null);
+        }
+        return true;
+      }
+    } catch (err) {
+      console.warn('[WhatsAppService] Error in toggleMute via getChatById, using page fallback:', err);
+    }
+
+    try {
+      await this.client.pupPage.evaluate(
+        async ({ targetChatId, shouldMute }: { targetChatId: string; shouldMute?: boolean }) => {
+          const w = window as any;
+          try {
+            const ChatCol = w.require?.('WAWebCollections')?.Chat;
+            const chat = ChatCol?.get?.(targetChatId);
+            if (chat) {
+              const isCurrentlyMuted = Boolean(chat.mute?.expiration && chat.mute.expiration !== 0);
+              const doMute = shouldMute !== undefined ? shouldMute : !isCurrentlyMuted;
+              const Cmd = w.require?.('WAWebCmd')?.Cmd;
+              if (Cmd?.muteChat) {
+                await Cmd.muteChat(chat, doMute ? -1 : 0);
+              } else if (doMute && typeof chat.mute === 'function') {
+                await chat.mute({ expiration: -1 });
+              } else if (!doMute && typeof chat.unmute === 'function') {
+                await chat.unmute();
+              }
+            }
+          } catch (_) {}
+        },
+        { targetChatId: chatId, shouldMute: mute }
+      );
+      return true;
+    } catch (evalErr) {
+      console.error('[WhatsAppService] Error in toggleMute evaluate:', evalErr);
+      return false;
+    }
+  }
+
   public async refresh(): Promise<FormattedChatSummary[]> {
     console.log('[WhatsAppService] Manual refresh requested...');
     this.mediaCache.clear();

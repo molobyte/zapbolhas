@@ -13,6 +13,11 @@ import {
   ExternalLink,
   Trash2,
   Pause,
+  Search,
+  ChevronUp,
+  ChevronDown,
+  CheckSquare,
+  CornerUpRight,
 } from 'lucide-react';
 import { useBubbleStore, isMatchingMessageId } from '../store/useBubbleStore';
 import { GroupParticipant, CHAT_SIZE_CONFIG, ChatBubbleSize, ChatSummary, DEFAULT_AVATAR } from '../types/whatsapp';
@@ -20,6 +25,8 @@ import { MessageBubble } from './MessageBubble';
 import { EmojiStickerPicker, PickerTab } from './EmojiStickerPicker';
 import { FormattedText } from './FormattedText';
 import { ReactionDetailsModal } from './ReactionDetailsModal';
+import { ChatContactSidebar } from './ChatContactSidebar';
+import { ForwardMessagesModal } from './ForwardMessagesModal';
 
 interface ChatWindowPopoverProps {
   onInteractiveEnter: () => void;
@@ -55,6 +62,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     closeBubble,
     groupParticipantsByChat,
     fetchGroupParticipants,
+    togglePinBubble,
+    toggleMuteChat,
+    deleteMessagesLocally,
+    forwardMessages,
+    pinnedChatIds,
     sendMessage,
     sendSticker,
     sendMedia,
@@ -81,6 +93,27 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const [zoom, setZoom] = useState(1);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Estados para Sidebar do Contato, Pesquisa e Seleção de Mensagens
+  const [showContactSidebar, setShowContactSidebar] = useState(false);
+  const [isSearchingInChat, setIsSearchingInChat] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchIndex, setSearchIndex] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const [showForwardModal, setShowForwardModal] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage(null);
+    }, 2800);
+  }, []);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesContentRef = useRef<HTMLDivElement | null>(null);
   const unreadDividerRef = useRef<HTMLDivElement | null>(null);
@@ -182,8 +215,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     // o balão se desloca para a esquerda (popoverShiftX) e a seta permanece na extremidade esquerda do balão
     const unconstrainedShift = idealArrowRight - maxArrowRightInWindow;
     const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
-    // Margem de segurança de 32px para não vazar a borda esquerda do overlay
-    const maxAllowedShift = Math.max(0, screenWidth - currentSize.width - 32);
+    // Margem de segurança de 32px para não vazar a borda esquerda do overlay (+ largura da sidebar se aberta)
+    const extraLeftSpace = showContactSidebar ? 292 : 32;
+    const maxAllowedShift = Math.max(0, screenWidth - currentSize.width - extraLeftSpace);
     popoverShiftX = Math.min(maxAllowedShift, unconstrainedShift);
     arrowRightPx = idealArrowRight - popoverShiftX;
   } else if (idealArrowRight < minArrowRight) {
@@ -273,6 +307,13 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     isLoadingOlderRef.current = false;
     isAtBottomRef.current = true;
     setHighlightedMessageId(null);
+    setShowContactSidebar(false);
+    setIsSearchingInChat(false);
+    setSearchQuery('');
+    setSearchIndex(0);
+    setIsSelectionMode(false);
+    setSelectedMessageIds(new Set());
+    setShowForwardModal(false);
     if (highlightTimerRef.current) {
       clearTimeout(highlightTimerRef.current);
     }
@@ -875,7 +916,41 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
 
-      // 0. Se estiver gravando áudio, cancela a gravação
+      // -1. Se o modal de encaminhar mensagens estiver aberto, fecha-o
+      if (showForwardModal) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowForwardModal(false);
+        return;
+      }
+
+      // 0. Se a barra de pesquisa na conversa estiver aberta, fecha-a
+      if (isSearchingInChat) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsSearchingInChat(false);
+        setSearchQuery('');
+        return;
+      }
+
+      // 0.1 Se estiver no modo de seleção de mensagens, cancela a seleção
+      if (isSelectionMode) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsSelectionMode(false);
+        setSelectedMessageIds(new Set());
+        return;
+      }
+
+      // 0.2 Se a sidebar do contato estiver aberta, fecha-a
+      if (showContactSidebar) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowContactSidebar(false);
+        return;
+      }
+
+      // 0.3 Se estiver gravando áudio, cancela a gravação
       if (isRecording) {
         e.preventDefault();
         e.stopPropagation();
@@ -929,6 +1004,10 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       window.removeEventListener('keydown', handleGlobalKeyDown);
     };
   }, [
+    showForwardModal,
+    isSearchingInChat,
+    isSelectionMode,
+    showContactSidebar,
     isRecording,
     pendingMedia,
     viewingImage,
@@ -1305,6 +1384,87 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     [currentChatId, messages]
   );
 
+  const searchMatches = useMemo(() => {
+    if (!searchQuery.trim() || !messages.length) return [];
+    const q = searchQuery.toLowerCase();
+    return messages
+      .filter((m) => Boolean(m.text && m.text.toLowerCase().includes(q)))
+      .map((m) => m.id);
+  }, [messages, searchQuery]);
+
+  const handleNextSearchResult = useCallback(() => {
+    if (searchMatches.length === 0) return;
+    const nextIdx = (searchIndex + 1) % searchMatches.length;
+    setSearchIndex(nextIdx);
+    handleJumpToMessage(searchMatches[nextIdx]);
+  }, [searchMatches, searchIndex, handleJumpToMessage]);
+
+  const handlePrevSearchResult = useCallback(() => {
+    if (searchMatches.length === 0) return;
+    const prevIdx = (searchIndex - 1 + searchMatches.length) % searchMatches.length;
+    setSearchIndex(prevIdx);
+    handleJumpToMessage(searchMatches[prevIdx]);
+  }, [searchMatches, searchIndex, handleJumpToMessage]);
+
+  const handleCloseSearch = useCallback(() => {
+    setIsSearchingInChat(false);
+    setSearchQuery('');
+    setSearchIndex(0);
+  }, []);
+
+  useEffect(() => {
+    if (isSearchingInChat && searchMatches.length > 0) {
+      handleJumpToMessage(searchMatches[0]);
+    }
+  }, [searchQuery, isSearchingInChat, searchMatches, handleJumpToMessage]);
+
+  const handleToggleSelectMessage = useCallback((msgId: string) => {
+    setSelectedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(msgId)) {
+        next.delete(msgId);
+      } else {
+        next.add(msgId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleCancelSelection = useCallback(() => {
+    setIsSelectionMode(false);
+    setSelectedMessageIds(new Set());
+  }, []);
+
+  const handleDeleteSelectedMessages = useCallback(() => {
+    if (!currentChatId || selectedMessageIds.size === 0) return;
+    const count = selectedMessageIds.size;
+    deleteMessagesLocally(currentChatId, Array.from(selectedMessageIds));
+    setIsSelectionMode(false);
+    setSelectedMessageIds(new Set());
+    showToast(
+      `${count} mensagem${count > 1 ? 'ns' : ''} apagada${count > 1 ? 's' : ''} localmente.`
+    );
+  }, [currentChatId, selectedMessageIds, deleteMessagesLocally, showToast]);
+
+  const handleForwardMessages = useCallback(
+    async (targetChatId: string) => {
+      if (!currentChatId || selectedMessageIds.size === 0) return;
+      const count = selectedMessageIds.size;
+      const msgsToForward = messages.filter((m) => selectedMessageIds.has(m.id));
+      await forwardMessages(targetChatId, msgsToForward);
+      setShowForwardModal(false);
+      setIsSelectionMode(false);
+      setSelectedMessageIds(new Set());
+      const targetChat = chats.find((c) => c.id === targetChatId);
+      showToast(
+        `${count} mensagem${count > 1 ? 'ns' : ''} encaminhada${count > 1 ? 's' : ''} para ${
+          targetChat?.name || 'contato'
+        }!`
+      );
+    },
+    [currentChatId, selectedMessageIds, messages, forwardMessages, chats, showToast]
+  );
+
   if (!currentChat) return null;
 
   return (
@@ -1321,7 +1481,29 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       transition={{ type: 'spring', stiffness: 420, damping: 28 }}
       className={`relative ${currentSize.widthClass} ${currentSize.heightClass} max-h-[calc(100vh-84px)] bg-[#0B141A] rounded-[8px] shadow-[0_16px_44px_rgba(0,0,0,0.88)] border border-white/[0.06] flex flex-col pointer-events-auto group/chat transition-[width,height] duration-200`}
     >
-      <div className="relative w-full h-full rounded-[8px] overflow-hidden flex flex-col">
+      {/* Sidebar do Perfil do Contato/Grupo (estilo evidencias/39.png - desliza por trás à esquerda) */}
+      <AnimatePresence>
+        {showContactSidebar && (
+          <ChatContactSidebar
+            chat={currentChat}
+            isPinned={isPinned}
+            onTogglePin={() => togglePinBubble(currentChat.id)}
+            onToggleMute={() => toggleMuteChat(currentChat.id)}
+            onStartSearch={() => {
+              setShowContactSidebar(false);
+              setIsSearchingInChat(true);
+            }}
+            onStartSelection={() => {
+              setShowContactSidebar(false);
+              setIsSelectionMode(true);
+              setSelectedMessageIds(new Set());
+            }}
+            onClose={() => setShowContactSidebar(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      <div className="relative w-full h-full rounded-[8px] overflow-hidden flex flex-col z-10 bg-[#0B141A]">
         {/* Textura de Fundo Oficial WhatsApp Dark Doodles */}
         <div
           className="absolute inset-0 pointer-events-none opacity-95 bg-repeat"
@@ -1332,17 +1514,28 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         />
 
       {/* Barra de Topo Minimalista em Hover (Minimizar conversa vs. Fechar/Remover Bolha) */}
-      <div className="absolute top-0 left-0 right-0 z-30 px-3 py-1.5 bg-gradient-to-b from-[#111B21]/95 via-[#111B21]/75 to-transparent flex items-center justify-between opacity-0 group-hover/chat:opacity-100 transition-opacity duration-150">
-        <div className="flex items-center gap-2 min-w-0">
+      <div
+        className={`absolute top-0 left-0 right-0 z-30 px-3 py-1.5 bg-gradient-to-b from-[#111B21]/95 via-[#111B21]/75 to-transparent flex items-center justify-between ${
+          showContactSidebar ? 'opacity-100' : 'opacity-0 group-hover/chat:opacity-100'
+        } transition-opacity duration-150`}
+      >
+        <button
+          type="button"
+          onClick={() => setShowContactSidebar((prev) => !prev)}
+          title="Ver perfil e opções do contato"
+          className="flex items-center gap-2 min-w-0 hover:opacity-85 active:scale-95 transition-all text-left cursor-pointer group/headerBtn"
+        >
           <img
             src={currentChat.avatar}
             alt={currentChat.name}
-            className="w-6 h-6 rounded-full object-cover border border-white/15"
+            className={`w-6 h-6 rounded-full object-cover border transition-all ${
+              showContactSidebar ? 'border-[#00A884] ring-2 ring-[#00A884]/40' : 'border-white/15'
+            }`}
           />
           <span className="text-[12.5px] font-medium text-[#E9EDEF] truncate">
             {currentChat.name}
           </span>
-        </div>
+        </button>
 
         <div className="flex items-center gap-1">
           <button
@@ -1375,6 +1568,79 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Barra de Pesquisa Dentro da Conversa */}
+      <AnimatePresence>
+        {isSearchingInChat && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.15 }}
+            className="absolute top-0 left-0 right-0 z-40 p-2 bg-[#111B21] border-b border-white/10 flex items-center gap-2 shadow-xl select-none"
+          >
+            <Search className="w-4 h-4 text-[#8696A0] shrink-0 ml-1" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setSearchIndex(0);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (e.shiftKey) {
+                    handlePrevSearchResult();
+                  } else {
+                    handleNextSearchResult();
+                  }
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  handleCloseSearch();
+                }
+              }}
+              placeholder="Pesquisar nesta conversa..."
+              className="flex-1 bg-transparent text-[12.5px] text-[#E9EDEF] placeholder-[#8696A0] outline-none"
+              autoFocus
+            />
+            {searchQuery.trim() && (
+              <span className="text-[11px] text-[#8696A0] shrink-0 select-none px-1">
+                {searchMatches.length > 0
+                  ? `${searchIndex + 1} de ${searchMatches.length}`
+                  : 'Nenhum resultado'}
+              </span>
+            )}
+            <button
+              type="button"
+              disabled={searchMatches.length === 0}
+              onClick={handlePrevSearchResult}
+              title="Resultado anterior (Shift+Enter)"
+              className="p-1 text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <ChevronUp className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              disabled={searchMatches.length === 0}
+              onClick={handleNextSearchResult}
+              title="Próximo resultado (Enter)"
+              className="p-1 text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <ChevronDown className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={handleCloseSearch}
+              title="Fechar pesquisa (Esc)"
+              className="p-1 text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10 rounded transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Área de Histórico de Mensagens */}
       <div
@@ -1461,8 +1727,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                   isHighlighted={Boolean(
                     highlightedMessageId && isMatchingMessageId(msg.id, highlightedMessageId)
                   )}
+                  isSelectionMode={isSelectionMode}
+                  isSelected={selectedMessageIds.has(msg.id)}
                   onReply={(quote) => setReplyingTo(quote)}
                   onJumpToMessage={handleJumpToMessage}
+                  onToggleSelect={handleToggleSelectMessage}
                 />
               </React.Fragment>
             );
@@ -1602,8 +1871,51 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Barra de Digitação Inferior ou Gravador de Voz (Visual WhatsApp Web) */}
-      <form onSubmit={handleSubmit} className="relative z-20 px-2 pb-2 pt-1">
+      {/* Barra de Digitação Inferior ou Gravador de Voz ou Barra de Seleção de Mensagens */}
+      {isSelectionMode ? (
+        <div className="relative z-20 mx-2 mb-2 p-2 bg-[#182229] border border-white/10 rounded-[8px] flex items-center justify-between shadow-2xl animate-in slide-in-from-bottom-2 duration-150 select-none">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={handleCancelSelection}
+              title="Cancelar seleção (Esc)"
+              className="p-1.5 rounded-full hover:bg-white/10 text-[#8696A0] hover:text-[#E9EDEF] transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <span className="text-[12.5px] text-[#E9EDEF] font-medium truncate">
+              {selectedMessageIds.size === 0
+                ? 'Selecione mensagens'
+                : `${selectedMessageIds.size} selecionada${selectedMessageIds.size > 1 ? 's' : ''}`}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={selectedMessageIds.size === 0}
+              onClick={() => setShowForwardModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] bg-[#00A884] text-white text-[12px] font-medium hover:bg-[#02906f] disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm cursor-pointer"
+              title="Encaminhar para outro contato"
+            >
+              <CornerUpRight className="w-3.5 h-3.5" />
+              <span>Encaminhar</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={selectedMessageIds.size === 0}
+              onClick={handleDeleteSelectedMessages}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] bg-[#202C33] text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[12px] font-medium cursor-pointer"
+              title="Apagar mensagens localmente nesta conversa"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Apagar</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="relative z-20 px-2 pb-2 pt-1">
         {isRecording ? (
           <div className="h-[42px] bg-[#202C33] rounded-[8px] px-3 flex items-center justify-between gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.45)] select-none">
             {/* Botão Cancelar / Lixeira (Vermelho) */}
@@ -1728,6 +2040,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
           </div>
         )}
       </form>
+      )}
 
       {/* Modal Lightbox Visualizador de Imagens */}
       <AnimatePresence>
@@ -1946,6 +2259,35 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
               );
             }}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Encaminhar Mensagens Selecionadas */}
+      <AnimatePresence>
+        {showForwardModal && (
+          <ForwardMessagesModal
+            chats={chats}
+            currentChatId={currentChatId || undefined}
+            selectedCount={selectedMessageIds.size}
+            onForward={handleForwardMessages}
+            onClose={() => setShowForwardModal(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Notificação Toast Flutuante */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            transition={{ duration: 0.15 }}
+            className="absolute bottom-16 left-1/2 -translate-x-1/2 z-50 px-3.5 py-1.5 bg-[#202C33]/95 border border-[#00A884]/40 text-[#E9EDEF] text-[12px] rounded-full shadow-2xl flex items-center gap-2 select-none pointer-events-none"
+          >
+            <span className="w-2 h-2 rounded-full bg-[#00A884]" />
+            <span>{toastMessage}</span>
+          </motion.div>
         )}
       </AnimatePresence>
       </div>

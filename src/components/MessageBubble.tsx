@@ -33,8 +33,11 @@ interface MessageBubbleProps {
   isGroupChat?: boolean;
   isSenderChanged?: boolean;
   isHighlighted?: boolean;
+  isSelectionMode?: boolean;
+  isSelected?: boolean;
   onReply: (quote: QuotedMessage) => void;
   onJumpToMessage?: (messageId: string) => void;
+  onToggleSelect?: (messageId: string) => void;
 }
 
 const DoubleCheckIcon: React.FC<{ ack?: 'sent' | 'delivered' | 'read' }> = ({ ack = 'read' }) => (
@@ -55,8 +58,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   isGroupChat,
   isSenderChanged = false,
   isHighlighted = false,
+  isSelectionMode = false,
+  isSelected = false,
   onReply,
   onJumpToMessage,
+  onToggleSelect,
 }) => {
   const {
     fromMe,
@@ -395,13 +401,44 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       <div
         ref={bubbleRef}
         data-msg-id={message.id}
-        onDoubleClick={handleReplyTrigger}
+        onClick={(e) => {
+          if (isSelectionMode) {
+            e.stopPropagation();
+            onToggleSelect?.(message.id);
+          }
+        }}
+        onDoubleClick={isSelectionMode ? undefined : handleReplyTrigger}
         className={`group/msg relative flex items-center ${
           fromMe ? 'justify-end' : 'justify-start'
         } ${hasReactions ? 'mb-3.5' : 'mb-[3px]'} ${
           isSenderChanged ? 'mt-3' : 'mt-0'
-        }`}
+        } ${isSelectionMode ? 'cursor-pointer' : ''}`}
       >
+        {/* Checkbox de Seleção no Modo de Seleção */}
+        {isSelectionMode && (
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelect?.(message.id);
+            }}
+            className="mr-2 self-center cursor-pointer select-none shrink-0"
+          >
+            <div
+              className={`w-[19px] h-[19px] rounded-full border-2 flex items-center justify-center transition-all ${
+                isSelected
+                  ? 'bg-[#00A884] border-[#00A884] text-white shadow-sm'
+                  : 'border-white/40 bg-black/30 hover:border-white/70'
+              }`}
+            >
+              {isSelected && (
+                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-none stroke-current stroke-[3]">
+                  <path d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Foto do perfil do membro à esquerda do balão em conversas de grupo */}
         {!fromMe && isGroupChat && (
           <div className="w-[28px] h-[28px] mr-2 self-start mt-0.5 shrink-0">
@@ -417,7 +454,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         )}
 
         {/* Botões de Ação em Hover (Esquerda para enviadas) */}
-        {fromMe && (
+        {!isSelectionMode && fromMe && (
           <div
             data-interactive="true"
             className={`mr-1.5 flex items-center gap-0.5 transition-opacity ${
@@ -918,7 +955,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         </div>
 
         {/* Botões de Ação em Hover (Direita para recebidas) */}
-        {!fromMe && (
+        {!isSelectionMode && !fromMe && (
           <div
             data-interactive="true"
             className={`ml-1.5 flex items-center gap-0.5 transition-opacity ${

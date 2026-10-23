@@ -9,6 +9,7 @@ import {
   GroupParticipant,
   IncomingMessagePayload,
   MessageReactionItem,
+  MessageMediaType,
   QuotedMessage,
   SavedContact,
   BubbleBorderMode,
@@ -311,6 +312,9 @@ interface BubbleStoreState {
   setChatBubbleSize: (chatId: string, size: ChatBubbleSize) => void;
   markChatAsUnread: (chatId: string) => Promise<void>;
   markChatAsRead: (chatId: string) => Promise<void>;
+  toggleMuteChat: (chatId: string) => Promise<void>;
+  deleteMessagesLocally: (chatId: string, messageIds: string[]) => void;
+  forwardMessages: (targetChatId: string, messagesToForward: FormattedMessage[]) => Promise<void>;
   sendMessage: (
     text: string,
     mentions?: string[],
@@ -1501,6 +1505,125 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       }
     } catch (err) {
       console.error('[useBubbleStore] Error in markChatAsRead:', err);
+    }
+  },
+
+  // Silenciar ou Reativar som da conversa
+  toggleMuteChat: async (chatId: string) => {
+    const { chats } = get();
+    const target = chats.find((c) => c.id === chatId);
+    if (!target) return;
+    const nextMuted = !target.isMuted;
+    set({
+      chats: chats.map((c) => (c.id === chatId ? { ...c, isMuted: nextMuted } : c)),
+    });
+    if (window.electronAPI?.toggleMute) {
+      try {
+        await window.electronAPI.toggleMute(chatId, nextMuted);
+      } catch (err) {
+        console.error('[useBubbleStore] Erro ao alternar silêncio:', err);
+      }
+    }
+  },
+
+  // Apagar mensagens selecionadas localmente
+  deleteMessagesLocally: (chatId: string, messageIds: string[]) => {
+    const { messagesByChat, chats } = get();
+    const currentMsgs = messagesByChat[chatId];
+    if (!currentMsgs || messageIds.length === 0) return;
+
+    const idSet = new Set(messageIds);
+    const remaining = currentMsgs.filter(
+      (m) => !idSet.has(m.id) && !messageIds.some((id) => isMatchingMessageId(m.id, id))
+    );
+
+    const updatedChats = chats.map((c) => {
+      if (c.id === chatId && remaining.length > 0) {
+        const last = remaining[remaining.length - 1];
+        const mediaType: MessageMediaType =
+          last.type === 'image'
+            ? 'photo'
+            : last.type === 'video'
+            ? 'video'
+            : last.type === 'audio'
+            ? 'audio'
+            : last.type === 'sticker'
+            ? 'sticker'
+            : 'text';
+
+        return {
+          ...c,
+          lastMessage: {
+            text:
+              last.text ||
+              (last.type === 'image'
+                ? '📷 Foto'
+                : last.type === 'video'
+                ? '🎥 Vídeo'
+                : last.type === 'audio'
+                ? '🎤 Áudio'
+                : last.type === 'sticker'
+                ? '💟 Figurinha'
+                : 'Mensagem'),
+            mediaType,
+            timestamp: last.timestamp,
+            senderName: last.senderName,
+            fromMe: last.fromMe,
+          },
+        };
+      }
+      return c;
+    });
+
+    set({
+      messagesByChat: {
+        ...messagesByChat,
+        [chatId]: remaining,
+      },
+      chats: updatedChats,
+    });
+  },
+
+  // Encaminhar mensagens para outro contato ou grupo
+  forwardMessages: async (targetChatId: string, messagesToForward: FormattedMessage[]) => {
+    if (!targetChatId || messagesToForward.length === 0) return;
+
+    for (const msg of messagesToForward) {
+      if (msg.type === 'sticker' && msg.imageUrl && window.electronAPI?.sendSticker) {
+        await window.electronAPI.sendSticker({
+          chatId: targetChatId,
+          stickerDataUrl: msg.imageUrl,
+        });
+      } else if (
+        (msg.type === 'image' || msg.type === 'video') &&
+        (msg.imageUrl || msg.videoUrl) &&
+        window.electronAPI?.sendMedia
+      ) {
+        await window.electronAPI.sendMedia({
+          chatId: targetChatId,
+          mediaDataUrl: msg.imageUrl || msg.videoUrl || '',
+          caption: msg.text || undefined,
+        });
+      } else if (msg.type === 'audio' && msg.audioData?.audioUrl && window.electronAPI?.sendMedia) {
+        await window.electronAPI.sendMedia({
+          chatId: targetChatId,
+          mediaDataUrl: msg.audioData.audioUrl,
+          sendAudioAsVoice: true,
+        });
+      } else if (msg.text && window.electronAPI?.sendMessage) {
+        await window.electronAPI.sendMessage({
+          chatId: targetChatId,
+          text: msg.text,
+        });
+      }
+    }
+
+    if (window.electronAPI?.getMessages) {
+      window.electronAPI.getMessages(targetChatId, 50).then((msgs) => {
+        if (msgs) {
+          get().setMessagesForChat(targetChatId, msgs);
+        }
+      });
     }
   },
 
