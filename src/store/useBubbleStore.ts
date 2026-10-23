@@ -414,6 +414,11 @@ interface BubbleStoreState {
     reactions?: MessageReactionItem[];
     timestamp?: number;
   }) => void;
+  updateMessageAck: (payload: {
+    chatId?: string;
+    messageId: string;
+    ack: 'sent' | 'delivered' | 'read';
+  }) => void;
   receiveIncomingMessage: (payload: IncomingMessagePayload) => void;
 }
 
@@ -2057,7 +2062,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       timestamp,
       fromMe: true,
       type: 'text',
-      ack: 'read',
+      ack: 'sent',
       quotedMessage: replyingTo || undefined,
       mentions: mentionedDisplayNames && mentionedDisplayNames.length > 0 ? mentionedDisplayNames : undefined,
     };
@@ -2071,7 +2076,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
               text: trimmed,
               mediaType: 'text' as const,
               fromMe: true,
-              ack: 'read' as const,
+              ack: 'sent' as const,
               timestamp,
             },
           }
@@ -2130,7 +2135,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       type: 'sticker',
       imageUrl: stickerDataUrl,
       isHdLoaded: true,
-      ack: 'read',
+      ack: 'sent',
       quotedMessage: replyingTo || undefined,
     };
 
@@ -2143,7 +2148,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
               text: 'Figurinha',
               mediaType: 'sticker' as const,
               fromMe: true,
-              ack: 'read' as const,
+              ack: 'sent' as const,
               timestamp,
             },
           }
@@ -2212,7 +2217,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       imageUrl: mediaType === 'image' ? payload.mediaDataUrl : undefined,
       videoUrl: mediaType === 'video' ? payload.mediaDataUrl : undefined,
       isHdLoaded: true,
-      ack: 'read',
+      ack: 'sent',
       quotedMessage: replyingTo || undefined,
     };
 
@@ -2225,7 +2230,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
               text: payload.caption || (mediaType === 'image' ? 'Foto' : 'Vídeo'),
               mediaType: mediaType === 'image' ? ('photo' as const) : ('video' as const),
               fromMe: true,
-              ack: 'read' as const,
+              ack: 'sent' as const,
               timestamp,
             },
           }
@@ -2769,6 +2774,58 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       },
       activeReactionDetailsMessage: nextDetails,
     });
+  },
+
+  updateMessageAck: (payload: {
+    chatId?: string;
+    messageId: string;
+    ack: 'sent' | 'delivered' | 'read';
+  }) => {
+    const { messagesByChat, chats } = get();
+
+    let targetChatId = payload.chatId;
+    if (!targetChatId || !messagesByChat[targetChatId]) {
+      for (const [cid, msgs] of Object.entries(messagesByChat)) {
+        if (msgs.some((m) => isMatchingMessageId(m.id, payload.messageId))) {
+          targetChatId = cid;
+          break;
+        }
+      }
+    }
+
+    if (targetChatId && messagesByChat[targetChatId]) {
+      const currentMsgs = messagesByChat[targetChatId];
+      const hasTarget = currentMsgs.some((m) => isMatchingMessageId(m.id, payload.messageId));
+      if (hasTarget) {
+        const updated = currentMsgs.map((m) =>
+          isMatchingMessageId(m.id, payload.messageId) ? { ...m, ack: payload.ack } : m
+        );
+        set({
+          messagesByChat: {
+            ...messagesByChat,
+            [targetChatId]: updated,
+          },
+        });
+      }
+    }
+
+    if (targetChatId) {
+      const targetChat = chats.find((c) => c.id === targetChatId);
+      if (targetChat?.lastMessage?.fromMe) {
+        const updatedChats = chats.map((c) =>
+          c.id === targetChatId && c.lastMessage
+            ? {
+                ...c,
+                lastMessage: {
+                  ...c.lastMessage,
+                  ack: payload.ack,
+                },
+              }
+            : c
+        );
+        set({ chats: updatedChats });
+      }
+    }
   },
 
   sendReaction: async (chatId: string, messageId: string, emoji: string) => {

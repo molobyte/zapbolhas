@@ -675,6 +675,27 @@ export class WhatsAppService {
       }
     });
 
+    this.client.on('message_ack', (msg: any, ack: number) => {
+      try {
+        const serializeId = (val: any): string => {
+          if (!val) return '';
+          if (typeof val === 'string') return val;
+          return val._serialized || val.id || '';
+        };
+        const messageId = serializeId(msg?.id);
+        const chatId = serializeId(msg?.to || msg?.from || msg?.id?.remote);
+        const mappedAck = mapAck(ack);
+
+        this.emitToRenderer('wa:message-ack', {
+          chatId,
+          messageId,
+          ack: mappedAck,
+        });
+      } catch (err) {
+        console.error('[WhatsAppService] Error handling message_ack:', err);
+      }
+    });
+
     this.client.on('message_reaction', async (reaction: any) => {
       try {
         const serializeId = (val: any): string => {

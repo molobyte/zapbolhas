@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Loader2, Search, Plus, X, ArrowLeft, User, Pin } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
 import { ChatSummary, SavedContact } from '../types/whatsapp';
+import { MessageCheckIcon } from './MessageCheckIcon';
 
 interface ChatListPopoverProps {
   onInteractiveEnter: () => void;
@@ -33,18 +34,6 @@ const PhotoIcon: React.FC = () => (
     <rect x="2" y="2.5" width="12" height="11" rx="1.8" />
     <circle cx="5.5" cy="6" r="1.1" fill="currentColor" stroke="none" />
     <path d="m2.5 11.5 3.2-3.2a1 1 0 0 1 1.4 0l2.4 2.4 1.6-1.6a1 1 0 0 1 1.4 0l1.5 1.5" />
-  </svg>
-);
-
-const DoubleCheckIcon: React.FC<{ read?: boolean }> = ({ read }) => (
-  <svg
-    viewBox="0 0 16 11"
-    className={`w-[15px] h-[11px] shrink-0 inline-block ${
-      read ? 'text-[#53BDEB]' : 'text-[#8696A0]'
-    }`}
-    fill="currentColor"
-  >
-    <path d="M11.071.653a.457.457 0 0 0-.304-.102.493.493 0 0 0-.381.178l-6.19 7.636-2.405-2.272a.463.463 0 0 0-.336-.146.47.47 0 0 0-.343.146l-.311.31a.445.445 0 0 0-.14.337c0 .136.047.25.14.343l2.996 2.996a.724.724 0 0 0 .502.203.697.697 0 0 0 .546-.266l6.646-8.417a.497.497 0 0 0 .108-.299.441.441 0 0 0-.19-.374l-.338-.273Zm3.614 0a.457.457 0 0 0-.304-.102.493.493 0 0 0-.381.178l-6.19 7.636-1.2-1.135-.66.819 1.67 1.67a.724.724 0 0 0 .502.203.697.697 0 0 0 .546-.266l6.646-8.417a.497.497 0 0 0 .108-.299.441.441 0 0 0-.19-.374l-.347-.273Z" />
   </svg>
 );
 
@@ -168,7 +157,7 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
     if (lastMessage.mediaType === 'audio') {
       return (
         <span className="flex items-center gap-1 text-[12.5px] text-[#8696A0] truncate">
-          {lastMessage.fromMe && <DoubleCheckIcon read={lastMessage.ack === 'read'} />}
+          {lastMessage.fromMe && <MessageCheckIcon ack={lastMessage.ack} className="ml-0 mr-0.5" />}
           <GreenMicIcon />
           <span>{lastMessage.duration || lastMessage.text}</span>
         </span>
@@ -178,6 +167,7 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
     if (lastMessage.mediaType === 'sticker') {
       return (
         <span className="flex items-center gap-1 text-[12.5px] text-[#8696A0] truncate">
+          {lastMessage.fromMe && <MessageCheckIcon ack={lastMessage.ack} className="ml-0 mr-0.5" />}
           {lastMessage.senderName && (
             <span className="truncate max-w-[140px]">{lastMessage.senderName}:</span>
           )}
@@ -190,6 +180,7 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
     if (lastMessage.mediaType === 'photo' || lastMessage.mediaType === 'video') {
       return (
         <span className="flex items-center gap-1 text-[12.5px] text-[#8696A0] truncate">
+          {lastMessage.fromMe && <MessageCheckIcon ack={lastMessage.ack} className="ml-0 mr-0.5" />}
           {lastMessage.senderName && (
             <span className="truncate max-w-[140px]">{lastMessage.senderName}:</span>
           )}
@@ -203,7 +194,7 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
 
     return (
       <span className="flex items-center gap-1 text-[12.5px] text-[#8696A0] truncate">
-        {lastMessage.fromMe && <DoubleCheckIcon read={lastMessage.ack === 'read'} />}
+        {lastMessage.fromMe && <MessageCheckIcon ack={lastMessage.ack} className="ml-0 mr-0.5" />}
         <span className="truncate">
           {lastMessage.senderName
             ? `${lastMessage.senderName}: ${lastMessage.text}`

@@ -201,6 +201,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('wa:message-received', handler);
   },
 
+  onMessageAck: (callback: (payload: { chatId: string; messageId: string; ack: 'sent' | 'delivered' | 'read' }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: any) => callback(payload);
+    ipcRenderer.on('wa:message-ack', handler);
+    return () => ipcRenderer.removeListener('wa:message-ack', handler);
+  },
+
   onReactionReceived: (callback: (payload: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
     ipcRenderer.on('wa:reaction-received', handler);

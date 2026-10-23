@@ -290,6 +290,7 @@ export interface ElectronAPI {
   onReady: (callback: () => void) => () => void;
   onChatsLoaded: (callback: (chats: ChatSummary[]) => void) => () => void;
   onMessageReceived: (callback: (payload: IncomingMessagePayload) => void) => () => void;
+  onMessageAck?: (callback: (payload: { chatId: string; messageId: string; ack: 'sent' | 'delivered' | 'read' }) => void) => () => void;
   onStatusChange: (callback: (status: { status: WaConnectionState; error?: string | null }) => void) => () => void;
 }
 

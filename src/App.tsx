@@ -16,6 +16,7 @@ export const App: React.FC = () => {
     applyRealWhatsAppChats,
     receiveIncomingMessage,
     applyReactionUpdate,
+    updateMessageAck,
     applyExternalSettingsUpdate,
   } = useBubbleStore();
 
@@ -110,6 +111,12 @@ export const App: React.FC = () => {
         })
       : () => {};
 
+    const unsubAck = api.onMessageAck
+      ? api.onMessageAck((payload) => {
+          updateMessageAck(payload);
+        })
+      : () => {};
+
     const unsubStatus = api.onStatusChange(({ status, error }) => {
       setWaStatus(status, error);
     });
@@ -126,6 +133,7 @@ export const App: React.FC = () => {
       unsubChats();
       unsubMsg();
       unsubReaction();
+      unsubAck();
       unsubStatus();
       unsubSettings();
     };
@@ -136,6 +144,7 @@ export const App: React.FC = () => {
     applyRealWhatsAppChats,
     receiveIncomingMessage,
     applyReactionUpdate,
+    updateMessageAck,
     applyExternalSettingsUpdate,
   ]);
 
