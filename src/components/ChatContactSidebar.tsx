@@ -10,8 +10,11 @@ import {
   Users,
   User,
   ArrowLeft,
+  FileText,
+  Copy,
+  Check,
 } from 'lucide-react';
-import { ChatSummary, DEFAULT_AVATAR, GroupParticipant } from '../types/whatsapp';
+import { ChatSummary, DEFAULT_AVATAR, GroupParticipant, GroupMetadataInfo } from '../types/whatsapp';
 import { FormattedText } from './FormattedText';
 import { useBubbleStore } from '../store/useBubbleStore';
 
@@ -34,7 +37,7 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
   onStartSelection,
   onClose,
 }) => {
-  const [viewMode, setViewMode] = useState<'main' | 'members'>('main');
+  const [viewMode, setViewMode] = useState<'main' | 'members' | 'description'>('main');
   const [avatarUrl, setAvatarUrl] = useState<string>(chat.avatar || DEFAULT_AVATAR);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
   const [members, setMembers] = useState<GroupParticipant[]>(() => {
@@ -44,6 +47,14 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
     return [];
   });
   const [isLoadingMembers, setIsLoadingMembers] = useState(false);
+  const [groupMetadata, setGroupMetadata] = useState<GroupMetadataInfo | null>(() => {
+    if (chat.isGroup && chat.id) {
+      return useBubbleStore.getState().groupMetadataByChat[chat.id] || null;
+    }
+    return null;
+  });
+  const [isLoadingMetadata, setIsLoadingMetadata] = useState(false);
+  const [copiedDescription, setCopiedDescription] = useState(false);
 
   // Busca avatar de alta resolução via API do Electron quando disponível
   useEffect(() => {
@@ -65,6 +76,44 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
       isCancelled = true;
     };
   }, [chat.id, chat.avatar]);
+
+  // Carrega metadados e descrição do grupo
+  useEffect(() => {
+    if (!chat.isGroup || !chat.id) return;
+    let isCancelled = false;
+
+    const cached = useBubbleStore.getState().groupMetadataByChat[chat.id];
+    if (cached) {
+      setGroupMetadata(cached);
+    }
+
+    if (window.electronAPI?.getGroupMetadata) {
+      if (!cached) setIsLoadingMetadata(true);
+      window.electronAPI
+        .getGroupMetadata(chat.id)
+        .then((meta) => {
+          if (!isCancelled && meta) {
+            setGroupMetadata(meta);
+            useBubbleStore.setState((state) => ({
+              groupMetadataByChat: {
+                ...state.groupMetadataByChat,
+                [chat.id]: meta,
+              },
+            }));
+          }
+        })
+        .catch((err) => {
+          console.error('[ChatContactSidebar] Erro ao buscar metadados do grupo:', err);
+        })
+        .finally(() => {
+          if (!isCancelled) setIsLoadingMetadata(false);
+        });
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [chat.id, chat.isGroup]);
 
   // Carrega lista de participantes do grupo
   useEffect(() => {
@@ -138,13 +187,41 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
     }
   }, [viewMode, chat.id, chat.isGroup, members.length]);
 
-  // Ao pressionar ESC na visualização de membros, retorna ao menu principal
+  // Se o usuário entrar na tela de descrição e ainda não tiver descrição carregada, força refetch
+  useEffect(() => {
+    if (viewMode === 'description' && chat.isGroup && chat.id && window.electronAPI?.getGroupMetadata) {
+      if (!groupMetadata?.description) {
+        setIsLoadingMetadata(true);
+        window.electronAPI
+          .getGroupMetadata(chat.id)
+          .then((meta) => {
+            if (meta) {
+              setGroupMetadata(meta);
+              useBubbleStore.setState((state) => ({
+                groupMetadataByChat: {
+                  ...state.groupMetadataByChat,
+                  [chat.id]: meta,
+                },
+              }));
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            setIsLoadingMetadata(false);
+          });
+      }
+    }
+  }, [viewMode, chat.id, chat.isGroup, groupMetadata?.description]);
+
+  // Ao pressionar ESC na visualização de membros ou descrição, retorna ao menu principal
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && viewMode === 'members') {
-        e.stopPropagation();
-        setViewMode('main');
-        setMemberSearchQuery('');
+      if (e.key === 'Escape') {
+        if (viewMode === 'members' || viewMode === 'description') {
+          e.stopPropagation();
+          setViewMode('main');
+          setMemberSearchQuery('');
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -231,6 +308,19 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
               <h3 className="mt-3.5 font-medium text-[15px] text-[#E9EDEF] leading-snug px-2 line-clamp-2 break-words">
                 <FormattedText text={chat.name} />
               </h3>
+
+              {/* Opção Ver descrição abaixo do nome do grupo */}
+              {chat.isGroup && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode('description')}
+                  title="Ver descrição do grupo na sidebar"
+                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.06] hover:bg-[#00A884]/20 border border-white/10 hover:border-[#00A884]/40 text-[#00A884] text-[12px] font-medium transition-all cursor-pointer group/descBtn active:scale-95"
+                >
+                  <FileText className="w-3.5 h-3.5 transition-transform group-hover/descBtn:scale-110" />
+                  <span>Ver descrição</span>
+                </button>
+              )}
             </div>
 
             {/* Lista de Opções da Conversa com amplo respiro à direita */}
@@ -251,6 +341,20 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
                       {members.length}
                     </span>
                   )}
+                </button>
+              )}
+
+              {/* 0.1. Ver Descrição (apenas para grupos) */}
+              {chat.isGroup && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode('description')}
+                  className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-xl hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors text-left group/opt cursor-pointer"
+                >
+                  <FileText className="w-5 h-5 text-[#AEBAC1] group-hover/opt:text-[#00A884] transition-colors shrink-0" />
+                  <span className="text-[14px] font-normal text-[#E9EDEF] group-hover/opt:text-white flex-1">
+                    Descrição do grupo
+                  </span>
                 </button>
               )}
 
@@ -319,6 +423,96 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
                   </span>
                 )}
               </button>
+            </div>
+          </motion.div>
+        ) : viewMode === 'description' ? (
+          <motion.div
+            key="description-view"
+            initial={{ opacity: 0, x: 16 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 16 }}
+            transition={{ duration: 0.15 }}
+            className="flex flex-col h-full overflow-hidden"
+          >
+            {/* Topo da descrição: Botão de voltar e título */}
+            <div className="flex items-center gap-2 mb-3 pb-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => setViewMode('main')}
+                title="Voltar ao perfil"
+                className="p-1.5 rounded-full text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <div className="flex-1 min-w-0">
+                <h4 className="text-[14px] font-medium text-[#E9EDEF] truncate">
+                  Descrição do Grupo
+                </h4>
+                <div className="text-[11px] text-[#8696A0] truncate">
+                  {chat.name}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                title="Fechar painel"
+                className="p-1.5 rounded-full text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Conteúdo da Descrição */}
+            <div className="flex-1 overflow-y-auto wa-scrollbar pr-1 flex flex-col">
+              {isLoadingMetadata && !groupMetadata ? (
+                <div className="flex flex-col items-center justify-center py-12 text-[#8696A0] gap-2">
+                  <div className="w-5 h-5 border-2 border-[#00A884] border-t-transparent rounded-full animate-spin" />
+                  <span className="text-[12px]">Carregando descrição...</span>
+                </div>
+              ) : groupMetadata?.description && groupMetadata.description.trim() ? (
+                <div className="flex flex-col gap-3">
+                  <div className="bg-[#182229] border border-white/[0.08] rounded-xl p-3.5 shadow-inner">
+                    <div className="text-[13px] text-[#E9EDEF] whitespace-pre-wrap break-words leading-relaxed select-text">
+                      <FormattedText text={groupMetadata.description.trim()} />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 px-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (groupMetadata?.description) {
+                          navigator.clipboard.writeText(groupMetadata.description);
+                          setCopiedDescription(true);
+                          setTimeout(() => setCopiedDescription(false), 2000);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-[#8696A0] hover:text-[#E9EDEF] text-[12px] font-medium transition-colors cursor-pointer active:scale-95"
+                      title="Copiar texto da descrição"
+                    >
+                      {copiedDescription ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-[#00A884]" />
+                          <span className="text-[#00A884]">Copiado!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copiar descrição</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 text-[#8696A0] text-center px-4">
+                  <FileText className="w-10 h-10 text-[#8696A0]/40 mb-2.5 stroke-[1.5]" />
+                  <span className="text-[13.5px] font-medium text-[#E9EDEF]/80">Nenhuma descrição</span>
+                  <span className="text-[12px] text-[#8696A0] mt-1 max-w-[220px]">
+                    Este grupo ainda não possui uma descrição definida pelos administradores.
+                  </span>
+                </div>
+              )}
             </div>
           </motion.div>
         ) : (

@@ -3796,6 +3796,125 @@ export class WhatsAppService {
     }
   }
 
+  public async getGroupMetadata(
+    chatId: string
+  ): Promise<{
+    description?: string;
+    descOwner?: string;
+    descTime?: number;
+    createdAt?: number;
+    owner?: string;
+  } | null> {
+    if (!chatId) return null;
+    let description = '';
+    let descOwner = '';
+    let descTime: number | undefined;
+    let createdAt: number | undefined;
+    let owner = '';
+
+    if (this.client?.pupPage && this.status === 'ready') {
+      try {
+        const res = await this.client.pupPage.evaluate(async (targetChatId: string) => {
+          try {
+            const w = window as any;
+            if (typeof w.require !== 'function') return null;
+            const collections = w.require('WAWebCollections');
+            if (!collections) return null;
+            const ChatCol = collections.Chat;
+
+            const serializeId = (val: any): string => {
+              if (!val) return '';
+              if (typeof val === 'string') return val;
+              if (typeof val._serialized === 'string' && val._serialized) return val._serialized;
+              return '';
+            };
+
+            const chat =
+              ChatCol?.get?.(targetChatId) ||
+              ChatCol?.getModelsArray?.()?.find?.((c: any) => serializeId(c.id) === targetChatId);
+
+            const GroupMetadataCol =
+              collections.GroupMetadata || collections.WAWebGroupMetadataCollection;
+            let groupMetadata =
+              chat?.groupMetadata || (chat?.id?.server === 'g.us' ? chat.groupMetadata : null);
+
+            if (!groupMetadata && GroupMetadataCol) {
+              groupMetadata = GroupMetadataCol.get?.(targetChatId);
+            }
+
+            if (!groupMetadata || groupMetadata.desc === undefined) {
+              try {
+                const widFactory = w.require('WAWebWidFactory');
+                const chatWid = widFactory?.createWid?.(targetChatId);
+                if (GroupMetadataCol?.update && chatWid) {
+                  await GroupMetadataCol.update(chatWid);
+                  groupMetadata =
+                    chat?.groupMetadata || GroupMetadataCol.get?.(targetChatId) || groupMetadata;
+                }
+              } catch (_) {}
+            }
+
+            if (!groupMetadata) return null;
+
+            let descText = '';
+            if (typeof groupMetadata.desc === 'string') {
+              descText = groupMetadata.desc;
+            } else if (groupMetadata.desc && typeof groupMetadata.desc.desc === 'string') {
+              descText = groupMetadata.desc.desc;
+            } else if (typeof groupMetadata.description === 'string') {
+              descText = groupMetadata.description;
+            }
+
+            const serializeOwner = (o: any) => {
+              if (!o) return '';
+              if (typeof o === 'string') return o;
+              if (o._serialized) return o._serialized;
+              if (o.user) return o.user;
+              return '';
+            };
+
+            return {
+              description: descText,
+              descOwner: serializeOwner(groupMetadata.descOwner),
+              descTime: groupMetadata.descTime,
+              createdAt: groupMetadata.creation,
+              owner: serializeOwner(groupMetadata.owner),
+            };
+          } catch (err) {
+            return null;
+          }
+        }, chatId);
+
+        if (res) {
+          description = res.description || '';
+          descOwner = res.descOwner || '';
+          descTime = res.descTime;
+          createdAt = res.createdAt;
+          owner = res.owner || '';
+        }
+      } catch (err) {
+        console.warn('[WhatsAppService] Error getting group metadata via evaluate:', err);
+      }
+    }
+
+    if (!description && this.client) {
+      try {
+        const chat = await this.client.getChatById(chatId).catch(() => null);
+        if (chat && typeof (chat as any).description === 'string') {
+          description = (chat as any).description;
+        }
+      } catch (_) {}
+    }
+
+    return {
+      description,
+      descOwner,
+      descTime,
+      createdAt,
+      owner,
+    };
+  }
+
   public async getSavedContacts(query: string = ''): Promise<
     Array<{
       id: string;

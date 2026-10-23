@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:get-group-participants', chatId, query, limit);
   },
 
+  getGroupMetadata: (chatId: string) => {
+    return ipcRenderer.invoke('wa:get-group-metadata', chatId);
+  },
+
   getSavedContacts: (query?: string) => {
     return ipcRenderer.invoke('wa:get-saved-contacts', query);
   },

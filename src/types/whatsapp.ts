@@ -24,6 +24,7 @@ export interface ChatSummary {
   hasMention?: boolean;
   isPinned?: boolean;
   timestamp?: number;
+  description?: string;
   lastMessage: LastMessagePreview;
 }
 
@@ -209,6 +210,14 @@ export interface StickerItem {
   name?: string;
 }
 
+export interface GroupMetadataInfo {
+  description?: string;
+  descOwner?: string;
+  descTime?: number;
+  createdAt?: number;
+  owner?: string;
+}
+
 export interface ElectronAPI {
   setIgnoreMouseEvents: (ignore: boolean) => void;
   getMessages: (chatId: string, limit?: number) => Promise<FormattedMessage[]>;
@@ -217,6 +226,7 @@ export interface ElectronAPI {
     query?: string,
     limit?: number
   ) => Promise<GroupParticipant[]>;
+  getGroupMetadata?: (chatId: string) => Promise<GroupMetadataInfo | null>;
   getSavedContacts?: (query?: string) => Promise<SavedContact[]>;
   sendMessage: (payload: SendMessagePayload) => Promise<FormattedMessage | null>;
   sendSticker?: (payload: SendStickerPayload) => Promise<FormattedMessage | null>;

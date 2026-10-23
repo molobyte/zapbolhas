@@ -368,6 +368,11 @@ function registerIpcHandlers() {
     }
   );
 
+  ipcMain.handle('wa:get-group-metadata', async (_event, chatId: string) => {
+    if (!waService) return null;
+    return await waService.getGroupMetadata(chatId);
+  });
+
   ipcMain.handle('wa:get-saved-contacts', async (_event, query?: string) => {
     if (!waService) return [];
     return await waService.getSavedContacts(query);

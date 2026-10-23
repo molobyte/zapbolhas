@@ -8,6 +8,7 @@ import {
   ConnectionMode,
   FormattedMessage,
   GroupParticipant,
+  GroupMetadataInfo,
   IncomingMessagePayload,
   MessageReactionItem,
   MessageMediaType,
@@ -315,6 +316,7 @@ interface BubbleStoreState {
   messagesByChat: Record<string, FormattedMessage[]>;
   groupParticipantsByChat: Record<string, GroupParticipant[]>;
   initialGroupParticipantsByChat: Record<string, GroupParticipant[]>;
+  groupMetadataByChat: Record<string, GroupMetadataInfo>;
   unreadBannerByChat: Record<string, UnreadBannerInfo | undefined>;
   replyingTo: QuotedMessage | null;
   viewingImage: ViewingImageState | null;
@@ -333,6 +335,7 @@ interface BubbleStoreState {
     query?: string,
     limit?: number
   ) => Promise<GroupParticipant[]>;
+  fetchGroupMetadata: (chatId: string) => Promise<GroupMetadataInfo | null>;
   updateMessageMedia: (chatId: string, msgId: string, mediaDataUrl: string) => void;
   setReplyingTo: (quote: QuotedMessage | null) => void;
   setViewingImage: (img: ViewingImageState | null) => void;
@@ -444,6 +447,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   messagesByChat: {},
   groupParticipantsByChat: {},
   initialGroupParticipantsByChat: {},
+  groupMetadataByChat: {},
   unreadBannerByChat: {},
   replyingTo: null,
   viewingImage: null,
@@ -879,6 +883,31 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     }
 
     return [];
+  },
+
+  fetchGroupMetadata: async (chatId) => {
+    if (!chatId) return null;
+    const { groupMetadataByChat } = get();
+    if (groupMetadataByChat[chatId]) {
+      return groupMetadataByChat[chatId];
+    }
+    if (window.electronAPI?.getGroupMetadata) {
+      try {
+        const meta = await window.electronAPI.getGroupMetadata(chatId);
+        if (meta) {
+          set((state) => ({
+            groupMetadataByChat: {
+              ...state.groupMetadataByChat,
+              [chatId]: meta,
+            },
+          }));
+          return meta;
+        }
+      } catch (err) {
+        console.error('[Store] Failed to fetch group metadata:', err);
+      }
+    }
+    return null;
   },
 
   updateMessageMedia: (chatId, msgId, mediaDataUrl) =>
