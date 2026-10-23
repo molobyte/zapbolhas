@@ -20,6 +20,7 @@ import {
   CornerUpRight,
 } from 'lucide-react';
 import { useBubbleStore, isMatchingMessageId } from '../store/useBubbleStore';
+import { useAudioPlaybackStore } from '../store/useAudioPlaybackStore';
 import { GroupParticipant, CHAT_SIZE_CONFIG, ChatBubbleSize, ChatSummary, DEFAULT_AVATAR } from '../types/whatsapp';
 import { MessageBubble } from './MessageBubble';
 import { EmojiStickerPicker, PickerTab } from './EmojiStickerPicker';
@@ -121,6 +122,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const userHasScrolledUpRef = useRef<boolean>(false);
   const isAtBottomRef = useRef<boolean>(true);
   const initialUnreadScrolledForChatRef = useRef<string | null>(null);
+  const hasJumpedToActiveAudioRef = useRef<string | null>(null);
   const userInteractedScrollRef = useRef<boolean>(false);
   const isLoadingOlderRef = useRef<boolean>(false);
 
@@ -272,6 +274,12 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     const container = scrollContainerRef.current;
     if (!container) return;
 
+    // Se há um áudio em reprodução deste contato, prioriza o foco na mensagem com áudio
+    const currentAudio = useAudioPlaybackStore.getState().activeAudio;
+    if (currentAudio && currentAudio.chatId === currentChatId) {
+      return;
+    }
+
     const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
     const divider = unreadDividerRef.current;
     const hasUnread = Boolean(unreadBanner && unreadBanner.count > 0);
@@ -319,6 +327,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   // Sempre que trocar de conversa (ou abrir a janela), reseta a trava e o estado de rolagem inicial
   useLayoutEffect(() => {
     initialUnreadScrolledForChatRef.current = null;
+    hasJumpedToActiveAudioRef.current = null;
     userInteractedScrollRef.current = false;
     userHasScrolledUpRef.current = false;
     isLoadingOlderRef.current = false;
@@ -346,6 +355,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
   // Sincroniza o scroll imediatamente antes da pintura e no próximo frame quando mensagens ou banner mudam
   useLayoutEffect(() => {
+    const currentAudio = useAudioPlaybackStore.getState().activeAudio;
+    if (currentAudio && currentAudio.chatId === currentChatId) {
+      return;
+    }
+
     const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
     if (hasInitialScrolled && (userHasScrolledUpRef.current || !isAtBottomRef.current)) {
       return;
@@ -375,6 +389,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     if (!contentEl) return;
 
     const observer = new ResizeObserver(() => {
+      const currentAudio = useAudioPlaybackStore.getState().activeAudio;
+      if (currentAudio && currentAudio.chatId === currentChatId) {
+        return;
+      }
+
       const hasInitialScrolled = initialUnreadScrolledForChatRef.current === currentChatId;
       const hasUnread = Boolean(unreadBanner && unreadBanner.count > 0);
 
@@ -1400,6 +1419,29 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     },
     [currentChatId, messages]
   );
+
+  // Se a conversa for aberta/restaurada e houver áudio tocando neste chat,
+  // foca na mensagem que está tocando o áudio com a mesma transição de destaque e rolagem suave
+  useEffect(() => {
+    const currentAudio = useAudioPlaybackStore.getState().activeAudio;
+    if (
+      currentAudio &&
+      currentAudio.chatId === currentChatId &&
+      hasJumpedToActiveAudioRef.current !== currentAudio.messageId
+    ) {
+      hasJumpedToActiveAudioRef.current = currentAudio.messageId;
+      initialUnreadScrolledForChatRef.current = currentChatId;
+      userInteractedScrollRef.current = true;
+      userHasScrolledUpRef.current = true;
+      isAtBottomRef.current = false;
+
+      const timer = setTimeout(() => {
+        handleJumpToMessage(currentAudio.messageId);
+      }, 70);
+
+      return () => clearTimeout(timer);
+    }
+  }, [currentChatId, messages, handleJumpToMessage]);
 
   const searchMatches = useMemo(() => {
     if (!searchQuery.trim() || !messages.length) return [];

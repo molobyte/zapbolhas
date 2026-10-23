@@ -35,6 +35,8 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
   const isAudioPlaying = Boolean(
     isAudioActiveForThisChat && activeAudio?.isPlaying
   );
+  // O botão de pause ou play só aparece quando a conversa está minimizada (!isActive)
+  const showBubbleAudioControl = isAudioActiveForThisChat && !isActive;
 
   let borderStyle: React.CSSProperties;
 
@@ -133,9 +135,9 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
         />
       </button>
 
-      {/* Botão de Controle de Áudio Tocando no Canto Superior Esquerdo */}
+      {/* Botão de Controle de Áudio Tocando no Canto Superior Esquerdo (Apenas quando minimizada) */}
       <AnimatePresence>
-        {isAudioActiveForThisChat && (
+        {showBubbleAudioControl && (
           <motion.button
             key="audio-bubble-indicator"
             type="button"
