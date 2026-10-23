@@ -61,7 +61,7 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 280 }}
       transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-      className="absolute right-[calc(100%-24px)] top-3 bottom-5 w-[305px] z-10 bg-[#111B21] rounded-l-[18px] border-y border-l border-white/[0.08] shadow-[-12px_12px_36px_rgba(0,0,0,0.75)] flex flex-col pt-5 pb-4 pl-3.5 pr-[42px] overflow-y-auto wa-scrollbar select-none pointer-events-auto"
+      className="absolute right-[calc(100%-20px)] top-3 bottom-5 w-[330px] z-10 bg-[#111B21] rounded-l-[18px] border-y border-l border-white/[0.08] shadow-[-10px_10px_32px_rgba(0,0,0,0.7)] flex flex-col pt-5 pb-4 pl-4 pr-[58px] overflow-y-auto wa-scrollbar select-none pointer-events-auto"
     >
       {/* Botão de Fechar Discreto no Topo Esquerdo */}
       <button
@@ -106,7 +106,7 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
         </h3>
       </div>
 
-      {/* Lista de Opções da Conversa com padding à direita para não ser encoberta pela conversa */}
+      {/* Lista de Opções da Conversa com amplo respiro à direita para não ser encoberta pela sombra da conversa */}
       <div className="flex flex-col gap-1 mt-2">
         {/* 1. Pesquisar */}
         <button

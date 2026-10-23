@@ -216,7 +216,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     const unconstrainedShift = idealArrowRight - maxArrowRightInWindow;
     const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
     // Margem de segurança de 32px para não vazar a borda esquerda do overlay (+ largura da sidebar se aberta)
-    const extraLeftSpace = showContactSidebar ? 320 : 32;
+    const extraLeftSpace = showContactSidebar ? 345 : 32;
     const maxAllowedShift = Math.max(0, screenWidth - currentSize.width - extraLeftSpace);
     popoverShiftX = Math.min(maxAllowedShift, unconstrainedShift);
     arrowRightPx = idealArrowRight - popoverShiftX;
@@ -1506,7 +1506,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       <div
         className={`relative z-20 w-full h-full rounded-[10px] overflow-hidden flex flex-col bg-[#0B141A] border border-white/[0.08] transition-shadow duration-300 ${
           showContactSidebar
-            ? 'shadow-[-16px_0_36px_rgba(0,0,0,0.85),0_16px_44px_rgba(0,0,0,0.88)]'
+            ? 'shadow-[-6px_0_18px_rgba(0,0,0,0.65),0_16px_44px_rgba(0,0,0,0.88)]'
             : 'shadow-[0_16px_44px_rgba(0,0,0,0.88)]'
         }`}
       >
@@ -1521,9 +1521,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
       {/* Barra de Topo Minimalista em Hover (Minimizar conversa vs. Fechar/Remover Bolha) */}
       <div
-        className={`absolute top-0 left-0 right-0 z-30 px-3 py-1.5 bg-gradient-to-b from-[#111B21]/95 via-[#111B21]/75 to-transparent flex items-center justify-between ${
-          showContactSidebar ? 'opacity-100' : 'opacity-0 group-hover/chat:opacity-100'
-        } transition-opacity duration-150`}
+        className={`absolute top-0 left-0 right-0 z-30 px-3 py-1.5 bg-[#111B21]/95 backdrop-blur-md border-b border-white/[0.06] flex items-center justify-between ${
+          showContactSidebar ? 'opacity-100 shadow-sm' : 'opacity-0 group-hover/chat:opacity-100 group-hover/chat:shadow-sm'
+        } transition-all duration-150`}
       >
         <button
           type="button"
@@ -1683,7 +1683,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             userHasScrolledUpRef.current = !atBottom;
           }
         }}
-        className="relative z-10 flex-1 overflow-y-auto px-3 pt-2 pb-2 wa-scrollbar"
+        className="relative z-10 flex-1 overflow-y-auto px-3 pt-10 pb-2 wa-scrollbar"
       >
         <div ref={messagesContentRef} className="flex flex-col min-h-full justify-end">
           {messages.map((msg, index) => {
