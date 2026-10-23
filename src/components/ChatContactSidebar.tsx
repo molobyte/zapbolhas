@@ -57,32 +57,30 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
 
   return (
     <motion.aside
-      initial={{ opacity: 0, x: 40 }}
+      initial={{ opacity: 0, x: 260 }}
       animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 40 }}
-      transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-      className="absolute right-full top-0 bottom-0 w-[260px] mr-[-1px] z-0 bg-[#111B21] rounded-l-[12px] border-y border-l border-white/[0.08] shadow-[0_16px_40px_rgba(0,0,0,0.85)] flex flex-col p-4 overflow-y-auto wa-scrollbar select-none pointer-events-auto"
+      exit={{ opacity: 0, x: 260 }}
+      transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+      className="absolute right-[calc(100%-24px)] top-3 bottom-5 w-[280px] z-10 bg-[#111B21] rounded-l-[18px] border-y border-l border-white/[0.08] shadow-[-12px_12px_36px_rgba(0,0,0,0.75)] flex flex-col pt-5 pb-4 px-3 overflow-y-auto wa-scrollbar select-none pointer-events-auto"
     >
-      {/* Botão de Fechar no Topo Direito */}
-      <div className="flex justify-end mb-1">
-        <button
-          type="button"
-          onClick={onClose}
-          title="Fechar painel do contato"
-          className="p-1 rounded-full text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10 transition-colors"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
+      {/* Botão de Fechar Discreto no Topo Esquerdo (longe da sobreposição com o chat à direita) */}
+      <button
+        type="button"
+        onClick={onClose}
+        title="Fechar painel do contato"
+        className="absolute top-2.5 left-2.5 p-1.5 rounded-full text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10 transition-colors z-20 cursor-pointer"
+      >
+        <X className="w-4 h-4" />
+      </button>
 
-      {/* Topo: Foto do Perfil em Alta Resolução */}
+      {/* Topo: Foto do Perfil em Alta Resolução Centralizada (Mockup evidencias/39.png) */}
       <div className="flex flex-col items-center text-center mt-1 mb-4">
         <div className="relative group/avatar">
           <img
             src={avatarUrl}
             alt={chat.name}
             onError={() => setAvatarUrl(DEFAULT_AVATAR)}
-            className="w-[104px] h-[104px] rounded-full object-cover shadow-[0_8px_24px_rgba(0,0,0,0.6)] border-2 border-white/10 ring-4 ring-black/25"
+            className="w-[104px] h-[104px] rounded-full object-cover shadow-[0_8px_24px_rgba(0,0,0,0.65)] border-2 border-white/10 ring-4 ring-black/30"
             draggable={false}
           />
           {chat.isGroup ? (
@@ -103,128 +101,77 @@ export const ChatContactSidebar: React.FC<ChatContactSidebarProps> = ({
         </div>
 
         {/* Nome do Contato / Grupo com suporte a Emojis */}
-        <h3 className="mt-3.5 font-semibold text-[14.5px] text-[#E9EDEF] leading-snug px-1 line-clamp-2 break-words">
+        <h3 className="mt-3.5 font-medium text-[15px] text-[#E9EDEF] leading-snug px-3 line-clamp-2 break-words">
           <FormattedText text={chat.name} />
         </h3>
-
-        <span className="text-[11.5px] text-[#8696A0] mt-1 flex items-center gap-1 font-normal">
-          {chat.isGroup ? 'Grupo do WhatsApp' : 'Contato'}
-        </span>
       </div>
 
-      {/* Separador Sutil */}
-      <div className="h-[1px] bg-white/[0.08] mb-3 mx-1" />
-
-      {/* Lista de Opções da Conversa */}
-      <div className="flex flex-col gap-1.5 flex-1">
+      {/* Lista de Opções da Conversa (conforme mockup evidencias/39.png) */}
+      <div className="flex flex-col gap-1 mt-2 px-1">
         {/* 1. Pesquisar */}
         <button
           type="button"
           onClick={onStartSearch}
-          className="w-full p-2.5 rounded-[8px] hover:bg-[#202C33] active:bg-[#26343d] flex items-center gap-3 transition-colors text-left group/opt cursor-pointer"
+          className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-xl hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors text-left group/opt cursor-pointer"
         >
-          <div className="w-8 h-8 rounded-full bg-[#202C33] group-hover/opt:bg-[#00A884]/20 flex items-center justify-center shrink-0 transition-colors">
-            <Search className="w-4 h-4 text-[#8696A0] group-hover/opt:text-[#00A884] transition-colors" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-[#E9EDEF]">
-              Pesquisar
-            </div>
-            <div className="text-[11px] text-[#8696A0] truncate">
-              Buscar mensagens nesta conversa
-            </div>
-          </div>
+          <Search className="w-5 h-5 text-[#AEBAC1] group-hover/opt:text-[#00A884] transition-colors shrink-0" />
+          <span className="text-[14px] font-normal text-[#E9EDEF] group-hover/opt:text-white">
+            Pesquisar
+          </span>
         </button>
 
         {/* 2. Selecionar mensagens */}
         <button
           type="button"
           onClick={onStartSelection}
-          className="w-full p-2.5 rounded-[8px] hover:bg-[#202C33] active:bg-[#26343d] flex items-center gap-3 transition-colors text-left group/opt cursor-pointer"
+          className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-xl hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors text-left group/opt cursor-pointer"
         >
-          <div className="w-8 h-8 rounded-full bg-[#202C33] group-hover/opt:bg-[#00A884]/20 flex items-center justify-center shrink-0 transition-colors">
-            <CheckSquare className="w-4 h-4 text-[#8696A0] group-hover/opt:text-[#00A884] transition-colors" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-[#E9EDEF]">
-              Selecionar mensagens
-            </div>
-            <div className="text-[11px] text-[#8696A0] truncate">
-              Encaminhar ou apagar localmente
-            </div>
-          </div>
+          <CheckSquare className="w-5 h-5 text-[#AEBAC1] group-hover/opt:text-[#00A884] transition-colors shrink-0" />
+          <span className="text-[14px] font-normal text-[#E9EDEF] group-hover/opt:text-white">
+            Selecionar mensagens
+          </span>
         </button>
 
         {/* 3. Silenciar */}
         <button
           type="button"
           onClick={onToggleMute}
-          className="w-full p-2.5 rounded-[8px] hover:bg-[#202C33] active:bg-[#26343d] flex items-center gap-3 transition-colors text-left group/opt cursor-pointer"
+          className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-xl hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors text-left group/opt cursor-pointer"
         >
-          <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
-              chat.isMuted
-                ? 'bg-[#EF4444]/20 text-[#EF4444]'
-                : 'bg-[#202C33] text-[#8696A0] group-hover/opt:bg-[#00A884]/20 group-hover/opt:text-[#00A884]'
-            }`}
-          >
-            {chat.isMuted ? (
-              <BellOff className="w-4 h-4 text-[#EF4444]" />
-            ) : (
-              <Bell className="w-4 h-4" />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-[#E9EDEF] flex items-center justify-between">
-              <span>{chat.isMuted ? 'Silenciado' : 'Silenciar'}</span>
-              {chat.isMuted && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#EF4444]/20 text-[#EF4444] font-medium">
-                  Ativo
-                </span>
-              )}
-            </div>
-            <div className="text-[11px] text-[#8696A0] truncate">
-              {chat.isMuted
-                ? 'Clique para reativar notificações'
-                : 'Silenciar notificações no WhatsApp'}
-            </div>
-          </div>
+          {chat.isMuted ? (
+            <BellOff className="w-5 h-5 text-[#EF4444] shrink-0" />
+          ) : (
+            <Bell className="w-5 h-5 text-[#AEBAC1] group-hover/opt:text-[#00A884] transition-colors shrink-0" />
+          )}
+          <span className="text-[14px] font-normal text-[#E9EDEF] group-hover/opt:text-white flex-1">
+            {chat.isMuted ? 'Silenciado' : 'Silenciar'}
+          </span>
+          {chat.isMuted && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#EF4444]/20 text-[#EF4444] font-medium">
+              Ativo
+            </span>
+          )}
         </button>
 
         {/* 4. Fixar Conversa */}
         <button
           type="button"
           onClick={onTogglePin}
-          className="w-full p-2.5 rounded-[8px] hover:bg-[#202C33] active:bg-[#26343d] flex items-center gap-3 transition-colors text-left group/opt cursor-pointer"
+          className="w-full flex items-center gap-3.5 px-3 py-2.5 rounded-xl hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors text-left group/opt cursor-pointer"
         >
-          <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
-              isPinned
-                ? 'bg-[#00A884]/20 text-[#00A884]'
-                : 'bg-[#202C33] text-[#8696A0] group-hover/opt:bg-[#00A884]/20 group-hover/opt:text-[#00A884]'
+          <Pin
+            className={`w-5 h-5 transition-transform shrink-0 ${
+              isPinned ? 'rotate-45 text-[#00A884]' : 'text-[#AEBAC1] group-hover/opt:text-[#00A884]'
             }`}
-          >
-            <Pin
-              className={`w-4 h-4 transition-transform ${
-                isPinned ? 'rotate-45 text-[#00A884]' : ''
-              }`}
-            />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-[#E9EDEF] flex items-center justify-between">
-              <span>{isPinned ? 'Conversa fixada' : 'Fixar conversa'}</span>
-              {isPinned && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#00A884]/20 text-[#00A884] font-medium">
-                  Fixada
-                </span>
-              )}
-            </div>
-            <div className="text-[11px] text-[#8696A0] truncate">
-              {isPinned
-                ? 'Fixada no dock do WhatsApp Bubbles'
-                : 'Fixar no app WhatsApp Bubbles'}
-            </div>
-          </div>
+          />
+          <span className="text-[14px] font-normal text-[#E9EDEF] group-hover/opt:text-white flex-1">
+            {isPinned ? 'Conversa fixada' : 'Fixar conversa'}
+          </span>
+          {isPinned && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#00A884]/20 text-[#00A884] font-medium">
+              Fixada
+            </span>
+          )}
         </button>
       </div>
     </motion.aside>

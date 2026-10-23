@@ -1479,7 +1479,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       animate={{ opacity: 1, y: 0, scale: 1, x: -popoverShiftX }}
       exit={{ opacity: 0, y: 12, scale: 0.96, x: -popoverShiftX }}
       transition={{ type: 'spring', stiffness: 420, damping: 28 }}
-      className={`relative ${currentSize.widthClass} ${currentSize.heightClass} max-h-[calc(100vh-84px)] bg-[#0B141A] rounded-[8px] shadow-[0_16px_44px_rgba(0,0,0,0.88)] border border-white/[0.06] flex flex-col pointer-events-auto group/chat transition-[width,height] duration-200`}
+      className={`relative ${currentSize.widthClass} ${currentSize.heightClass} max-h-[calc(100vh-84px)] flex flex-col pointer-events-auto group/chat transition-[width,height] duration-200`}
     >
       {/* Sidebar do Perfil do Contato/Grupo (estilo evidencias/39.png - desliza por trás à esquerda) */}
       <AnimatePresence>
@@ -1503,7 +1503,13 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         )}
       </AnimatePresence>
 
-      <div className="relative w-full h-full rounded-[8px] overflow-hidden flex flex-col z-10 bg-[#0B141A]">
+      <div
+        className={`relative z-20 w-full h-full rounded-[10px] overflow-hidden flex flex-col bg-[#0B141A] border border-white/[0.08] transition-shadow duration-300 ${
+          showContactSidebar
+            ? 'shadow-[-16px_0_36px_rgba(0,0,0,0.85),0_16px_44px_rgba(0,0,0,0.88)]'
+            : 'shadow-[0_16px_44px_rgba(0,0,0,0.88)]'
+        }`}
+      >
         {/* Textura de Fundo Oficial WhatsApp Dark Doodles */}
         <div
           className="absolute inset-0 pointer-events-none opacity-95 bg-repeat"
