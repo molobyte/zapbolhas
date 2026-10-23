@@ -8,6 +8,28 @@ interface AudioPlayerProps {
   ack?: 'sent' | 'delivered' | 'read';
 }
 
+type PlaybackSpeed = 1 | 1.5 | 2;
+
+const AUDIO_SPEED_STORAGE_KEY = 'whatsapp-bubbles-audio-playback-rate-v1';
+
+function getStoredPlaybackRate(): PlaybackSpeed {
+  try {
+    const saved = localStorage.getItem(AUDIO_SPEED_STORAGE_KEY);
+    if (saved === '1.5') return 1.5;
+    if (saved === '2') return 2;
+    return 1;
+  } catch {
+    return 1;
+  }
+}
+
+function setStoredPlaybackRate(rate: PlaybackSpeed) {
+  try {
+    localStorage.setItem(AUDIO_SPEED_STORAGE_KEY, String(rate));
+    window.dispatchEvent(new CustomEvent('wa:audio-speed-change', { detail: rate }));
+  } catch {}
+}
+
 function parseDurationString(str?: string): number {
   if (!str) return 0;
   const parts = str.split(':').map((p) => parseInt(p.trim(), 10));
@@ -63,7 +85,9 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0); // 0 to 1
+  const [playbackRate, setPlaybackRate] = useState<PlaybackSpeed>(getStoredPlaybackRate);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playerId = useRef(Math.random().toString(36).substring(2));
 
   // Calcula com robustez a duração total em segundos
   const fallbackSeconds = useMemo(() => {
@@ -90,6 +114,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   useEffect(() => {
     if (audioData.audioUrl) {
       const audio = new Audio(audioData.audioUrl);
+      audio.playbackRate = playbackRate;
       audioRef.current = audio;
 
       audio.onended = () => {
@@ -106,15 +131,61 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
   }, [audioData.audioUrl]);
 
+  // Sincroniza velocidade de reprodução com o elemento de áudio
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackRate;
+    }
+  }, [playbackRate]);
+
+  // Sincroniza preferência de velocidade entre múltiplos players
+  useEffect(() => {
+    const handleSpeedSync = (e: Event) => {
+      const customEvent = e as CustomEvent<PlaybackSpeed>;
+      if (customEvent.detail && [1, 1.5, 2].includes(customEvent.detail)) {
+        setPlaybackRate(customEvent.detail);
+        if (audioRef.current) {
+          audioRef.current.playbackRate = customEvent.detail;
+        }
+      }
+    };
+
+    window.addEventListener('wa:audio-speed-change', handleSpeedSync);
+    return () => {
+      window.removeEventListener('wa:audio-speed-change', handleSpeedSync);
+    };
+  }, []);
+
+  // Pausa este áudio se outro começar a tocar no app
+  useEffect(() => {
+    const handleOtherAudioPlaying = (e: Event) => {
+      const customEvent = e as CustomEvent<string>;
+      if (customEvent.detail !== playerId.current && isPlaying) {
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
+        setIsPlaying(false);
+      }
+    };
+
+    window.addEventListener('wa:audio-playing', handleOtherAudioPlaying);
+    return () => {
+      window.removeEventListener('wa:audio-playing', handleOtherAudioPlaying);
+    };
+  }, [isPlaying]);
+
   // Loop de atualização a 60fps enquanto o áudio estiver tocando
   useEffect(() => {
     if (!isPlaying) return;
 
     let animId: number;
-    const simStartTime = Date.now();
-    const startProgress = progress;
+    let lastTime = performance.now();
 
     const tick = () => {
+      const now = performance.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+
       const audio = audioRef.current;
       if (audio && audioData.audioUrl) {
         const dur = getEffectiveDuration(audio);
@@ -129,21 +200,22 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         }
       } else {
         // Modo simulado caso não haja arquivo de áudio carregado
-        const elapsed = (Date.now() - simStartTime) / 1000;
-        const nextProgress = startProgress + elapsed / Math.max(1, fallbackSeconds);
-        if (nextProgress >= 1) {
-          setIsPlaying(false);
-          setProgress(0);
-          return;
-        }
-        setProgress(nextProgress);
+        setProgress((prev) => {
+          const step = (dt * playbackRate) / Math.max(1, fallbackSeconds);
+          const next = prev + step;
+          if (next >= 1) {
+            setIsPlaying(false);
+            return 0;
+          }
+          return next;
+        });
       }
       animId = requestAnimationFrame(tick);
     };
 
     animId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, audioData.audioUrl, fallbackSeconds]);
+  }, [isPlaying, audioData.audioUrl, fallbackSeconds, playbackRate]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
@@ -152,6 +224,10 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         audio.pause();
         setIsPlaying(false);
       } else {
+        window.dispatchEvent(
+          new CustomEvent('wa:audio-playing', { detail: playerId.current })
+        );
+        audio.playbackRate = playbackRate;
         const dur = getEffectiveDuration(audio);
         // Se já chegou ao final, reinicia do começo
         if (progress >= 1 || (audio.currentTime >= dur && dur > 0)) {
@@ -166,11 +242,31 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       if (isPlaying) {
         setIsPlaying(false);
       } else {
+        window.dispatchEvent(
+          new CustomEvent('wa:audio-playing', { detail: playerId.current })
+        );
         if (progress >= 1) {
           setProgress(0);
         }
         setIsPlaying(true);
       }
+    }
+  };
+
+  const cycleSpeed = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    let nextRate: PlaybackSpeed = 1;
+    if (playbackRate === 1) {
+      nextRate = 1.5;
+    } else if (playbackRate === 1.5) {
+      nextRate = 2;
+    } else {
+      nextRate = 1;
+    }
+    setPlaybackRate(nextRate);
+    setStoredPlaybackRate(nextRate);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = nextRate;
     }
   };
 
@@ -188,10 +284,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
   };
 
-  const displayedDuration =
-    isPlaying || progress > 0
-      ? formatSeconds(progress * fallbackSeconds)
-      : audioData.duration || formatSeconds(fallbackSeconds);
+  const isListening = isPlaying || progress > 0;
+
+  const displayedDuration = isListening
+    ? formatSeconds(progress * fallbackSeconds)
+    : audioData.duration || formatSeconds(fallbackSeconds);
 
   const waveformBars =
     audioData.waveform && audioData.waveform.length >= 8
@@ -213,6 +310,27 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       >
         <MicBadgeIcon colorClass={fromMe ? 'text-[#25D366]' : 'text-[#53BDEB]'} />
       </div>
+    </div>
+  );
+
+  const AvatarOrSpeedSlot = (
+    <div className="relative w-[45px] h-[45px] shrink-0 flex items-center justify-center">
+      {isListening ? (
+        <button
+          type="button"
+          onClick={cycleSpeed}
+          title="Alterar velocidade de reprodução (1x, 1.5x, 2x)"
+          className={`min-w-[38px] h-[28px] px-2 rounded-full text-[12px] font-bold tracking-tight shadow-sm flex items-center justify-center transition-all cursor-pointer select-none active:scale-95 ${
+            fromMe
+              ? 'bg-[#004739] hover:bg-[#003d31] border border-[#007a65]/50 text-[#E9EDEF]'
+              : 'bg-[#202C33] hover:bg-[#2A3942] border border-[#374248] text-[#E9EDEF]'
+          }`}
+        >
+          {playbackRate}x
+        </button>
+      ) : (
+        AvatarWithMic
+      )}
     </div>
   );
 
@@ -287,7 +405,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     <div className="flex items-center gap-2.5 px-1.5 py-0.5 min-w-[248px]">
       {fromMe ? (
         <>
-          {AvatarWithMic}
+          {AvatarOrSpeedSlot}
           {PlayPauseBtn}
           {WaveformBlock}
         </>
@@ -295,7 +413,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         <>
           {PlayPauseBtn}
           {WaveformBlock}
-          {AvatarWithMic}
+          {AvatarOrSpeedSlot}
         </>
       )}
     </div>
