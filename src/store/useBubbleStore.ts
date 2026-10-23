@@ -230,6 +230,9 @@ function saveChatSizes(sizes: Record<string, ChatBubbleSize>): void {
   }
 }
 
+const newlyActiveChatIdsThisSession = new Set<string>();
+const dismissedChatIdsThisSession = new Set<string>();
+
 export function organizeBubbles(
   bubbles: BubbleItem[],
   maxBubbles: number,
@@ -657,7 +660,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       return;
     }
 
-    const { maxBubbles, pinnedChatIds: currentPinnedIds } = get();
+    const { maxBubbles, pinnedChatIds: currentPinnedIds, startupChatFilter } = get();
     const isAnyChatOpen = activePopover === 'chat-window' && Boolean(activeChatId);
 
     // Sincronizações subsequentes em segundo plano: atualiza lista e mantém bolhas sincronizadas
@@ -725,41 +728,52 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       }
     }
 
-    // Se surgiu alguma conversa não silenciada com unreadCount > 0 ou marcada como não lida que ainda não tem bolha, cria a bolha
-    // (respeitando que a interação tenha ocorrido nas últimas 48 horas)
-    const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
-    const nowTs = Date.now();
-    for (const c of realChats) {
-      const isUnread = Boolean(c.unreadCount > 0 || c.isMarkedUnread || c.unreadCount === -1);
-      const chatTs = c.timestamp || c.lastMessage?.timestampMs;
-      const isWithin48h =
-        typeof chatTs === 'number' &&
-        chatTs > 0 &&
-        nowTs - chatTs <= FORTY_EIGHT_HOURS_MS &&
-        nowTs - chatTs >= -600000;
+    if (startupChatFilter === 'pinned_only') {
+      updatedBubbles = updatedBubbles.filter(
+        (b) =>
+          b.isPinned ||
+          currentPinnedIds.includes(b.chatId) ||
+          newlyActiveChatIdsThisSession.has(b.chatId) ||
+          (isAnyChatOpen && activeChatId === b.chatId)
+      );
+    } else {
+      // Se surgiu alguma conversa não silenciada com unreadCount > 0 ou marcada como não lida que ainda não tem bolha, cria a bolha
+      // (respeitando que a interação tenha ocorrido nas últimas 48 horas e que não tenha sido dispensada nesta sessão)
+      const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+      const nowTs = Date.now();
+      for (const c of realChats) {
+        if (dismissedChatIdsThisSession.has(c.id)) continue;
+        const isUnread = Boolean(c.unreadCount > 0 || c.isMarkedUnread || c.unreadCount === -1);
+        const chatTs = c.timestamp || c.lastMessage?.timestampMs;
+        const isWithin48h =
+          typeof chatTs === 'number' &&
+          chatTs > 0 &&
+          nowTs - chatTs <= FORTY_EIGHT_HOURS_MS &&
+          nowTs - chatTs >= -600000;
 
-      if (
-        isUnread &&
-        !c.isMuted &&
-        isWithin48h &&
-        !updatedBubbles.some((b) => b.chatId === c.id)
-      ) {
-        const newB: BubbleItem = {
-          chatId: c.id,
-          name: c.name,
-          avatar: c.avatar,
-          unreadCount: c.unreadCount,
-          isMarkedUnread: Boolean(c.isMarkedUnread || c.unreadCount === -1),
-          isPinned: currentPinnedIds.includes(c.id),
-          isGroup: c.isGroup,
-          hasMention: Boolean(c.hasMention),
-          lastActivity: Date.now(),
-        };
-        if (isAnyChatOpen) {
-          // Insere na última esquerda para não movimentar as bolhas existentes
-          updatedBubbles = [newB, ...updatedBubbles];
-        } else {
-          updatedBubbles = [...updatedBubbles, newB];
+        if (
+          isUnread &&
+          !c.isMuted &&
+          isWithin48h &&
+          !updatedBubbles.some((b) => b.chatId === c.id)
+        ) {
+          const newB: BubbleItem = {
+            chatId: c.id,
+            name: c.name,
+            avatar: c.avatar,
+            unreadCount: c.unreadCount,
+            isMarkedUnread: Boolean(c.isMarkedUnread || c.unreadCount === -1),
+            isPinned: currentPinnedIds.includes(c.id),
+            isGroup: c.isGroup,
+            hasMention: Boolean(c.hasMention),
+            lastActivity: Date.now(),
+          };
+          if (isAnyChatOpen) {
+            // Insere na última esquerda para não movimentar as bolhas existentes
+            updatedBubbles = [newB, ...updatedBubbles];
+          } else {
+            updatedBubbles = [...updatedBubbles, newB];
+          }
         }
       }
     }
@@ -1202,7 +1216,32 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderWidth: s.bubbleBorderWidth,
       startupChatFilter,
     });
-    set({ startupChatFilter });
+
+    let nextBubbles = s.activeBubbles;
+    let nextActiveChatId = s.activeChatId;
+    let nextPopover = s.activePopover;
+
+    if (startupChatFilter === 'pinned_only') {
+      const isAnyChatOpen = s.activePopover === 'chat-window' && Boolean(s.activeChatId);
+      nextBubbles = s.activeBubbles.filter(
+        (b) =>
+          b.isPinned ||
+          s.pinnedChatIds.includes(b.chatId) ||
+          newlyActiveChatIdsThisSession.has(b.chatId) ||
+          (isAnyChatOpen && s.activeChatId === b.chatId)
+      );
+      if (s.activeChatId && !nextBubbles.some((b) => b.chatId === s.activeChatId)) {
+        nextActiveChatId = null;
+        if (nextPopover === 'chat-window') nextPopover = 'none';
+      }
+    }
+
+    set({
+      startupChatFilter,
+      activeBubbles: nextBubbles,
+      activeChatId: nextActiveChatId,
+      activePopover: nextPopover,
+    });
     window.electronAPI?.broadcastSettingsUpdate?.({ startupChatFilter });
   },
 
@@ -1246,8 +1285,22 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         : s.startupChatFilter;
 
     const trimmedBubbles = organizeBubbles(s.activeBubbles, nextMaxBubbles, s.pinnedChatIds);
-    const activeStillExists =
-      !s.activeChatId || trimmedBubbles.some((b) => b.chatId === s.activeChatId);
+    let filteredBubbles = trimmedBubbles;
+    let activeStillExists =
+      !s.activeChatId || filteredBubbles.some((b) => b.chatId === s.activeChatId);
+
+    if (nextStartupChatFilter === 'pinned_only') {
+      const isAnyChatOpen = s.activePopover === 'chat-window' && Boolean(s.activeChatId);
+      filteredBubbles = trimmedBubbles.filter(
+        (b) =>
+          b.isPinned ||
+          s.pinnedChatIds.includes(b.chatId) ||
+          newlyActiveChatIdsThisSession.has(b.chatId) ||
+          (isAnyChatOpen && s.activeChatId === b.chatId)
+      );
+      activeStillExists =
+        !s.activeChatId || filteredBubbles.some((b) => b.chatId === s.activeChatId);
+    }
 
     saveUserSettings({
       bubbleScale: nextScale,
@@ -1277,7 +1330,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: nextBorderOpacity,
       bubbleBorderWidth: nextBorderWidth,
       startupChatFilter: nextStartupChatFilter,
-      activeBubbles: trimmedBubbles,
+      activeBubbles: filteredBubbles,
       activeChatId: activeStillExists ? s.activeChatId : null,
       activePopover:
         !activeStillExists && s.activePopover === 'chat-window'
@@ -1307,6 +1360,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   },
 
   logoutWhatsApp: async () => {
+    newlyActiveChatIdsThisSession.clear();
+    dismissedChatIdsThisSession.clear();
     savePinnedChatIds([]);
     savePinnedChatMeta({});
     saveUnpinnedChatIds([]);
@@ -1440,6 +1495,9 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   // 5.3 Fluxo de Criação de Bolha pela Lista
   selectChatFromList: (chatId) => {
+    dismissedChatIdsThisSession.delete(chatId);
+    newlyActiveChatIdsThisSession.add(chatId);
+
     const { chats, activeBubbles, messagesByChat, unreadBannerByChat } = get();
     const targetChat = chats.find((c) => c.id === chatId);
     if (!targetChat) return;
@@ -1700,6 +1758,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       // Bloqueado: bolhas fixadas não podem ser fechadas até serem desfixadas
       return;
     }
+    dismissedChatIdsThisSession.add(chatId);
+    newlyActiveChatIdsThisSession.delete(chatId);
     const updatedBubbles = activeBubbles.filter((b) => b.chatId !== chatId);
     const isClosingActiveChat =
       activePopover === 'chat-window' && activeChatId === chatId;
@@ -2343,6 +2403,9 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   // 5.5 Fluxo de Recebimento de Nova Mensagem (Gatilho Automático)
   receiveIncomingMessage: ({ chat, message }) => {
     if (chat.isMuted) return;
+
+    dismissedChatIdsThisSession.delete(chat.id);
+    newlyActiveChatIdsThisSession.add(chat.id);
 
     const {
       activeBubbles,
