@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Loader2, Search, Plus, X, ArrowLeft, User } from 'lucide-react';
+import { Loader2, Search, Plus, X, ArrowLeft, User, Pin } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
 import { ChatSummary, SavedContact } from '../types/whatsapp';
 
@@ -72,6 +72,7 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
     isLoadingContacts,
     fetchSavedContacts,
     startChatWithContact,
+    pinnedChatIds,
   } = useBubbleStore();
 
   const [view, setView] = React.useState<'chats' | 'contacts'>('chats');
@@ -345,18 +346,23 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
                     <div className="mt-[1px]">{renderLastMessagePreview(chat)}</div>
                   </div>
 
-                  {/* Indicador de menção (@) e mensagens não lidas à direita */}
-                  {((chat.unreadCount > 0) || chat.isMarkedUnread || chat.unreadCount === -1) && (
-                    <div className="shrink-0 pl-1 flex items-center justify-end gap-1.5">
-                      {chat.isGroup && chat.hasMention && (
-                        <span
-                          title="Você foi marcado neste grupo"
-                          className="w-[18px] h-[18px] rounded-full bg-[#32CAED] text-[#111B21] text-[11px] font-black leading-none flex items-center justify-center shadow-sm select-none"
-                        >
-                          @
-                        </span>
-                      )}
-                      {chat.isMarkedUnread || chat.unreadCount === -1 ? (
+                  {/* Indicador de conversa fixada, menção (@) e mensagens não lidas à direita */}
+                  <div className="shrink-0 pl-1 flex items-center justify-end gap-1.5">
+                    {(chat.isPinned || pinnedChatIds.includes(chat.id)) && (
+                      <span title="Conversa fixada" className="inline-flex items-center justify-center">
+                        <Pin className="w-3.5 h-3.5 text-[#00A884] rotate-45 shrink-0" />
+                      </span>
+                    )}
+                    {chat.isGroup && chat.hasMention && (
+                      <span
+                        title="Você foi marcado neste grupo"
+                        className="w-[18px] h-[18px] rounded-full bg-[#32CAED] text-[#111B21] text-[11px] font-black leading-none flex items-center justify-center shadow-sm select-none"
+                      >
+                        @
+                      </span>
+                    )}
+                    {((chat.unreadCount > 0) || chat.isMarkedUnread || chat.unreadCount === -1) && (
+                      chat.isMarkedUnread || chat.unreadCount === -1 ? (
                         <span
                           title="Não lida"
                           className="w-[10px] h-[10px] rounded-full bg-[#25D366] shadow-sm shrink-0"
@@ -365,9 +371,9 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
                         <span className="min-w-[20px] h-[20px] px-[6px] rounded-full bg-[#25D366] text-[#111B21] text-[11.5px] font-bold leading-none flex items-center justify-center shadow-sm">
                           {chat.unreadCount > 99 ? '99+' : chat.unreadCount}
                         </span>
-                      )}
-                    </div>
-                  )}
+                      )
+                    )}
+                  </div>
                 </button>
               ))}
             </div>

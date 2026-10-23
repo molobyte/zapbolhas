@@ -21,6 +21,7 @@ export interface ChatSummary {
   isGroup: boolean;
   isMuted?: boolean;
   hasMention?: boolean;
+  isPinned?: boolean;
   lastMessage: LastMessagePreview;
 }
 

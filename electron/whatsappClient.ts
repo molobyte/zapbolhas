@@ -114,6 +114,7 @@ export interface FormattedChatSummary {
   isGroup: boolean;
   isMuted?: boolean;
   hasMention?: boolean;
+  isPinned?: boolean;
   lastMessage: {
     text: string;
     senderName?: string;
@@ -1434,8 +1435,15 @@ export class WhatsAppService {
               !cid.endsWith('@newsletter')
             );
           })
-          .sort((a: any, b: any) => (b.t || 0) - (a.t || 0))
-          .slice(0, 25);
+          .sort((a: any, b: any) => {
+            const pinA = Number(getProp(a, 'pin') || a.pin || 0);
+            const pinB = Number(getProp(b, 'pin') || b.pin || 0);
+            if (pinA > 0 && pinB === 0) return -1;
+            if (pinB > 0 && pinA === 0) return 1;
+            if (pinA > 0 && pinB > 0) return pinB - pinA;
+            return (b.t || 0) - (a.t || 0);
+          })
+          .slice(0, 50);
 
         const results = [];
 
@@ -1553,6 +1561,9 @@ export class WhatsAppService {
           const formattedLastMsg = formatMentionsInText(rawBody, lastMsg);
           const cleanLastMsgText = isRawMediaBase64OrKey(formattedLastMsg.text) ? '' : formattedLastMsg.text;
 
+          const rawPin = Number(getProp(c, 'pin') || c.pin || 0);
+          const isChatPinned = Boolean(rawPin > 0 || c.isPinned || c.pinned);
+
           results.push({
             id,
             name,
@@ -1562,6 +1573,7 @@ export class WhatsAppService {
             isGroup,
             isMuted,
             hasMention,
+            isPinned: isChatPinned,
             timestamp: Number(lastMsg?.t || c.t || 0),
             lastMsgType: rawType,
             lastMsgIsViewOnce: isViewOnce,
@@ -1632,6 +1644,7 @@ export class WhatsAppService {
           isGroup: raw.isGroup,
           isMuted: raw.isMuted,
           hasMention: Boolean(raw.hasMention),
+          isPinned: Boolean(raw.isPinned),
           lastMessage: {
             text,
             senderName: raw.senderName || undefined,

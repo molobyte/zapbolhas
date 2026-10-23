@@ -152,7 +152,25 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const currentChatId = activeChatId || lastActiveChatIdRef.current;
 
   const lastActiveChatRef = useRef<ChatSummary | undefined>(undefined);
-  const activeChat = chats.find((c) => c.id === currentChatId);
+  const activeBubble = activeBubbles.find((b) => b.chatId === currentChatId);
+  const activeChat =
+    chats.find((c) => c.id === currentChatId) ||
+    (activeBubble
+      ? {
+          id: activeBubble.chatId,
+          name: activeBubble.name,
+          avatar: activeBubble.avatar,
+          unreadCount: activeBubble.unreadCount,
+          isMarkedUnread: activeBubble.isMarkedUnread,
+          isGroup: Boolean(activeBubble.isGroup),
+          isPinned: Boolean(activeBubble.isPinned),
+          lastMessage: {
+            text: '',
+            mediaType: 'text' as const,
+            timestamp: '',
+          },
+        }
+      : undefined);
   if (activeChat) {
     lastActiveChatRef.current = activeChat;
   }
@@ -186,8 +204,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const messages = currentChatId ? messagesByChat[currentChatId] || [] : [];
   const unreadBanner = currentChatId ? unreadBannerByChat[currentChatId] : undefined;
 
-  const activeBubble = activeBubbles.find((b) => b.chatId === currentChatId);
-  const isPinned = Boolean(activeBubble?.isPinned);
+  const isPinned = Boolean(activeBubble?.isPinned || (currentChatId && pinnedChatIds.includes(currentChatId)));
 
   const currentSizeKey: ChatBubbleSize = (currentChatId && chatSizes[currentChatId]) || 'pequeno';
   const currentSize = CHAT_SIZE_CONFIG[currentSizeKey] || CHAT_SIZE_CONFIG.pequeno;

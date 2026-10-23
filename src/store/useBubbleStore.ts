@@ -125,7 +125,17 @@ function saveUserSettings(settings: SavedUserSettings) {
 }
 
 const PINNED_STORAGE_KEY = 'whatsapp-bubbles-pinned-chats-v1';
+const PINNED_METADATA_STORAGE_KEY = 'whatsapp-bubbles-pinned-metadata-v1';
+const UNPINNED_STORAGE_KEY = 'whatsapp-bubbles-unpinned-chats-v1';
 const CHAT_SIZES_STORAGE_KEY = 'whatsapp-bubbles-chat-sizes-v1';
+
+export interface PinnedChatMeta {
+  chatId: string;
+  name: string;
+  avatar: string;
+  isGroup?: boolean;
+  lastActivity?: number;
+}
 
 function loadPinnedChatIds(): string[] {
   try {
@@ -146,6 +156,74 @@ function savePinnedChatIds(ids: string[]): void {
   } catch {
     // Ignore localStorage error
   }
+}
+
+function loadPinnedChatMeta(): Record<string, PinnedChatMeta> {
+  try {
+    const raw = localStorage.getItem(PINNED_METADATA_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch {
+    // Ignore localStorage error
+  }
+  return {};
+}
+
+function savePinnedChatMeta(meta: Record<string, PinnedChatMeta>): void {
+  try {
+    localStorage.setItem(PINNED_METADATA_STORAGE_KEY, JSON.stringify(meta));
+  } catch {
+    // Ignore localStorage error
+  }
+}
+
+function loadUnpinnedChatIds(): string[] {
+  try {
+    const raw = localStorage.getItem(UNPINNED_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter((id) => typeof id === 'string');
+    }
+  } catch {
+    // Ignore localStorage error
+  }
+  return [];
+}
+
+function saveUnpinnedChatIds(ids: string[]): void {
+  try {
+    localStorage.setItem(UNPINNED_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    // Ignore localStorage error
+  }
+}
+
+function loadInitialBubbles(
+  pinnedChatIds: string[],
+  pinnedMeta: Record<string, PinnedChatMeta>,
+  maxBubbles: number
+): BubbleItem[] {
+  const initial: BubbleItem[] = [];
+  const now = Date.now();
+
+  pinnedChatIds.forEach((id, idx) => {
+    const meta = pinnedMeta[id];
+    initial.push({
+      chatId: id,
+      name: meta?.name || id.split('@')[0],
+      avatar: meta?.avatar || '',
+      unreadCount: 0,
+      isMarkedUnread: false,
+      isPinned: true,
+      isGroup: meta?.isGroup ?? id.endsWith('@g.us'),
+      hasMention: false,
+      lastActivity: meta?.lastActivity || (now - (pinnedChatIds.length - idx) * 1000),
+    });
+  });
+
+  return organizeBubbles(initial, maxBubbles, pinnedChatIds);
 }
 
 function loadChatSizes(): Record<string, ChatBubbleSize> {
@@ -231,7 +309,13 @@ export function moveBubbleToMostRecent(
 
 const initialSettings = loadUserSettings();
 const initialPinnedChatIds = loadPinnedChatIds();
+const initialPinnedMeta = loadPinnedChatMeta();
 const initialChatSizes = loadChatSizes();
+const initialActiveBubbles = loadInitialBubbles(
+  initialPinnedChatIds,
+  initialPinnedMeta,
+  initialSettings.maxBubbles
+);
 
 interface BubbleStoreState {
   mode: ConnectionMode;
@@ -383,7 +467,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   bubbleBorderWidth: initialSettings.bubbleBorderWidth,
 
   chats: [],
-  activeBubbles: [],
+  activeBubbles: initialActiveBubbles,
   pinnedChatIds: initialPinnedChatIds,
   chatSizes: initialChatSizes,
   activePopover: 'none',
@@ -451,12 +535,97 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     if (!realChats || realChats.length === 0) return;
 
     if (!hasSyncedRealChats) {
-      const { maxBubbles, pinnedChatIds } = get();
-      // Primeira sincronização real: cria bolhas para as conversas reais não silenciadas que possuem mensagens não lidas ou marcadas como não lidas.
-      // As mais recentes ficam na direita (final do array) e respeitam o limite maxBubbles.
-      const initialRealBubbles: BubbleItem[] = realChats
-        .filter((c) => (c.unreadCount > 0 || c.isMarkedUnread || c.unreadCount === -1) && !c.isMuted)
-        .slice(0, maxBubbles)
+      const { maxBubbles, pinnedChatIds: currentPinnedIds, activeBubbles: currentActive } = get();
+      const metaMap = loadPinnedChatMeta();
+      const unpinnedSet = new Set(loadUnpinnedChatIds());
+      const chatMap = new Map(realChats.map((c) => [c.id, c]));
+
+      // 1. Detecta conversas fixadas no WhatsApp (c.isPinned) que o usuário ainda não desfixou
+      const combinedPinnedSet = new Set(currentPinnedIds);
+      for (const c of realChats) {
+        if (c.isPinned && !unpinnedSet.has(c.id)) {
+          combinedPinnedSet.add(c.id);
+        }
+      }
+      const updatedPinnedIds = Array.from(combinedPinnedSet);
+      savePinnedChatIds(updatedPinnedIds);
+
+      // 2. Constrói bolhas para todas as conversas fixadas
+      const pinnedBubbles: BubbleItem[] = [];
+      const now = Date.now();
+      updatedPinnedIds.forEach((pid, idx) => {
+        const realChat = chatMap.get(pid);
+        const existingBubble = currentActive.find((b) => b.chatId === pid);
+        const meta = metaMap[pid];
+
+        const name = realChat?.name || existingBubble?.name || meta?.name || pid.split('@')[0];
+        const avatar = realChat?.avatar || existingBubble?.avatar || meta?.avatar || '';
+        const isGroup = realChat?.isGroup ?? existingBubble?.isGroup ?? meta?.isGroup ?? pid.endsWith('@g.us');
+        const lastActivity =
+          existingBubble?.lastActivity || meta?.lastActivity || now - (updatedPinnedIds.length - idx) * 1000;
+        const unreadCount = realChat ? realChat.unreadCount : (existingBubble?.unreadCount || 0);
+        const isMarkedUnread = realChat
+          ? Boolean(realChat.isMarkedUnread || realChat.unreadCount === -1)
+          : Boolean(existingBubble?.isMarkedUnread);
+        const hasMention = realChat ? Boolean(realChat.hasMention) : Boolean(existingBubble?.hasMention);
+
+        // Atualiza metadata em disco
+        metaMap[pid] = {
+          chatId: pid,
+          name,
+          avatar,
+          isGroup,
+          lastActivity,
+        };
+
+        pinnedBubbles.push({
+          chatId: pid,
+          name,
+          avatar,
+          unreadCount,
+          isMarkedUnread,
+          isPinned: true,
+          isGroup,
+          hasMention,
+          lastActivity,
+        });
+      });
+      savePinnedChatMeta(metaMap);
+
+      // 3. Garante que se alguma conversa fixada não estiver na lista de realChats, adicionamos um resumo sintético dela
+      const existingChatIds = new Set(realChats.map((c) => c.id));
+      const syntheticMissingChats: ChatSummary[] = [];
+      for (const pid of updatedPinnedIds) {
+        if (!existingChatIds.has(pid)) {
+          const meta = metaMap[pid];
+          syntheticMissingChats.push({
+            id: pid,
+            name: meta?.name || pid.split('@')[0],
+            avatar: meta?.avatar || '',
+            unreadCount: 0,
+            isMarkedUnread: false,
+            isGroup: Boolean(meta?.isGroup ?? pid.endsWith('@g.us')),
+            isPinned: true,
+            lastMessage: {
+              text: '',
+              mediaType: 'text',
+              timestamp: '',
+            },
+          });
+        }
+      }
+      const fullChatsList = [...realChats, ...syntheticMissingChats];
+
+      // 4. Cria bolhas para as conversas reais não silenciadas com mensagens não lidas que NÃO estejam fixadas
+      const unreadUnpinnedChats = realChats.filter(
+        (c) =>
+          !updatedPinnedIds.includes(c.id) &&
+          (c.unreadCount > 0 || c.isMarkedUnread || c.unreadCount === -1) &&
+          !c.isMuted
+      );
+
+      const unreadBubbles: BubbleItem[] = unreadUnpinnedChats
+        .slice(0, Math.max(0, maxBubbles - pinnedBubbles.length))
         .reverse()
         .map((c, idx) => ({
           chatId: c.id,
@@ -464,20 +633,22 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           avatar: c.avatar,
           unreadCount: c.unreadCount,
           isMarkedUnread: Boolean(c.isMarkedUnread || c.unreadCount === -1),
-          isPinned: pinnedChatIds.includes(c.id),
+          isPinned: false,
           isGroup: c.isGroup,
           hasMention: Boolean(c.hasMention),
-          lastActivity: Date.now() - (maxBubbles - idx) * 1000,
+          lastActivity: now - (unreadUnpinnedChats.length - idx) * 1000,
         }));
 
-      const organizedInitial = organizeBubbles(initialRealBubbles, maxBubbles, pinnedChatIds);
+      const combinedInitial = [...unreadBubbles, ...pinnedBubbles];
+      const organizedInitial = organizeBubbles(combinedInitial, maxBubbles, updatedPinnedIds);
 
       set({
         mode: 'whatsapp',
         waStatus: 'ready',
         hasSyncedRealChats: true,
-        chats: realChats,
+        chats: fullChatsList,
         activeBubbles: organizedInitial,
+        pinnedChatIds: updatedPinnedIds,
         messagesByChat: {},
         activePopover: activePopover === 'qr-code' ? 'chat-list' : activePopover,
         activeChatId: null,
@@ -485,11 +656,14 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       return;
     }
 
-    const { maxBubbles, pinnedChatIds } = get();
+    const { maxBubbles, pinnedChatIds: currentPinnedIds } = get();
     const isAnyChatOpen = activePopover === 'chat-window' && Boolean(activeChatId);
 
     // Sincronizações subsequentes em segundo plano: atualiza lista e mantém bolhas sincronizadas
     const chatMap = new Map(realChats.map((c) => [c.id, c]));
+    const metaMap = loadPinnedChatMeta();
+    let metaChanged = false;
+
     let updatedBubbles = activeBubbles.map((b) => {
       const fresh = chatMap.get(b.chatId);
       if (!fresh) return b;
@@ -501,17 +675,54 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       const hasMention = isCurrentlyOpen || unreadCount === 0
         ? false
         : Boolean(fresh.hasMention);
+
+      // Mantém metadata atualizado para conversas fixadas
+      if (b.isPinned || currentPinnedIds.includes(b.chatId)) {
+        if (
+          metaMap[b.chatId] &&
+          (metaMap[b.chatId].name !== fresh.name || metaMap[b.chatId].avatar !== fresh.avatar)
+        ) {
+          metaMap[b.chatId].name = fresh.name;
+          metaMap[b.chatId].avatar = fresh.avatar;
+          metaChanged = true;
+        }
+      }
+
       return {
         ...b,
         name: fresh.name,
         avatar: fresh.avatar,
         unreadCount,
         isMarkedUnread,
-        isPinned: b.isPinned ?? pinnedChatIds.includes(b.chatId),
+        isPinned: b.isPinned ?? currentPinnedIds.includes(b.chatId),
         isGroup: fresh.isGroup ?? b.isGroup,
         hasMention,
       };
     });
+
+    if (metaChanged) {
+      savePinnedChatMeta(metaMap);
+    }
+
+    // Garante que todas as conversas fixadas permaneçam em updatedBubbles
+    for (const pid of currentPinnedIds) {
+      if (!updatedBubbles.some((b) => b.chatId === pid)) {
+        const fresh = chatMap.get(pid);
+        const meta = metaMap[pid];
+        const newPinnedB: BubbleItem = {
+          chatId: pid,
+          name: fresh?.name || meta?.name || pid.split('@')[0],
+          avatar: fresh?.avatar || meta?.avatar || '',
+          unreadCount: fresh?.unreadCount || 0,
+          isMarkedUnread: Boolean(fresh?.isMarkedUnread),
+          isPinned: true,
+          isGroup: fresh?.isGroup ?? meta?.isGroup ?? pid.endsWith('@g.us'),
+          hasMention: Boolean(fresh?.hasMention),
+          lastActivity: meta?.lastActivity || Date.now(),
+        };
+        updatedBubbles.push(newPinnedB);
+      }
+    }
 
     // Se surgiu alguma conversa não silenciada com unreadCount > 0 ou marcada como não lida que ainda não tem bolha, cria a bolha
     for (const c of realChats) {
@@ -527,7 +738,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           avatar: c.avatar,
           unreadCount: c.unreadCount,
           isMarkedUnread: Boolean(c.isMarkedUnread || c.unreadCount === -1),
-          isPinned: pinnedChatIds.includes(c.id),
+          isPinned: currentPinnedIds.includes(c.id),
           isGroup: c.isGroup,
           hasMention: Boolean(c.hasMention),
           lastActivity: Date.now(),
@@ -542,9 +753,32 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     }
     const finalBubbles = isAnyChatOpen
       ? updatedBubbles
-      : organizeBubbles(updatedBubbles, maxBubbles, pinnedChatIds);
+      : organizeBubbles(updatedBubbles, maxBubbles, currentPinnedIds);
 
-    const normalizedChats = realChats.map((c) => {
+    const existingChatIds = new Set(realChats.map((c) => c.id));
+    const syntheticMissingChats: ChatSummary[] = [];
+    for (const pid of currentPinnedIds) {
+      if (!existingChatIds.has(pid)) {
+        const meta = metaMap[pid];
+        syntheticMissingChats.push({
+          id: pid,
+          name: meta?.name || pid.split('@')[0],
+          avatar: meta?.avatar || '',
+          unreadCount: 0,
+          isMarkedUnread: false,
+          isGroup: Boolean(meta?.isGroup ?? pid.endsWith('@g.us')),
+          isPinned: true,
+          lastMessage: {
+            text: '',
+            mediaType: 'text',
+            timestamp: '',
+          },
+        });
+      }
+    }
+    const fullChatsList = [...realChats, ...syntheticMissingChats];
+
+    const normalizedChats = fullChatsList.map((c) => {
       const isCurrentlyOpen =
         activePopover === 'chat-window' && activeChatId === c.id;
       if (isCurrentlyOpen && (c.unreadCount > 0 || c.unreadCount === -1 || c.isMarkedUnread || c.hasMention)) {
@@ -1001,12 +1235,16 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   },
 
   logoutWhatsApp: async () => {
+    savePinnedChatIds([]);
+    savePinnedChatMeta({});
+    saveUnpinnedChatIds([]);
     set({
       waStatus: 'initializing',
       qrDataUrl: null,
       hasSyncedRealChats: false,
       chats: [],
       activeBubbles: [],
+      pinnedChatIds: [],
       messagesByChat: {},
       unreadBannerByChat: {},
       activeChatId: null,
@@ -1206,7 +1444,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       },
     });
 
-    if (targetChat?.isGroup) {
+    if (targetChat?.isGroup || existingBubble?.isGroup) {
       get().fetchGroupParticipants(chatId);
     }
 
@@ -1350,7 +1588,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       },
     });
 
-    if (targetChat?.isGroup) {
+    if (targetChat?.isGroup || existingBubble?.isGroup) {
       get().fetchGroupParticipants(chatId);
     }
 
@@ -1408,7 +1646,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   // Fixar ou Desfixar conversa
   togglePinBubble: (chatId: string) => {
-    const { activeBubbles, pinnedChatIds, maxBubbles, activePopover, activeChatId } = get();
+    const { activeBubbles, pinnedChatIds, maxBubbles, activePopover, activeChatId, chats } = get();
     const isCurrentlyPinned = pinnedChatIds.includes(chatId);
     const nextPinned = !isCurrentlyPinned;
 
@@ -1420,6 +1658,29 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     }
     const nextPinnedIds = Array.from(nextPinnedSet);
     savePinnedChatIds(nextPinnedIds);
+
+    const metaMap = loadPinnedChatMeta();
+    if (nextPinned) {
+      const targetBubble = activeBubbles.find((b) => b.chatId === chatId);
+      const targetChat = chats.find((c) => c.id === chatId);
+      metaMap[chatId] = {
+        chatId,
+        name: targetBubble?.name || targetChat?.name || chatId.split('@')[0],
+        avatar: targetBubble?.avatar || targetChat?.avatar || '',
+        isGroup: targetBubble?.isGroup ?? targetChat?.isGroup,
+        lastActivity: targetBubble?.lastActivity || Date.now(),
+      };
+      savePinnedChatMeta(metaMap);
+
+      const unpinned = loadUnpinnedChatIds().filter((id) => id !== chatId);
+      saveUnpinnedChatIds(unpinned);
+    } else {
+      delete metaMap[chatId];
+      savePinnedChatMeta(metaMap);
+
+      const unpinned = Array.from(new Set([...loadUnpinnedChatIds(), chatId]));
+      saveUnpinnedChatIds(unpinned);
+    }
 
     const updated = activeBubbles.map((b) =>
       b.chatId === chatId ? { ...b, isPinned: nextPinned } : b
