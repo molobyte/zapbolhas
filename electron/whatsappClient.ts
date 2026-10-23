@@ -4818,6 +4818,109 @@ export class WhatsAppService {
     }
   }
 
+  public async forwardMessages(payload: {
+    targetChatId: string;
+    messageIds: string[];
+  }): Promise<{ success: boolean; forwardedCount: number }> {
+    if (!this.client?.pupPage || this.status !== 'ready') {
+      return { success: false, forwardedCount: 0 };
+    }
+
+    try {
+      const res = await this.client.pupPage.evaluate(
+        async ({ targetChatId, messageIds }: { targetChatId: string; messageIds: string[] }) => {
+          const w = window as any;
+          if (typeof w.require !== 'function') return { success: false, forwardedCount: 0 };
+
+          const serializeId = (val: any): string => {
+            if (!val) return '';
+            if (typeof val === 'string') return val;
+            return val._serialized || val.id || '';
+          };
+
+          const collections = w.require('WAWebCollections');
+          const MsgCollection = collections?.Msg;
+
+          // Obtém o chat de destino
+          let targetChat: any = null;
+          if (w.WWebJS?.getChat) {
+            try {
+              targetChat = await w.WWebJS.getChat(targetChatId, { getAsModel: false });
+            } catch (err) {
+              console.warn('[forwardMessages] WWebJS.getChat error:', err);
+            }
+          }
+          if (!targetChat) {
+            targetChat =
+              collections.Chat?.get?.(targetChatId) ||
+              collections.Chat?.getModelsArray?.().find((c: any) => serializeId(c.id) === targetChatId);
+          }
+          if (!targetChat && collections.Chat?.find) {
+            try {
+              targetChat = await collections.Chat.find(targetChatId);
+            } catch (_) {}
+          }
+          if (!targetChat) {
+            console.error('[forwardMessages] Destino não encontrado:', targetChatId);
+            return { success: false, forwardedCount: 0 };
+          }
+
+          let forwardedCount = 0;
+          for (const msgId of messageIds) {
+            try {
+              let msg = MsgCollection?.get?.(msgId);
+              if (!msg && MsgCollection?.getMessagesById) {
+                const fetched = await MsgCollection.getMessagesById([msgId]);
+                msg = fetched?.messages?.[0];
+              }
+
+              if (!msg) {
+                const allChats = collections.Chat?.getModelsArray?.() || [];
+                for (const c of allChats) {
+                  const mList = c?.msgs?.getModelsArray?.() || [];
+                  const found = mList.find((m: any) => serializeId(m.id) === msgId);
+                  if (found) {
+                    msg = found;
+                    break;
+                  }
+                }
+              }
+
+              if (msg) {
+                const forwardAction = w.require('WAWebChatForwardMessage');
+                if (forwardAction?.forwardMessages) {
+                  await forwardAction.forwardMessages({
+                    chat: targetChat,
+                    msgs: [msg],
+                    multicast: true,
+                    includeCaption: true,
+                    appendedText: undefined,
+                  });
+                  forwardedCount++;
+                } else if (w.WWebJS?.forwardMessage) {
+                  await w.WWebJS.forwardMessage(targetChatId, msgId);
+                  forwardedCount++;
+                }
+              } else {
+                console.warn('[forwardMessages] Mensagem não encontrada para forward:', msgId);
+              }
+            } catch (itemErr) {
+              console.error('[forwardMessages] Erro ao encaminhar mensagem:', msgId, itemErr);
+            }
+          }
+
+          return { success: forwardedCount > 0, forwardedCount };
+        },
+        payload
+      );
+
+      return res;
+    } catch (err) {
+      console.error('[WhatsAppService] Error in forwardMessages:', err);
+      return { success: false, forwardedCount: 0 };
+    }
+  }
+
   public async getHighResProfilePic(chatId: string): Promise<string | null> {
     if (!this.client || this.status !== 'ready') return null;
     try {

@@ -520,6 +520,17 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle(
+    'wa:forward-messages',
+    async (
+      _event,
+      payload: { targetChatId: string; messageIds: string[] }
+    ) => {
+      if (!waService) return { success: false, forwardedCount: 0 };
+      return await waService.forwardMessages(payload);
+    }
+  );
+
+  ipcMain.handle(
     'wa:send-message',
     async (
       _event,

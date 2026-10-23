@@ -230,6 +230,10 @@ export interface ElectronAPI {
   getGroupMetadata?: (chatId: string) => Promise<GroupMetadataInfo | null>;
   getSavedContacts?: (query?: string) => Promise<SavedContact[]>;
   sendMessage: (payload: SendMessagePayload) => Promise<FormattedMessage | null>;
+  forwardMessages?: (payload: {
+    targetChatId: string;
+    messageIds: string[];
+  }) => Promise<{ success: boolean; forwardedCount: number }>;
   sendSticker?: (payload: SendStickerPayload) => Promise<FormattedMessage | null>;
   sendMedia?: (payload: SendMediaPayload) => Promise<FormattedMessage | null>;
   selectMediaFile?: () => Promise<{

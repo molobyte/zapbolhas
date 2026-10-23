@@ -1942,28 +1942,89 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   forwardMessages: async (targetChatId: string, messagesToForward: FormattedMessage[]) => {
     if (!targetChatId || messagesToForward.length === 0) return;
 
+    // 1. Tenta o encaminhamento nativo oficial do WhatsApp Web (preserva vídeos em HD, GIFs com loop e animação, fotos, figurinhas e textos)
+    const realMsgIds = messagesToForward.map((m) => m.id).filter(Boolean);
+    if (window.electronAPI?.forwardMessages && realMsgIds.length > 0) {
+      try {
+        const res = await window.electronAPI.forwardMessages({
+          targetChatId,
+          messageIds: realMsgIds,
+        });
+        if (res?.success && res.forwardedCount === realMsgIds.length) {
+          if (window.electronAPI?.getMessages) {
+            window.electronAPI.getMessages(targetChatId, 50).then((msgs) => {
+              if (msgs) {
+                get().setMessagesForChat(targetChatId, msgs);
+              }
+            });
+          }
+          return;
+        }
+      } catch (err) {
+        console.warn('[Store] Falha no forward nativo, aplicando fallback:', err);
+      }
+    }
+
+    // 2. Fallback caso alguma mensagem não esteja no cache do WhatsApp Web
     for (const msg of messagesToForward) {
       if (msg.type === 'sticker' && msg.imageUrl && window.electronAPI?.sendSticker) {
         await window.electronAPI.sendSticker({
           chatId: targetChatId,
           stickerDataUrl: msg.imageUrl,
         });
-      } else if (
-        (msg.type === 'image' || msg.type === 'video') &&
-        (msg.imageUrl || msg.videoUrl) &&
-        window.electronAPI?.sendMedia
-      ) {
-        await window.electronAPI.sendMedia({
-          chatId: targetChatId,
-          mediaDataUrl: msg.imageUrl || msg.videoUrl || '',
-          caption: msg.text || undefined,
-        });
-      } else if (msg.type === 'audio' && msg.audioData?.audioUrl && window.electronAPI?.sendMedia) {
-        await window.electronAPI.sendMedia({
-          chatId: targetChatId,
-          mediaDataUrl: msg.audioData.audioUrl,
-          sendAudioAsVoice: true,
-        });
+      } else if (msg.type === 'video' && window.electronAPI?.sendMedia) {
+        // Se for vídeo/gif, NUNCA usar imageUrl (que é apenas a thumbnail JPEG minúscula).
+        // Se ainda não tiver videoUrl em memória, faz o download do vídeo completo em HD.
+        let videoData = msg.videoUrl;
+        if (!videoData && window.electronAPI?.downloadMedia) {
+          try {
+            const downloaded = await window.electronAPI.downloadMedia(msg.id);
+            if (downloaded) {
+              videoData = downloaded;
+            }
+          } catch (_) {}
+        }
+        if (videoData) {
+          await window.electronAPI.sendMedia({
+            chatId: targetChatId,
+            mediaDataUrl: videoData,
+            caption: msg.text || undefined,
+          });
+        }
+      } else if (msg.type === 'image' && window.electronAPI?.sendMedia) {
+        let imageData = msg.imageUrl;
+        if (!msg.isHdLoaded && window.electronAPI?.downloadMedia) {
+          try {
+            const downloaded = await window.electronAPI.downloadMedia(msg.id);
+            if (downloaded) {
+              imageData = downloaded;
+            }
+          } catch (_) {}
+        }
+        if (imageData) {
+          await window.electronAPI.sendMedia({
+            chatId: targetChatId,
+            mediaDataUrl: imageData,
+            caption: msg.text || undefined,
+          });
+        }
+      } else if (msg.type === 'audio' && window.electronAPI?.sendMedia) {
+        let audioUrl = msg.audioData?.audioUrl;
+        if (!audioUrl && window.electronAPI?.downloadMedia) {
+          try {
+            const downloaded = await window.electronAPI.downloadMedia(msg.id);
+            if (downloaded) {
+              audioUrl = downloaded;
+            }
+          } catch (_) {}
+        }
+        if (audioUrl) {
+          await window.electronAPI.sendMedia({
+            chatId: targetChatId,
+            mediaDataUrl: audioUrl,
+            sendAudioAsVoice: true,
+          });
+        }
       } else if (msg.text && window.electronAPI?.sendMessage) {
         await window.electronAPI.sendMessage({
           chatId: targetChatId,

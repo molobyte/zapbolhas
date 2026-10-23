@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:send-message', payload);
   },
 
+  forwardMessages: (payload: { targetChatId: string; messageIds: string[] }) => {
+    return ipcRenderer.invoke('wa:forward-messages', payload);
+  },
+
   sendSticker: (payload: {
     chatId: string;
     stickerDataUrl: string;
