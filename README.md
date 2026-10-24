@@ -87,10 +87,6 @@ Acesse dados detalhados com a nova gaveta lateral que desliza suavemente por tr�
 - **Para Contatos:** Foto em alta resolução, recados, número e ações rápidas.
 - **Ações Imediatas:** Pesquisar no histórico, Selecionar mensagens para encaminhar, Silenciar e Fixar/Desfixar conversa.
 
-<p align="center">
-  <img src="docs/screenshots/12-sidebar-info.png" alt="Sidebar de Informações do Grupo e Contato" width="620" />
-</p>
-
 ---
 
 ### 5. Encaminhamento Nativo de Mídias (Vídeos em HD & GIFs Animados)
