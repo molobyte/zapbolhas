@@ -4995,7 +4995,19 @@ export class WhatsAppService {
     messageIds: string[];
     everyone?: boolean;
   }): Promise<{ success: boolean; deletedCount: number; error?: string }> {
+    const logPath = path.join(process.cwd(), 'delete_debug.log');
+    const writeLog = (msg: string) => {
+      const line = `[${new Date().toISOString()}] ${msg}\n`;
+      try {
+        fs.appendFileSync(logPath, line);
+      } catch (_) {}
+      console.log(`[WhatsAppService:deleteMessages] ${msg}`);
+    };
+
+    writeLog(`Iniciando deleteMessages: chatId=${payload.chatId}, count=${payload.messageIds?.length}, everyone=${payload.everyone}`);
+
     if (!this.client?.pupPage || this.status !== 'ready') {
+      writeLog('Abortado: WhatsApp não está conectado ou pupPage indisponível');
       return { success: false, deletedCount: 0, error: 'WhatsApp não está conectado' };
     }
 
@@ -5010,10 +5022,23 @@ export class WhatsAppService {
           messageIds: string[];
           everyone?: boolean;
         }) => {
+          const evalLogs: string[] = [];
+          const log = (m: string) => evalLogs.push(m);
+
           const w = window as any;
           if (typeof w.require !== 'function') {
-            return { success: false, deletedCount: 0, error: 'WhatsApp Web require não disponível' };
+            log('Erro: w.require não é função');
+            return { success: false, deletedCount: 0, error: 'WhatsApp Web require não disponível', evalLogs };
           }
+
+          const safeRequire = (modName: string) => {
+            try {
+              return typeof w.require === 'function' ? w.require(modName) : null;
+            } catch (err: any) {
+              log(`safeRequire(${modName}) falhou: ${err?.message || String(err)}`);
+              return null;
+            }
+          };
 
           const serializeId = (val: any): string => {
             if (!val) return '';
@@ -5030,37 +5055,64 @@ export class WhatsAppService {
             return Boolean(partA && partB && partA === partB);
           };
 
-          const collections = w.require('WAWebCollections');
+          const collections = safeRequire('WAWebCollections');
+          const ChatCol = collections?.Chat;
           const MsgCollection = collections?.Msg;
+          const MsgKey = safeRequire('WAWebMsgKey');
 
-          // Localiza o chat
+          log(`Collections: ChatCol=${Boolean(ChatCol)}, MsgCol=${Boolean(MsgCollection)}, MsgKey=${Boolean(MsgKey)}`);
+
+          // 1. Localiza o Chat
           let chat: any = null;
           if (w.WWebJS?.getChat) {
             try {
               chat = await w.WWebJS.getChat(chatId, { getAsModel: false });
-            } catch (_) {}
+              log(`Chat via WWebJS.getChat: ${Boolean(chat)}`);
+            } catch (e: any) {
+              log(`WWebJS.getChat erro: ${e?.message}`);
+            }
           }
-          if (!chat) {
-            chat =
-              collections.Chat?.get?.(chatId) ||
-              collections.Chat?.getModelsArray?.().find((c: any) => serializeId(c.id) === chatId);
-          }
-          if (!chat && collections.Chat?.find) {
+          if (!chat && ChatCol) {
             try {
-              chat = await collections.Chat.find(chatId);
+              chat =
+                ChatCol.get?.(chatId) ||
+                ChatCol.getModelsArray?.().find((c: any) => serializeId(c.id) === chatId);
+              log(`Chat via ChatCol: ${Boolean(chat)}`);
+            } catch (_) {}
+          }
+          if (!chat && ChatCol?.find) {
+            try {
+              chat = await ChatCol.find(chatId);
+              log(`Chat via ChatCol.find: ${Boolean(chat)}`);
             } catch (_) {}
           }
           if (!chat) {
-            const wid = w.require?.('WAWebWidFactory')?.createWid?.(chatId);
-            if (wid) {
-              chat = collections.Chat?.get?.(wid) || (await collections.Chat?.find?.(wid));
+            const widFactory = safeRequire('WAWebWidFactory');
+            const wid = widFactory?.createWid?.(chatId);
+            if (wid && ChatCol) {
+              chat = ChatCol.get?.(wid) || (await ChatCol.find?.(wid));
+              log(`Chat via WidFactory: ${Boolean(chat)}`);
             }
           }
 
-          // Localiza todas as mensagens selecionadas
+          // 2. Localiza cada mensagem
           const foundMsgs: any[] = [];
           for (const msgId of messageIds) {
-            let msg = MsgCollection?.get?.(msgId);
+            let msg: any = null;
+
+            if (MsgCollection?.get) {
+              try {
+                msg = MsgCollection.get(msgId);
+              } catch (_) {}
+            }
+
+            if (!msg && MsgKey?.fromString && MsgCollection?.get) {
+              try {
+                const keyObj = MsgKey.fromString(msgId);
+                if (keyObj) msg = MsgCollection.get(keyObj);
+              } catch (_) {}
+            }
+
             if (!msg && MsgCollection?.getMessagesById) {
               try {
                 const fetched = await MsgCollection.getMessagesById([msgId]);
@@ -5069,154 +5121,267 @@ export class WhatsAppService {
             }
 
             if (!msg && chat?.msgs) {
-              const mList = chat.msgs.getModelsArray?.() || [];
-              msg = mList.find((m: any) => matchId(serializeId(m.id), msgId));
+              try {
+                const mList = chat.msgs.getModelsArray?.() || [];
+                msg = mList.find((m: any) => matchId(serializeId(m.id), msgId));
+              } catch (_) {}
             }
 
-            if (!msg) {
-              const allChats = collections.Chat?.getModelsArray?.() || [];
-              for (const c of allChats) {
-                const mList = c?.msgs?.getModelsArray?.() || [];
-                const found = mList.find((m: any) => matchId(serializeId(m.id), msgId));
-                if (found) {
-                  msg = found;
-                  break;
+            if (!msg && ChatCol?.getModelsArray) {
+              try {
+                const allChats = ChatCol.getModelsArray() || [];
+                for (const c of allChats) {
+                  const mList = c?.msgs?.getModelsArray?.() || [];
+                  const found = mList.find((m: any) => matchId(serializeId(m.id), msgId));
+                  if (found) {
+                    msg = found;
+                    break;
+                  }
                 }
-              }
+              } catch (_) {}
             }
 
             if (msg) {
               foundMsgs.push(msg);
+              log(`Msg localizada: ${serializeId(msg.id)}`);
+            } else {
+              log(`Msg NÃO localizada: ${msgId}`);
             }
           }
 
-          if (foundMsgs.length === 0) {
-            return { success: false, deletedCount: 0, error: 'Mensagens não localizadas na página' };
-          }
+          log(`Total localizadas: ${foundMsgs.length} de ${messageIds.length}`);
 
-          if (!chat && foundMsgs[0]?.id?.remote) {
-            const remote = foundMsgs[0].id.remote;
-            chat = collections.Chat?.get?.(remote) || (await collections.Chat?.find?.(remote));
+          if (foundMsgs.length === 0) {
+            return {
+              success: false,
+              deletedCount: 0,
+              error: 'Mensagens não localizadas na página do WhatsApp',
+              evalLogs,
+            };
           }
 
           if (!chat) {
-            return { success: false, deletedCount: 0, error: 'Chat não encontrado' };
+            for (const m of foundMsgs) {
+              if (m.chat) {
+                chat = m.chat;
+                break;
+              }
+              if (m.id?.remote && ChatCol) {
+                try {
+                  chat = ChatCol.get?.(m.id.remote) || (await ChatCol.find?.(m.id.remote));
+                  if (chat) break;
+                } catch (_) {}
+              }
+            }
           }
 
-          const Cmd = w.require?.('WAWebCmd')?.Cmd;
-          const MsgCap = w.require?.('WAWebMsgActionCapability');
-          const isNewWweb = w.WWebJS?.compareWwebVersions
-            ? w.WWebJS.compareWwebVersions(w.Debug?.VERSION || '2.3000.0', '>=', '2.3000.0')
-            : true;
+          if (!chat) {
+            log('Erro: Conversa não encontrada');
+            return { success: false, deletedCount: 0, error: 'Conversa não encontrada', evalLogs };
+          }
+
+          const waWebCmdMod = safeRequire('WAWebCmd');
+          const Cmd = waWebCmdMod?.Cmd || waWebCmdMod || w.Store?.Cmd;
+          log(`Cmd disponível: ${Boolean(Cmd)}`);
+          if (Cmd) {
+            const fns = Object.keys(Cmd).filter((k) => typeof Cmd[k] === 'function');
+            log(`Funções de Cmd: ${fns.join(', ')}`);
+          }
 
           let deletedCount = 0;
 
           if (everyone) {
-            const canRevokeList = foundMsgs.filter((m: any) => {
-              if (MsgCap?.canSenderRevokeMsg && MsgCap.canSenderRevokeMsg(m)) return true;
-              if (MsgCap?.canAdminRevokeMsg && MsgCap.canAdminRevokeMsg(m)) return true;
-              return Boolean(m.id?.fromMe);
-            });
+            log(`Tentando revogação para todos de ${foundMsgs.length} mensagem(ns)...`);
 
-            const msgsToRevoke = canRevokeList.length > 0 ? canRevokeList : foundMsgs;
-
-            if (Cmd?.sendRevokeMsgs) {
+            // Estratégia 1: Bulk moderno ({ list: foundMsgs, type: 'message' }, { clearMedia: true })
+            if (typeof Cmd?.sendRevokeMsgs === 'function') {
               try {
-                if (isNewWweb) {
-                  await Cmd.sendRevokeMsgs(
-                    chat,
-                    { list: msgsToRevoke, type: 'message' },
-                    { clearMedia: true }
-                  );
-                } else {
-                  await Cmd.sendRevokeMsgs(chat, msgsToRevoke, {
-                    clearMedia: true,
-                    type: msgsToRevoke[0]?.id?.fromMe ? 'Sender' : 'Admin',
-                  });
-                }
-                deletedCount = msgsToRevoke.length;
-              } catch (bulkErr) {
-                console.warn('[deleteMessages] Erro revoke em lote, tentando unitário:', bulkErr);
-                for (const m of msgsToRevoke) {
+                await Cmd.sendRevokeMsgs(
+                  chat,
+                  { list: foundMsgs, type: 'message' },
+                  { clearMedia: true }
+                );
+                deletedCount = foundMsgs.length;
+                log(`sendRevokeMsgs bulk moderno OK (${deletedCount} msgs)`);
+              } catch (e: any) {
+                log(`sendRevokeMsgs bulk moderno erro: ${e?.message}`);
+              }
+            }
+
+            // Estratégia 2: Unitário se o lote falhou ou não completou
+            if (deletedCount === 0) {
+              for (const msg of foundMsgs) {
+                const targetChat =
+                  msg.chat ||
+                  (msg.id?.remote && ChatCol?.get?.(msg.id.remote)) ||
+                  (msg.id?.remote && (await ChatCol?.find?.(msg.id.remote))) ||
+                  chat;
+
+                let successForThisMsg = false;
+
+                // 2.1: Moderno unitário ({ list: [msg], type: 'message' }, { clearMedia: true })
+                if (!successForThisMsg && typeof Cmd?.sendRevokeMsgs === 'function') {
                   try {
-                    if (isNewWweb) {
-                      await Cmd.sendRevokeMsgs(chat, { list: [m], type: 'message' }, { clearMedia: true });
-                    } else {
-                      await Cmd.sendRevokeMsgs(chat, [m], {
-                        clearMedia: true,
-                        type: m.id?.fromMe ? 'Sender' : 'Admin',
-                      });
-                    }
-                    deletedCount++;
-                  } catch (itemErr) {
-                    console.error('[deleteMessages] Erro revoke unitário:', itemErr);
+                    await Cmd.sendRevokeMsgs(
+                      targetChat,
+                      { list: [msg], type: 'message' },
+                      { clearMedia: true }
+                    );
+                    successForThisMsg = true;
+                    log(`sendRevokeMsgs moderno unitário OK: ${serializeId(msg.id)}`);
+                  } catch (e: any) {
+                    log(`sendRevokeMsgs moderno unitário erro: ${e?.message}`);
                   }
+                }
+
+                // 2.2: Legado unitário ([msg], { clearMedia: true, type: 'Sender'|'Admin' })
+                if (!successForThisMsg && typeof Cmd?.sendRevokeMsgs === 'function') {
+                  try {
+                    await Cmd.sendRevokeMsgs(targetChat, [msg], {
+                      clearMedia: true,
+                      type: msg.id?.fromMe ? 'Sender' : 'Admin',
+                    });
+                    successForThisMsg = true;
+                    log(`sendRevokeMsgs legado unitário OK: ${serializeId(msg.id)}`);
+                  } catch (e: any) {
+                    log(`sendRevokeMsgs legado unitário erro: ${e?.message}`);
+                  }
+                }
+
+                // 2.3: targetChat.sendRevokeMsgs
+                if (!successForThisMsg && typeof targetChat?.sendRevokeMsgs === 'function') {
+                  try {
+                    await targetChat.sendRevokeMsgs([msg], targetChat);
+                    successForThisMsg = true;
+                    log(`targetChat.sendRevokeMsgs OK: ${serializeId(msg.id)}`);
+                  } catch (e: any) {
+                    log(`targetChat.sendRevokeMsgs erro: ${e?.message}`);
+                  }
+                }
+
+                if (successForThisMsg) {
+                  deletedCount++;
                 }
               }
             }
           } else {
-            if (Cmd?.sendDeleteMsgs) {
+            log(`Tentando apagar para mim ${foundMsgs.length} mensagem(ns)...`);
+
+            // Estratégia 1: Bulk moderno ({ list: foundMsgs, type: 'message' }, true)
+            if (typeof Cmd?.sendDeleteMsgs === 'function') {
               try {
-                if (isNewWweb) {
-                  await Cmd.sendDeleteMsgs(
-                    chat,
-                    { list: foundMsgs, type: 'message' },
-                    true
-                  );
-                } else {
-                  await Cmd.sendDeleteMsgs(chat, foundMsgs, true);
-                }
+                await Cmd.sendDeleteMsgs(
+                  chat,
+                  { list: foundMsgs, type: 'message' },
+                  true
+                );
                 deletedCount = foundMsgs.length;
-              } catch (bulkErr) {
-                console.warn('[deleteMessages] Erro delete em lote, tentando unitário:', bulkErr);
-                for (const m of foundMsgs) {
+                log(`sendDeleteMsgs bulk moderno OK (${deletedCount} msgs)`);
+              } catch (e: any) {
+                log(`sendDeleteMsgs bulk moderno erro: ${e?.message}`);
+              }
+            }
+
+            // Estratégia 2: Unitário se o lote falhou ou não completou
+            if (deletedCount === 0) {
+              for (const msg of foundMsgs) {
+                const targetChat =
+                  msg.chat ||
+                  (msg.id?.remote && ChatCol?.get?.(msg.id.remote)) ||
+                  (msg.id?.remote && (await ChatCol?.find?.(msg.id.remote))) ||
+                  chat;
+
+                let successForThisMsg = false;
+
+                // 2.1: Moderno unitário ({ list: [msg], type: 'message' }, true)
+                if (!successForThisMsg && typeof Cmd?.sendDeleteMsgs === 'function') {
                   try {
-                    if (isNewWweb) {
-                      await Cmd.sendDeleteMsgs(chat, { list: [m], type: 'message' }, true);
-                    } else {
-                      await Cmd.sendDeleteMsgs(chat, [m], true);
-                    }
-                    deletedCount++;
-                  } catch (itemErr) {
-                    console.error('[deleteMessages] Erro delete unitário:', itemErr);
+                    await Cmd.sendDeleteMsgs(
+                      targetChat,
+                      { list: [msg], type: 'message' },
+                      true
+                    );
+                    successForThisMsg = true;
+                    log(`sendDeleteMsgs moderno unitário OK: ${serializeId(msg.id)}`);
+                  } catch (e: any) {
+                    log(`sendDeleteMsgs moderno unitário erro: ${e?.message}`);
                   }
+                }
+
+                // 2.2: Legado unitário ([msg], true)
+                if (!successForThisMsg && typeof Cmd?.sendDeleteMsgs === 'function') {
+                  try {
+                    await Cmd.sendDeleteMsgs(targetChat, [msg], true);
+                    successForThisMsg = true;
+                    log(`sendDeleteMsgs legado unitário OK: ${serializeId(msg.id)}`);
+                  } catch (e: any) {
+                    log(`sendDeleteMsgs legado unitário erro: ${e?.message}`);
+                  }
+                }
+
+                // 2.3: targetChat.sendDeleteMsgs
+                if (!successForThisMsg && typeof targetChat?.sendDeleteMsgs === 'function') {
+                  try {
+                    await targetChat.sendDeleteMsgs([msg], targetChat);
+                    successForThisMsg = true;
+                    log(`targetChat.sendDeleteMsgs OK: ${serializeId(msg.id)}`);
+                  } catch (e: any) {
+                    log(`targetChat.sendDeleteMsgs erro: ${e?.message}`);
+                  }
+                }
+
+                if (successForThisMsg) {
+                  deletedCount++;
                 }
               }
             }
           }
 
-          return { success: deletedCount > 0, deletedCount };
+          log(`Finalizado evaluate: deletedCount=${deletedCount}`);
+          return { success: deletedCount > 0, deletedCount, evalLogs };
         },
         payload
       );
 
+      if (res?.evalLogs && Array.isArray(res.evalLogs)) {
+        for (const line of res.evalLogs) {
+          writeLog(`[evaluate] ${line}`);
+        }
+      }
+
+      writeLog(`Resultado evaluate: success=${res?.success}, deletedCount=${res?.deletedCount}`);
+
       // Fallback Node-side com whatsapp-web.js Message.delete
       if (!res?.success || res.deletedCount === 0) {
+        writeLog('Tentando fallback Node-side via client.getMessageById...');
         let fallbackCount = 0;
         for (const msgId of payload.messageIds) {
           try {
             const msgObj = await (this.client as any).getMessageById(msgId);
+            writeLog(`getMessageById(${msgId}): encontrado=${Boolean(msgObj)}`);
             if (msgObj && typeof msgObj.delete === 'function') {
               await msgObj.delete(Boolean(payload.everyone), true);
               fallbackCount++;
+              writeLog(`msgObj.delete executado com sucesso para ${msgId}`);
             }
-          } catch (fallbackErr) {
-            console.warn('[deleteMessages] Fallback Message.delete failed for msgId:', msgId, fallbackErr);
+          } catch (fallbackErr: any) {
+            writeLog(`Fallback Message.delete falhou para ${msgId}: ${fallbackErr?.message || String(fallbackErr)}`);
           }
         }
         if (fallbackCount > 0) {
+          writeLog(`Fallback Node-side sucesso: deletedCount=${fallbackCount}`);
           return { success: true, deletedCount: fallbackCount };
         }
       }
 
       return res || { success: false, deletedCount: 0 };
     } catch (err: any) {
-      console.error('[WhatsAppService] Error in deleteMessages:', err);
+      writeLog(`Exceção fatal em deleteMessages: ${err?.message || String(err)}\n${err?.stack || ''}`);
       return { success: false, deletedCount: 0, error: err?.message || String(err) };
     }
   }
 
-  public async getHighResProfilePic(chatId: string): Promise<string | null> {
+    public async getHighResProfilePic(chatId: string): Promise<string | null> {
     if (!this.client || this.status !== 'ready') return null;
     try {
       if (typeof (this.client as any).getProfilePicUrl === 'function') {

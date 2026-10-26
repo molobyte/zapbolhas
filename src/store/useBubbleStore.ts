@@ -1952,10 +1952,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   deleteMessages: async (chatId: string, messageIds: string[], everyone: boolean = false) => {
     if (!chatId || messageIds.length === 0) return false;
 
-    // 1. Apaga imediatamente da interface do zapbolhas
-    get().deleteMessagesLocally(chatId, messageIds);
-
-    // 2. Apaga no aplicativo do WhatsApp (celular + web) via Electron
+    // 1. Apaga no aplicativo do WhatsApp (celular + web) via Electron
     if (window.electronAPI?.deleteMessages) {
       try {
         const res = await window.electronAPI.deleteMessages({
@@ -1963,13 +1960,19 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           messageIds,
           everyone,
         });
-        return res?.success ?? false;
+        if (res?.success) {
+          get().deleteMessagesLocally(chatId, messageIds);
+          return true;
+        } else {
+          console.warn('[useBubbleStore] Erro retornado ao excluir mensagens no WhatsApp:', res);
+          return false;
+        }
       } catch (err) {
         console.error('[useBubbleStore] Erro ao excluir mensagens no WhatsApp:', err);
         return false;
       }
     }
-    return true;
+    return false;
   },
 
   // Encaminhar mensagens para outro contato ou grupo
