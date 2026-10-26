@@ -5182,158 +5182,205 @@ export class WhatsAppService {
 
           const waWebCmdMod = safeRequire('WAWebCmd');
           const Cmd = waWebCmdMod?.Cmd || waWebCmdMod || w.Store?.Cmd;
-          log(`Cmd disponível: ${Boolean(Cmd)}`);
-          if (Cmd) {
-            const fns = Object.keys(Cmd).filter((k) => typeof Cmd[k] === 'function');
-            log(`Funções de Cmd: ${fns.join(', ')}`);
+          
+          const getAllMethods = (obj: any): string[] => {
+            if (!obj) return [];
+            const methods = new Set<string>();
+            let curr = obj;
+            while (curr && curr !== Object.prototype) {
+              for (const name of Object.getOwnPropertyNames(curr)) {
+                try {
+                  if (typeof curr[name] === 'function') methods.add(name);
+                } catch (_) {}
+              }
+              curr = Object.getPrototypeOf(curr);
+            }
+            return Array.from(methods);
+          };
+
+          const cmdMethods = getAllMethods(Cmd);
+          log(`Cmd disponível: ${Boolean(Cmd)}, métodos (${cmdMethods.length}): ${cmdMethods.slice(0, 20).join(', ')}`);
+          if (Cmd?.sendRevokeMsgs) {
+            log(`Cmd.sendRevokeMsgs source: ${String(Cmd.sendRevokeMsgs).slice(0, 200).replace(/\s+/g, ' ')}`);
           }
+          if (Cmd?.sendDeleteMsgs) {
+            log(`Cmd.sendDeleteMsgs source: ${String(Cmd.sendDeleteMsgs).slice(0, 200).replace(/\s+/g, ' ')}`);
+          }
+
+          // Diagnóstico de módulos Webpack disponíveis no WhatsApp Web
+          try {
+            const webpackCache = w.require?.c || {};
+            const modNames = Object.keys(webpackCache);
+            const actionMods = modNames.filter((m) => /revoke|delete|msgaction/i.test(m));
+            log(`Módulos webpack relacionados a delete/revoke: ${actionMods.slice(0, 15).join(', ')}`);
+          } catch (_) {}
+
+          // Função de verificação real: confirma se a mensagem de fato sumiu ou mudou para 'revoked'/'isDeleted'
+          const verifyMessageState = async (mModel: any, mChat: any): Promise<'revoked' | 'deleted' | 'alive'> => {
+            for (let checkAttempt = 0; checkAttempt < 5; checkAttempt++) {
+              await new Promise((r) => setTimeout(r, 80));
+              const currentM = MsgCollection?.get?.(mModel.id) || mChat?.msgs?.get?.(mModel.id);
+              if (!currentM) return 'deleted';
+              if (currentM.type === 'revoked' || currentM.__x_type === 'revoked' || currentM.isRevoked) {
+                return 'revoked';
+              }
+              if (currentM.isDeleted) return 'deleted';
+            }
+            return 'alive';
+          };
 
           let deletedCount = 0;
 
-          if (everyone) {
-            log(`Tentando revogação para todos de ${foundMsgs.length} mensagem(ns)...`);
+          for (const msg of foundMsgs) {
+            const targetChat =
+              msg.chat ||
+              (msg.id?.remote && ChatCol?.get?.(msg.id.remote)) ||
+              (msg.id?.remote && (await ChatCol?.find?.(msg.id.remote))) ||
+              chat;
 
-            // Estratégia 1: Bulk moderno ({ list: foundMsgs, type: 'message' }, { clearMedia: true })
-            if (typeof Cmd?.sendRevokeMsgs === 'function') {
-              try {
-                await Cmd.sendRevokeMsgs(
-                  chat,
-                  { list: foundMsgs, type: 'message' },
-                  { clearMedia: true }
-                );
-                deletedCount = foundMsgs.length;
-                log(`sendRevokeMsgs bulk moderno OK (${deletedCount} msgs)`);
-              } catch (e: any) {
-                log(`sendRevokeMsgs bulk moderno erro: ${e?.message}`);
+            const isFromMe = Boolean(msg.id?.fromMe);
+            const msgCap = safeRequire('WAWebMsgActionCapability');
+            const canSender = msgCap?.canSenderRevokeMsg ? Boolean(msgCap.canSenderRevokeMsg(msg)) : isFromMe;
+            const canAdmin = msgCap?.canAdminRevokeMsg ? Boolean(msgCap.canAdminRevokeMsg(msg)) : false;
+            
+            log(`Msg ${serializeId(msg.id)}: fromMe=${isFromMe}, canSender=${canSender}, canAdmin=${canAdmin}, targetChat=${serializeId(targetChat?.id)}`);
+
+            let msgHandled = false;
+
+            if (everyone) {
+              log(`Iniciando tentativas de Revoke para todos na mensagem ${serializeId(msg.id)}...`);
+
+              // 1. Cmd.sendRevokeMsgs legado: (targetChat, [msg], { clearMedia: true, type: 'Sender'|'Admin' })
+              if (!msgHandled && typeof Cmd?.sendRevokeMsgs === 'function') {
+                try {
+                  const ret = await Cmd.sendRevokeMsgs(targetChat, [msg], {
+                    clearMedia: true,
+                    type: isFromMe ? 'Sender' : 'Admin',
+                  });
+                  log(`sendRevokeMsgs legado executado, ret=${JSON.stringify(ret)}`);
+                  const state = await verifyMessageState(msg, targetChat);
+                  if (state !== 'alive') {
+                    msgHandled = true;
+                    log(`sendRevokeMsgs legado CONFIRMADO no Store (${state})!`);
+                  } else {
+                    log('sendRevokeMsgs legado não alterou estado da mensagem');
+                  }
+                } catch (e: any) {
+                  log(`sendRevokeMsgs legado erro: ${e?.message}`);
+                }
+              }
+
+              // 2. Cmd.sendRevokeMsgs moderno: (targetChat, { list: [msg], type: 'message' }, { clearMedia: true })
+              if (!msgHandled && typeof Cmd?.sendRevokeMsgs === 'function') {
+                try {
+                  const ret = await Cmd.sendRevokeMsgs(
+                    targetChat,
+                    { list: [msg], type: 'message' },
+                    { clearMedia: true }
+                  );
+                  log(`sendRevokeMsgs moderno executado, ret=${JSON.stringify(ret)}`);
+                  const state = await verifyMessageState(msg, targetChat);
+                  if (state !== 'alive') {
+                    msgHandled = true;
+                    log(`sendRevokeMsgs moderno CONFIRMADO no Store (${state})!`);
+                  } else {
+                    log('sendRevokeMsgs moderno não alterou estado da mensagem');
+                  }
+                } catch (e: any) {
+                  log(`sendRevokeMsgs moderno erro: ${e?.message}`);
+                }
+              }
+
+              // 3. Cmd.sendRevokeMsgs com apenas (targetChat, [msg], { type })
+              if (!msgHandled && typeof Cmd?.sendRevokeMsgs === 'function') {
+                try {
+                  const ret = await Cmd.sendRevokeMsgs(targetChat, [msg], {
+                    type: isFromMe ? 'Sender' : 'Admin',
+                  });
+                  log(`sendRevokeMsgs com {type} executado, ret=${JSON.stringify(ret)}`);
+                  const state = await verifyMessageState(msg, targetChat);
+                  if (state !== 'alive') {
+                    msgHandled = true;
+                    log(`sendRevokeMsgs {type} CONFIRMADO no Store (${state})!`);
+                  }
+                } catch (e: any) {
+                  log(`sendRevokeMsgs {type} erro: ${e?.message}`);
+                }
+              }
+
+              // 4. targetChat.sendRevokeMsgs([msg], targetChat)
+              if (!msgHandled && typeof targetChat?.sendRevokeMsgs === 'function') {
+                try {
+                  const ret = await targetChat.sendRevokeMsgs([msg], targetChat);
+                  log(`targetChat.sendRevokeMsgs executado, ret=${JSON.stringify(ret)}`);
+                  const state = await verifyMessageState(msg, targetChat);
+                  if (state !== 'alive') {
+                    msgHandled = true;
+                    log(`targetChat.sendRevokeMsgs CONFIRMADO no Store (${state})!`);
+                  }
+                } catch (e: any) {
+                  log(`targetChat.sendRevokeMsgs erro: ${e?.message}`);
+                }
+              }
+            } else {
+              log(`Iniciando tentativas de Delete para mim na mensagem ${serializeId(msg.id)}...`);
+
+              // 1. Cmd.sendDeleteMsgs padrão: (targetChat, [msg], true)
+              if (!msgHandled && typeof Cmd?.sendDeleteMsgs === 'function') {
+                try {
+                  const ret = await Cmd.sendDeleteMsgs(targetChat, [msg], true);
+                  log(`sendDeleteMsgs [msg], true executado, ret=${JSON.stringify(ret)}`);
+                  const state = await verifyMessageState(msg, targetChat);
+                  if (state !== 'alive') {
+                    msgHandled = true;
+                    log(`sendDeleteMsgs [msg] CONFIRMADO no Store (${state})!`);
+                  } else {
+                    log('sendDeleteMsgs [msg] não alterou estado da mensagem');
+                  }
+                } catch (e: any) {
+                  log(`sendDeleteMsgs [msg] erro: ${e?.message}`);
+                }
+              }
+
+              // 2. Cmd.sendDeleteMsgs moderno: (targetChat, { list: [msg], type: 'message' }, true)
+              if (!msgHandled && typeof Cmd?.sendDeleteMsgs === 'function') {
+                try {
+                  const ret = await Cmd.sendDeleteMsgs(
+                    targetChat,
+                    { list: [msg], type: 'message' },
+                    true
+                  );
+                  log(`sendDeleteMsgs {list}, true executado, ret=${JSON.stringify(ret)}`);
+                  const state = await verifyMessageState(msg, targetChat);
+                  if (state !== 'alive') {
+                    msgHandled = true;
+                    log(`sendDeleteMsgs {list} CONFIRMADO no Store (${state})!`);
+                  } else {
+                    log('sendDeleteMsgs {list} não alterou estado da mensagem');
+                  }
+                } catch (e: any) {
+                  log(`sendDeleteMsgs {list} erro: ${e?.message}`);
+                }
+              }
+
+              // 3. targetChat.sendDeleteMsgs([msg], targetChat)
+              if (!msgHandled && typeof targetChat?.sendDeleteMsgs === 'function') {
+                try {
+                  const ret = await targetChat.sendDeleteMsgs([msg], targetChat);
+                  log(`targetChat.sendDeleteMsgs executado, ret=${JSON.stringify(ret)}`);
+                  const state = await verifyMessageState(msg, targetChat);
+                  if (state !== 'alive') {
+                    msgHandled = true;
+                    log(`targetChat.sendDeleteMsgs CONFIRMADO no Store (${state})!`);
+                  }
+                } catch (e: any) {
+                  log(`targetChat.sendDeleteMsgs erro: ${e?.message}`);
+                }
               }
             }
 
-            // Estratégia 2: Unitário se o lote falhou ou não completou
-            if (deletedCount === 0) {
-              for (const msg of foundMsgs) {
-                const targetChat =
-                  msg.chat ||
-                  (msg.id?.remote && ChatCol?.get?.(msg.id.remote)) ||
-                  (msg.id?.remote && (await ChatCol?.find?.(msg.id.remote))) ||
-                  chat;
-
-                let successForThisMsg = false;
-
-                // 2.1: Moderno unitário ({ list: [msg], type: 'message' }, { clearMedia: true })
-                if (!successForThisMsg && typeof Cmd?.sendRevokeMsgs === 'function') {
-                  try {
-                    await Cmd.sendRevokeMsgs(
-                      targetChat,
-                      { list: [msg], type: 'message' },
-                      { clearMedia: true }
-                    );
-                    successForThisMsg = true;
-                    log(`sendRevokeMsgs moderno unitário OK: ${serializeId(msg.id)}`);
-                  } catch (e: any) {
-                    log(`sendRevokeMsgs moderno unitário erro: ${e?.message}`);
-                  }
-                }
-
-                // 2.2: Legado unitário ([msg], { clearMedia: true, type: 'Sender'|'Admin' })
-                if (!successForThisMsg && typeof Cmd?.sendRevokeMsgs === 'function') {
-                  try {
-                    await Cmd.sendRevokeMsgs(targetChat, [msg], {
-                      clearMedia: true,
-                      type: msg.id?.fromMe ? 'Sender' : 'Admin',
-                    });
-                    successForThisMsg = true;
-                    log(`sendRevokeMsgs legado unitário OK: ${serializeId(msg.id)}`);
-                  } catch (e: any) {
-                    log(`sendRevokeMsgs legado unitário erro: ${e?.message}`);
-                  }
-                }
-
-                // 2.3: targetChat.sendRevokeMsgs
-                if (!successForThisMsg && typeof targetChat?.sendRevokeMsgs === 'function') {
-                  try {
-                    await targetChat.sendRevokeMsgs([msg], targetChat);
-                    successForThisMsg = true;
-                    log(`targetChat.sendRevokeMsgs OK: ${serializeId(msg.id)}`);
-                  } catch (e: any) {
-                    log(`targetChat.sendRevokeMsgs erro: ${e?.message}`);
-                  }
-                }
-
-                if (successForThisMsg) {
-                  deletedCount++;
-                }
-              }
-            }
-          } else {
-            log(`Tentando apagar para mim ${foundMsgs.length} mensagem(ns)...`);
-
-            // Estratégia 1: Bulk moderno ({ list: foundMsgs, type: 'message' }, true)
-            if (typeof Cmd?.sendDeleteMsgs === 'function') {
-              try {
-                await Cmd.sendDeleteMsgs(
-                  chat,
-                  { list: foundMsgs, type: 'message' },
-                  true
-                );
-                deletedCount = foundMsgs.length;
-                log(`sendDeleteMsgs bulk moderno OK (${deletedCount} msgs)`);
-              } catch (e: any) {
-                log(`sendDeleteMsgs bulk moderno erro: ${e?.message}`);
-              }
-            }
-
-            // Estratégia 2: Unitário se o lote falhou ou não completou
-            if (deletedCount === 0) {
-              for (const msg of foundMsgs) {
-                const targetChat =
-                  msg.chat ||
-                  (msg.id?.remote && ChatCol?.get?.(msg.id.remote)) ||
-                  (msg.id?.remote && (await ChatCol?.find?.(msg.id.remote))) ||
-                  chat;
-
-                let successForThisMsg = false;
-
-                // 2.1: Moderno unitário ({ list: [msg], type: 'message' }, true)
-                if (!successForThisMsg && typeof Cmd?.sendDeleteMsgs === 'function') {
-                  try {
-                    await Cmd.sendDeleteMsgs(
-                      targetChat,
-                      { list: [msg], type: 'message' },
-                      true
-                    );
-                    successForThisMsg = true;
-                    log(`sendDeleteMsgs moderno unitário OK: ${serializeId(msg.id)}`);
-                  } catch (e: any) {
-                    log(`sendDeleteMsgs moderno unitário erro: ${e?.message}`);
-                  }
-                }
-
-                // 2.2: Legado unitário ([msg], true)
-                if (!successForThisMsg && typeof Cmd?.sendDeleteMsgs === 'function') {
-                  try {
-                    await Cmd.sendDeleteMsgs(targetChat, [msg], true);
-                    successForThisMsg = true;
-                    log(`sendDeleteMsgs legado unitário OK: ${serializeId(msg.id)}`);
-                  } catch (e: any) {
-                    log(`sendDeleteMsgs legado unitário erro: ${e?.message}`);
-                  }
-                }
-
-                // 2.3: targetChat.sendDeleteMsgs
-                if (!successForThisMsg && typeof targetChat?.sendDeleteMsgs === 'function') {
-                  try {
-                    await targetChat.sendDeleteMsgs([msg], targetChat);
-                    successForThisMsg = true;
-                    log(`targetChat.sendDeleteMsgs OK: ${serializeId(msg.id)}`);
-                  } catch (e: any) {
-                    log(`targetChat.sendDeleteMsgs erro: ${e?.message}`);
-                  }
-                }
-
-                if (successForThisMsg) {
-                  deletedCount++;
-                }
-              }
+            if (msgHandled) {
+              deletedCount++;
             }
           }
 
