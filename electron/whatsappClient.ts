@@ -5095,27 +5095,29 @@ export class WhatsAppService {
             }
           }
 
-          // 2. Localiza cada mensagem
+          // 2. Localiza cada mensagem (tratando sufixo _out)
           const foundMsgs: any[] = [];
-          for (const msgId of messageIds) {
+          for (const rawMsgId of messageIds) {
+            const cleanId = String(rawMsgId || '').replace(/_out$/, '');
+            const altId = cleanId.endsWith('_out') ? cleanId : `${cleanId}_out`;
             let msg: any = null;
 
             if (MsgCollection?.get) {
               try {
-                msg = MsgCollection.get(msgId);
+                msg = MsgCollection.get(cleanId) || MsgCollection.get(altId) || MsgCollection.get(rawMsgId);
               } catch (_) {}
             }
 
             if (!msg && MsgKey?.fromString && MsgCollection?.get) {
               try {
-                const keyObj = MsgKey.fromString(msgId);
+                const keyObj = MsgKey.fromString(cleanId) || MsgKey.fromString(rawMsgId);
                 if (keyObj) msg = MsgCollection.get(keyObj);
               } catch (_) {}
             }
 
             if (!msg && MsgCollection?.getMessagesById) {
               try {
-                const fetched = await MsgCollection.getMessagesById([msgId]);
+                const fetched = await MsgCollection.getMessagesById([cleanId, altId, rawMsgId]);
                 msg = fetched?.messages?.[0];
               } catch (_) {}
             }
@@ -5123,7 +5125,7 @@ export class WhatsAppService {
             if (!msg && chat?.msgs) {
               try {
                 const mList = chat.msgs.getModelsArray?.() || [];
-                msg = mList.find((m: any) => matchId(serializeId(m.id), msgId));
+                msg = mList.find((m: any) => matchId(serializeId(m.id), cleanId) || matchId(serializeId(m.id), rawMsgId));
               } catch (_) {}
             }
 
@@ -5132,7 +5134,7 @@ export class WhatsAppService {
                 const allChats = ChatCol.getModelsArray() || [];
                 for (const c of allChats) {
                   const mList = c?.msgs?.getModelsArray?.() || [];
-                  const found = mList.find((m: any) => matchId(serializeId(m.id), msgId));
+                  const found = mList.find((m: any) => matchId(serializeId(m.id), cleanId) || matchId(serializeId(m.id), rawMsgId));
                   if (found) {
                     msg = found;
                     break;
@@ -5145,7 +5147,7 @@ export class WhatsAppService {
               foundMsgs.push(msg);
               log(`Msg localizada: ${serializeId(msg.id)}`);
             } else {
-              log(`Msg NÃO localizada: ${msgId}`);
+              log(`Msg NÃO localizada: ${rawMsgId}`);
             }
           }
 
@@ -5182,7 +5184,7 @@ export class WhatsAppService {
 
           const waWebCmdMod = safeRequire('WAWebCmd');
           const Cmd = waWebCmdMod?.Cmd || waWebCmdMod || w.Store?.Cmd;
-          
+
           const getAllMethods = (obj: any): string[] => {
             if (!obj) return [];
             const methods = new Set<string>();
@@ -5199,25 +5201,39 @@ export class WhatsAppService {
           };
 
           const cmdMethods = getAllMethods(Cmd);
-          log(`Cmd disponível: ${Boolean(Cmd)}, métodos (${cmdMethods.length}): ${cmdMethods.slice(0, 20).join(', ')}`);
-          if (Cmd?.sendRevokeMsgs) {
-            log(`Cmd.sendRevokeMsgs source: ${String(Cmd.sendRevokeMsgs).slice(0, 200).replace(/\s+/g, ' ')}`);
-          }
-          if (Cmd?.sendDeleteMsgs) {
-            log(`Cmd.sendDeleteMsgs source: ${String(Cmd.sendDeleteMsgs).slice(0, 200).replace(/\s+/g, ' ')}`);
+          log(`Cmd disponível: ${Boolean(Cmd)}, métodos (${cmdMethods.length}): ${cmdMethods.slice(0, 15).join(', ')}`);
+
+          // Abre a conversa via UI para garantir que os listeners de Cmd estejam montados
+          if (typeof Cmd?.openChatBottom === 'function' && chat) {
+            try {
+              await Cmd.openChatBottom({ chat });
+              log('Cmd.openChatBottom chamado para montar listeners');
+              await new Promise((r) => setTimeout(r, 200));
+            } catch (e: any) {
+              log(`Cmd.openChatBottom erro: ${e?.message}`);
+            }
           }
 
-          // Diagnóstico de módulos Webpack disponíveis no WhatsApp Web
-          try {
-            const webpackCache = w.require?.c || {};
-            const modNames = Object.keys(webpackCache);
-            const actionMods = modNames.filter((m) => /revoke|delete|msgaction/i.test(m));
-            log(`Módulos webpack relacionados a delete/revoke: ${actionMods.slice(0, 15).join(', ')}`);
-          } catch (_) {}
+          // Inspeciona os eventos registrados no bus Cmd
+          const evKeys = Object.keys(Cmd?._events || {});
+          log(`Cmd._events registrados: ${evKeys.join(', ')}`);
 
-          // Função de verificação real: confirma se a mensagem de fato sumiu ou mudou para 'revoked'/'isDeleted'
+          const getEventListenerFn = (evName: string): any => {
+            const ev = Cmd?._events?.[evName];
+            if (!ev) return null;
+            if (Array.isArray(ev)) {
+              return ev[0]?.callback || ev[0]?.fn || ev[0];
+            }
+            return ev?.callback || ev?.fn || ev;
+          };
+
+          const evRevokeFn = getEventListenerFn('send_revoke_msgs');
+          const evDeleteFn = getEventListenerFn('send_delete_msgs');
+          log(`Listeners Cmd: send_revoke=${Boolean(evRevokeFn)}, send_delete=${Boolean(evDeleteFn)}`);
+
+          // Função de verificação real: confirma se a mensagem de fato mudou para 'revoked'/'isDeleted'
           const verifyMessageState = async (mModel: any, mChat: any): Promise<'revoked' | 'deleted' | 'alive'> => {
-            for (let checkAttempt = 0; checkAttempt < 5; checkAttempt++) {
+            for (let checkAttempt = 0; checkAttempt < 6; checkAttempt++) {
               await new Promise((r) => setTimeout(r, 80));
               const currentM = MsgCollection?.get?.(mModel.id) || mChat?.msgs?.get?.(mModel.id);
               if (!currentM) return 'deleted';
@@ -5242,136 +5258,133 @@ export class WhatsAppService {
             const msgCap = safeRequire('WAWebMsgActionCapability');
             const canSender = msgCap?.canSenderRevokeMsg ? Boolean(msgCap.canSenderRevokeMsg(msg)) : isFromMe;
             const canAdmin = msgCap?.canAdminRevokeMsg ? Boolean(msgCap.canAdminRevokeMsg(msg)) : false;
-            
-            log(`Msg ${serializeId(msg.id)}: fromMe=${isFromMe}, canSender=${canSender}, canAdmin=${canAdmin}, targetChat=${serializeId(targetChat?.id)}`);
+            const canRevoke = canSender || canAdmin;
+
+            log(`Msg ${serializeId(msg.id)}: fromMe=${isFromMe}, canSender=${canSender}, canAdmin=${canAdmin}, canRevoke=${canRevoke}, targetChat=${serializeId(targetChat?.id)}`);
 
             let msgHandled = false;
 
-            if (everyone) {
-              log(`Iniciando tentativas de Revoke para todos na mensagem ${serializeId(msg.id)}...`);
+            // 1. Tenta Revoke para todos se solicitado e suportado pelas regras do WhatsApp
+            if (everyone && canRevoke) {
+              log(`Iniciando Revoke para todos na msg ${serializeId(msg.id)}...`);
 
-              // 1. Cmd.sendRevokeMsgs legado: (targetChat, [msg], { clearMedia: true, type: 'Sender'|'Admin' })
+              // 1.1: Cmd.sendRevokeMsgs legado: (targetChat, [msg], { clearMedia: true, type: 'Sender'|'Admin' })
               if (!msgHandled && typeof Cmd?.sendRevokeMsgs === 'function') {
                 try {
-                  const ret = await Cmd.sendRevokeMsgs(targetChat, [msg], {
+                  await Cmd.sendRevokeMsgs(targetChat, [msg], {
                     clearMedia: true,
                     type: isFromMe ? 'Sender' : 'Admin',
                   });
-                  log(`sendRevokeMsgs legado executado, ret=${JSON.stringify(ret)}`);
                   const state = await verifyMessageState(msg, targetChat);
                   if (state !== 'alive') {
                     msgHandled = true;
-                    log(`sendRevokeMsgs legado CONFIRMADO no Store (${state})!`);
-                  } else {
-                    log('sendRevokeMsgs legado não alterou estado da mensagem');
+                    log(`sendRevokeMsgs legado CONFIRMADO (${state})!`);
                   }
                 } catch (e: any) {
                   log(`sendRevokeMsgs legado erro: ${e?.message}`);
                 }
               }
 
-              // 2. Cmd.sendRevokeMsgs moderno: (targetChat, { list: [msg], type: 'message' }, { clearMedia: true })
+              // 1.2: Cmd.sendRevokeMsgs moderno: (targetChat, { list: [msg], type: 'message' }, { clearMedia: true })
               if (!msgHandled && typeof Cmd?.sendRevokeMsgs === 'function') {
                 try {
-                  const ret = await Cmd.sendRevokeMsgs(
+                  await Cmd.sendRevokeMsgs(
                     targetChat,
                     { list: [msg], type: 'message' },
                     { clearMedia: true }
                   );
-                  log(`sendRevokeMsgs moderno executado, ret=${JSON.stringify(ret)}`);
                   const state = await verifyMessageState(msg, targetChat);
                   if (state !== 'alive') {
                     msgHandled = true;
-                    log(`sendRevokeMsgs moderno CONFIRMADO no Store (${state})!`);
-                  } else {
-                    log('sendRevokeMsgs moderno não alterou estado da mensagem');
+                    log(`sendRevokeMsgs moderno CONFIRMADO (${state})!`);
                   }
                 } catch (e: any) {
                   log(`sendRevokeMsgs moderno erro: ${e?.message}`);
                 }
               }
 
-              // 3. Cmd.sendRevokeMsgs com apenas (targetChat, [msg], { type })
-              if (!msgHandled && typeof Cmd?.sendRevokeMsgs === 'function') {
+              // 1.3: Invocação direta do listener evRevokeFn
+              if (!msgHandled && typeof evRevokeFn === 'function') {
                 try {
-                  const ret = await Cmd.sendRevokeMsgs(targetChat, [msg], {
+                  await evRevokeFn(targetChat, [msg], {
+                    clearMedia: true,
                     type: isFromMe ? 'Sender' : 'Admin',
                   });
-                  log(`sendRevokeMsgs com {type} executado, ret=${JSON.stringify(ret)}`);
                   const state = await verifyMessageState(msg, targetChat);
                   if (state !== 'alive') {
                     msgHandled = true;
-                    log(`sendRevokeMsgs {type} CONFIRMADO no Store (${state})!`);
+                    log(`evRevokeFn direto CONFIRMADO (${state})!`);
                   }
                 } catch (e: any) {
-                  log(`sendRevokeMsgs {type} erro: ${e?.message}`);
+                  log(`evRevokeFn erro: ${e?.message}`);
                 }
               }
+            }
 
-              // 4. targetChat.sendRevokeMsgs([msg], targetChat)
-              if (!msgHandled && typeof targetChat?.sendRevokeMsgs === 'function') {
-                try {
-                  const ret = await targetChat.sendRevokeMsgs([msg], targetChat);
-                  log(`targetChat.sendRevokeMsgs executado, ret=${JSON.stringify(ret)}`);
-                  const state = await verifyMessageState(msg, targetChat);
-                  if (state !== 'alive') {
-                    msgHandled = true;
-                    log(`targetChat.sendRevokeMsgs CONFIRMADO no Store (${state})!`);
-                  }
-                } catch (e: any) {
-                  log(`targetChat.sendRevokeMsgs erro: ${e?.message}`);
-                }
+            // 2. Se Revoke não é suportado (tempo expirado) ou se o usuário pediu Delete para mim, ou se Revoke falhou:
+            if (!msgHandled) {
+              if (everyone && !canRevoke) {
+                log(`Msg não pode ser revogada para todos (limite de tempo expirado). Executando Delete para mim.`);
+              } else if (everyone && !msgHandled) {
+                log(`Revoke para todos não surtiu efeito. Executando Delete para mim como alternativa.`);
+              } else {
+                log(`Iniciando Delete para mim na msg ${serializeId(msg.id)}...`);
               }
-            } else {
-              log(`Iniciando tentativas de Delete para mim na mensagem ${serializeId(msg.id)}...`);
 
-              // 1. Cmd.sendDeleteMsgs padrão: (targetChat, [msg], true)
+              // 2.1: Cmd.sendDeleteMsgs padrão: (targetChat, [msg], true)
               if (!msgHandled && typeof Cmd?.sendDeleteMsgs === 'function') {
                 try {
-                  const ret = await Cmd.sendDeleteMsgs(targetChat, [msg], true);
-                  log(`sendDeleteMsgs [msg], true executado, ret=${JSON.stringify(ret)}`);
+                  await Cmd.sendDeleteMsgs(targetChat, [msg], true);
                   const state = await verifyMessageState(msg, targetChat);
                   if (state !== 'alive') {
                     msgHandled = true;
-                    log(`sendDeleteMsgs [msg] CONFIRMADO no Store (${state})!`);
-                  } else {
-                    log('sendDeleteMsgs [msg] não alterou estado da mensagem');
+                    log(`sendDeleteMsgs [msg] CONFIRMADO (${state})!`);
                   }
                 } catch (e: any) {
                   log(`sendDeleteMsgs [msg] erro: ${e?.message}`);
                 }
               }
 
-              // 2. Cmd.sendDeleteMsgs moderno: (targetChat, { list: [msg], type: 'message' }, true)
+              // 2.2: Cmd.sendDeleteMsgs moderno: (targetChat, { list: [msg], type: 'message' }, true)
               if (!msgHandled && typeof Cmd?.sendDeleteMsgs === 'function') {
                 try {
-                  const ret = await Cmd.sendDeleteMsgs(
+                  await Cmd.sendDeleteMsgs(
                     targetChat,
                     { list: [msg], type: 'message' },
                     true
                   );
-                  log(`sendDeleteMsgs {list}, true executado, ret=${JSON.stringify(ret)}`);
                   const state = await verifyMessageState(msg, targetChat);
                   if (state !== 'alive') {
                     msgHandled = true;
-                    log(`sendDeleteMsgs {list} CONFIRMADO no Store (${state})!`);
-                  } else {
-                    log('sendDeleteMsgs {list} não alterou estado da mensagem');
+                    log(`sendDeleteMsgs {list} CONFIRMADO (${state})!`);
                   }
                 } catch (e: any) {
                   log(`sendDeleteMsgs {list} erro: ${e?.message}`);
                 }
               }
 
-              // 3. targetChat.sendDeleteMsgs([msg], targetChat)
-              if (!msgHandled && typeof targetChat?.sendDeleteMsgs === 'function') {
+              // 2.3: Invocação direta do listener evDeleteFn
+              if (!msgHandled && typeof evDeleteFn === 'function') {
                 try {
-                  const ret = await targetChat.sendDeleteMsgs([msg], targetChat);
-                  log(`targetChat.sendDeleteMsgs executado, ret=${JSON.stringify(ret)}`);
+                  await evDeleteFn(targetChat, [msg], true);
                   const state = await verifyMessageState(msg, targetChat);
                   if (state !== 'alive') {
                     msgHandled = true;
-                    log(`targetChat.sendDeleteMsgs CONFIRMADO no Store (${state})!`);
+                    log(`evDeleteFn direto CONFIRMADO (${state})!`);
+                  }
+                } catch (e: any) {
+                  log(`evDeleteFn erro: ${e?.message}`);
+                }
+              }
+
+              // 2.4: targetChat.sendDeleteMsgs([msg], targetChat)
+              if (!msgHandled && typeof targetChat?.sendDeleteMsgs === 'function') {
+                try {
+                  await targetChat.sendDeleteMsgs([msg], targetChat);
+                  const state = await verifyMessageState(msg, targetChat);
+                  if (state !== 'alive') {
+                    msgHandled = true;
+                    log(`targetChat.sendDeleteMsgs CONFIRMADO (${state})!`);
                   }
                 } catch (e: any) {
                   log(`targetChat.sendDeleteMsgs erro: ${e?.message}`);
@@ -5400,19 +5413,45 @@ export class WhatsAppService {
 
       // Fallback Node-side com whatsapp-web.js Message.delete
       if (!res?.success || res.deletedCount === 0) {
-        writeLog('Tentando fallback Node-side via client.getMessageById...');
+        writeLog('Evaluate não confirmou exclusão. Tentando fallback Node-side via client.getMessageById...');
         let fallbackCount = 0;
-        for (const msgId of payload.messageIds) {
+        for (const rawMsgId of payload.messageIds) {
+          const cleanId = String(rawMsgId || '').replace(/_out$/, '');
+          const altId = cleanId.endsWith('_out') ? cleanId : `${cleanId}_out`;
           try {
-            const msgObj = await (this.client as any).getMessageById(msgId);
-            writeLog(`getMessageById(${msgId}): encontrado=${Boolean(msgObj)}`);
+            let msgObj = await (this.client as any).getMessageById(cleanId).catch(() => null);
+            if (!msgObj) {
+              msgObj = await (this.client as any).getMessageById(altId).catch(() => null);
+            }
+            writeLog(`getMessageById(${cleanId}): encontrado=${Boolean(msgObj)}`);
             if (msgObj && typeof msgObj.delete === 'function') {
-              await msgObj.delete(Boolean(payload.everyone), true);
-              fallbackCount++;
-              writeLog(`msgObj.delete executado com sucesso para ${msgId}`);
+              let deleted = false;
+              if (payload.everyone) {
+                try {
+                  writeLog(`Chamando msgObj.delete(everyone=true, clearMedia=true)...`);
+                  await msgObj.delete(true, true);
+                  deleted = true;
+                  writeLog(`msgObj.delete(everyone=true) OK para ${cleanId}`);
+                } catch (revokeErr: any) {
+                  writeLog(`msgObj.delete(everyone=true) falhou (${revokeErr?.message || String(revokeErr)}), tentando delete para mim...`);
+                }
+              }
+              if (!deleted) {
+                try {
+                  writeLog(`Chamando msgObj.delete(everyone=false, clearMedia=true)...`);
+                  await msgObj.delete(false, true);
+                  deleted = true;
+                  writeLog(`msgObj.delete(everyone=false) OK para ${cleanId}`);
+                } catch (delErr: any) {
+                  writeLog(`msgObj.delete(everyone=false) falhou: ${delErr?.message || String(delErr)}`);
+                }
+              }
+              if (deleted) {
+                fallbackCount++;
+              }
             }
           } catch (fallbackErr: any) {
-            writeLog(`Fallback Message.delete falhou para ${msgId}: ${fallbackErr?.message || String(fallbackErr)}`);
+            writeLog(`Fallback Message.delete falhou para ${cleanId}: ${fallbackErr?.message || String(fallbackErr)}`);
           }
         }
         if (fallbackCount > 0) {

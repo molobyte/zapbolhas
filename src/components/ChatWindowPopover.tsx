@@ -1684,7 +1684,14 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       (m) => idSet.has(m.id) || Array.from(idSet).some((id) => isMatchingMessageId(m.id, id))
     );
     if (selectedList.length === 0) return false;
-    return selectedList.every((m) => m.fromMe);
+    return selectedList.every((m) => {
+      if (!m.fromMe) return false;
+      // WhatsApp só permite "Apagar para todos" dentro da janela de revogação (~48h: Hoje ou Ontem)
+      if (m.dateLabel && m.dateLabel !== 'Hoje' && m.dateLabel !== 'Ontem') {
+        return false;
+      }
+      return true;
+    });
   }, [messages, selectedMessageIds]);
 
   const handleDeleteSelectedMessages = useCallback(() => {
