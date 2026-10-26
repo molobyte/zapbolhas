@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:forward-messages', payload);
   },
 
+  deleteMessages: (payload: { chatId: string; messageIds: string[]; everyone?: boolean }) => {
+    return ipcRenderer.invoke('wa:delete-messages', payload);
+  },
+
   sendSticker: (payload: {
     chatId: string;
     stickerDataUrl: string;
@@ -199,6 +203,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
     ipcRenderer.on('wa:message-received', handler);
     return () => ipcRenderer.removeListener('wa:message-received', handler);
+  },
+
+  onMessageDeleted: (
+    callback: (payload: { chatId: string; messageId: string; everyone: boolean }) => void
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: { chatId: string; messageId: string; everyone: boolean }
+    ) => callback(payload);
+    ipcRenderer.on('wa:message-deleted', handler);
+    return () => ipcRenderer.removeListener('wa:message-deleted', handler);
   },
 
   onMessageAck: (callback: (payload: { chatId: string; messageId: string; ack: 'sent' | 'delivered' | 'read' }) => void) => {

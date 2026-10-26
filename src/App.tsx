@@ -17,6 +17,7 @@ export const App: React.FC = () => {
     receiveIncomingMessage,
     applyReactionUpdate,
     updateMessageAck,
+    deleteMessagesLocally,
     applyExternalSettingsUpdate,
   } = useBubbleStore();
 
@@ -117,6 +118,12 @@ export const App: React.FC = () => {
         })
       : () => {};
 
+    const unsubDeleted = api.onMessageDeleted
+      ? api.onMessageDeleted((payload) => {
+          deleteMessagesLocally(payload.chatId, [payload.messageId]);
+        })
+      : () => {};
+
     const unsubStatus = api.onStatusChange(({ status, error }) => {
       setWaStatus(status, error);
     });
@@ -134,6 +141,7 @@ export const App: React.FC = () => {
       unsubMsg();
       unsubReaction();
       unsubAck();
+      unsubDeleted();
       unsubStatus();
       unsubSettings();
     };
@@ -145,6 +153,7 @@ export const App: React.FC = () => {
     receiveIncomingMessage,
     applyReactionUpdate,
     updateMessageAck,
+    deleteMessagesLocally,
     applyExternalSettingsUpdate,
   ]);
 

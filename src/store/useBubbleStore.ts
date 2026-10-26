@@ -382,6 +382,11 @@ interface BubbleStoreState {
   markChatAsRead: (chatId: string) => Promise<void>;
   toggleMuteChat: (chatId: string) => Promise<void>;
   deleteMessagesLocally: (chatId: string, messageIds: string[]) => void;
+  deleteMessages: (
+    chatId: string,
+    messageIds: string[],
+    everyone?: boolean
+  ) => Promise<boolean>;
   forwardMessages: (targetChatId: string, messagesToForward: FormattedMessage[]) => Promise<void>;
   sendMessage: (
     text: string,
@@ -1941,6 +1946,30 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       },
       chats: updatedChats,
     });
+  },
+
+  // Apagar mensagens no WhatsApp (app do celular e WhatsApp Web) e na UI local
+  deleteMessages: async (chatId: string, messageIds: string[], everyone: boolean = false) => {
+    if (!chatId || messageIds.length === 0) return false;
+
+    // 1. Apaga imediatamente da interface do zapbolhas
+    get().deleteMessagesLocally(chatId, messageIds);
+
+    // 2. Apaga no aplicativo do WhatsApp (celular + web) via Electron
+    if (window.electronAPI?.deleteMessages) {
+      try {
+        const res = await window.electronAPI.deleteMessages({
+          chatId,
+          messageIds,
+          everyone,
+        });
+        return res?.success ?? false;
+      } catch (err) {
+        console.error('[useBubbleStore] Erro ao excluir mensagens no WhatsApp:', err);
+        return false;
+      }
+    }
+    return true;
   },
 
   // Encaminhar mensagens para outro contato ou grupo

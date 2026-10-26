@@ -841,6 +841,54 @@ export class WhatsAppService {
       }
     });
 
+    this.client.on('message_revoke_everyone', async (after: any, before: any) => {
+      try {
+        const serializeId = (val: any): string => {
+          if (!val) return '';
+          if (typeof val === 'string') return val;
+          return val._serialized || val.id || '';
+        };
+
+        const messageId = serializeId(after?.id) || serializeId(before?.id);
+        const chatId = serializeId(
+          after?.to || after?.from || after?.id?.remote || before?.to || before?.from || before?.id?.remote
+        );
+
+        if (messageId && chatId) {
+          this.emitToRenderer('wa:message-deleted', {
+            chatId,
+            messageId,
+            everyone: true,
+          });
+        }
+      } catch (err) {
+        console.error('[WhatsAppService] Error handling message_revoke_everyone:', err);
+      }
+    });
+
+    this.client.on('message_revoke_me', async (msg: any) => {
+      try {
+        const serializeId = (val: any): string => {
+          if (!val) return '';
+          if (typeof val === 'string') return val;
+          return val._serialized || val.id || '';
+        };
+
+        const messageId = serializeId(msg?.id);
+        const chatId = serializeId(msg?.to || msg?.from || msg?.id?.remote);
+
+        if (messageId && chatId) {
+          this.emitToRenderer('wa:message-deleted', {
+            chatId,
+            messageId,
+            everyone: false,
+          });
+        }
+      } catch (err) {
+        console.error('[WhatsAppService] Error handling message_revoke_me:', err);
+      }
+    });
+
     this.client.on('disconnected', (reason: string) => {
       console.warn('[WhatsAppService] Client disconnected:', reason);
       if (this.syncTimer) {
@@ -4939,6 +4987,232 @@ export class WhatsAppService {
     } catch (err) {
       console.error('[WhatsAppService] Error in forwardMessages:', err);
       return { success: false, forwardedCount: 0 };
+    }
+  }
+
+  public async deleteMessages(payload: {
+    chatId: string;
+    messageIds: string[];
+    everyone?: boolean;
+  }): Promise<{ success: boolean; deletedCount: number; error?: string }> {
+    if (!this.client?.pupPage || this.status !== 'ready') {
+      return { success: false, deletedCount: 0, error: 'WhatsApp não está conectado' };
+    }
+
+    try {
+      const res = await this.client.pupPage.evaluate(
+        async ({
+          chatId,
+          messageIds,
+          everyone,
+        }: {
+          chatId: string;
+          messageIds: string[];
+          everyone?: boolean;
+        }) => {
+          const w = window as any;
+          if (typeof w.require !== 'function') {
+            return { success: false, deletedCount: 0, error: 'WhatsApp Web require não disponível' };
+          }
+
+          const serializeId = (val: any): string => {
+            if (!val) return '';
+            if (typeof val === 'string') return val;
+            return val._serialized || val.id || '';
+          };
+
+          const matchId = (msgIdA: string, msgIdB: string): boolean => {
+            if (!msgIdA || !msgIdB) return false;
+            if (msgIdA === msgIdB) return true;
+            if (msgIdA.endsWith(`_${msgIdB}`) || msgIdB.endsWith(`_${msgIdA}`)) return true;
+            const partA = msgIdA.includes('_') ? msgIdA.split('_')[2] : msgIdA;
+            const partB = msgIdB.includes('_') ? msgIdB.split('_')[2] : msgIdB;
+            return Boolean(partA && partB && partA === partB);
+          };
+
+          const collections = w.require('WAWebCollections');
+          const MsgCollection = collections?.Msg;
+
+          // Localiza o chat
+          let chat: any = null;
+          if (w.WWebJS?.getChat) {
+            try {
+              chat = await w.WWebJS.getChat(chatId, { getAsModel: false });
+            } catch (_) {}
+          }
+          if (!chat) {
+            chat =
+              collections.Chat?.get?.(chatId) ||
+              collections.Chat?.getModelsArray?.().find((c: any) => serializeId(c.id) === chatId);
+          }
+          if (!chat && collections.Chat?.find) {
+            try {
+              chat = await collections.Chat.find(chatId);
+            } catch (_) {}
+          }
+          if (!chat) {
+            const wid = w.require?.('WAWebWidFactory')?.createWid?.(chatId);
+            if (wid) {
+              chat = collections.Chat?.get?.(wid) || (await collections.Chat?.find?.(wid));
+            }
+          }
+
+          // Localiza todas as mensagens selecionadas
+          const foundMsgs: any[] = [];
+          for (const msgId of messageIds) {
+            let msg = MsgCollection?.get?.(msgId);
+            if (!msg && MsgCollection?.getMessagesById) {
+              try {
+                const fetched = await MsgCollection.getMessagesById([msgId]);
+                msg = fetched?.messages?.[0];
+              } catch (_) {}
+            }
+
+            if (!msg && chat?.msgs) {
+              const mList = chat.msgs.getModelsArray?.() || [];
+              msg = mList.find((m: any) => matchId(serializeId(m.id), msgId));
+            }
+
+            if (!msg) {
+              const allChats = collections.Chat?.getModelsArray?.() || [];
+              for (const c of allChats) {
+                const mList = c?.msgs?.getModelsArray?.() || [];
+                const found = mList.find((m: any) => matchId(serializeId(m.id), msgId));
+                if (found) {
+                  msg = found;
+                  break;
+                }
+              }
+            }
+
+            if (msg) {
+              foundMsgs.push(msg);
+            }
+          }
+
+          if (foundMsgs.length === 0) {
+            return { success: false, deletedCount: 0, error: 'Mensagens não localizadas na página' };
+          }
+
+          if (!chat && foundMsgs[0]?.id?.remote) {
+            const remote = foundMsgs[0].id.remote;
+            chat = collections.Chat?.get?.(remote) || (await collections.Chat?.find?.(remote));
+          }
+
+          if (!chat) {
+            return { success: false, deletedCount: 0, error: 'Chat não encontrado' };
+          }
+
+          const Cmd = w.require?.('WAWebCmd')?.Cmd;
+          const MsgCap = w.require?.('WAWebMsgActionCapability');
+          const isNewWweb = w.WWebJS?.compareWwebVersions
+            ? w.WWebJS.compareWwebVersions(w.Debug?.VERSION || '2.3000.0', '>=', '2.3000.0')
+            : true;
+
+          let deletedCount = 0;
+
+          if (everyone) {
+            const canRevokeList = foundMsgs.filter((m: any) => {
+              if (MsgCap?.canSenderRevokeMsg && MsgCap.canSenderRevokeMsg(m)) return true;
+              if (MsgCap?.canAdminRevokeMsg && MsgCap.canAdminRevokeMsg(m)) return true;
+              return Boolean(m.id?.fromMe);
+            });
+
+            const msgsToRevoke = canRevokeList.length > 0 ? canRevokeList : foundMsgs;
+
+            if (Cmd?.sendRevokeMsgs) {
+              try {
+                if (isNewWweb) {
+                  await Cmd.sendRevokeMsgs(
+                    chat,
+                    { list: msgsToRevoke, type: 'message' },
+                    { clearMedia: true }
+                  );
+                } else {
+                  await Cmd.sendRevokeMsgs(chat, msgsToRevoke, {
+                    clearMedia: true,
+                    type: msgsToRevoke[0]?.id?.fromMe ? 'Sender' : 'Admin',
+                  });
+                }
+                deletedCount = msgsToRevoke.length;
+              } catch (bulkErr) {
+                console.warn('[deleteMessages] Erro revoke em lote, tentando unitário:', bulkErr);
+                for (const m of msgsToRevoke) {
+                  try {
+                    if (isNewWweb) {
+                      await Cmd.sendRevokeMsgs(chat, { list: [m], type: 'message' }, { clearMedia: true });
+                    } else {
+                      await Cmd.sendRevokeMsgs(chat, [m], {
+                        clearMedia: true,
+                        type: m.id?.fromMe ? 'Sender' : 'Admin',
+                      });
+                    }
+                    deletedCount++;
+                  } catch (itemErr) {
+                    console.error('[deleteMessages] Erro revoke unitário:', itemErr);
+                  }
+                }
+              }
+            }
+          } else {
+            if (Cmd?.sendDeleteMsgs) {
+              try {
+                if (isNewWweb) {
+                  await Cmd.sendDeleteMsgs(
+                    chat,
+                    { list: foundMsgs, type: 'message' },
+                    true
+                  );
+                } else {
+                  await Cmd.sendDeleteMsgs(chat, foundMsgs, true);
+                }
+                deletedCount = foundMsgs.length;
+              } catch (bulkErr) {
+                console.warn('[deleteMessages] Erro delete em lote, tentando unitário:', bulkErr);
+                for (const m of foundMsgs) {
+                  try {
+                    if (isNewWweb) {
+                      await Cmd.sendDeleteMsgs(chat, { list: [m], type: 'message' }, true);
+                    } else {
+                      await Cmd.sendDeleteMsgs(chat, [m], true);
+                    }
+                    deletedCount++;
+                  } catch (itemErr) {
+                    console.error('[deleteMessages] Erro delete unitário:', itemErr);
+                  }
+                }
+              }
+            }
+          }
+
+          return { success: deletedCount > 0, deletedCount };
+        },
+        payload
+      );
+
+      // Fallback Node-side com whatsapp-web.js Message.delete
+      if (!res?.success || res.deletedCount === 0) {
+        let fallbackCount = 0;
+        for (const msgId of payload.messageIds) {
+          try {
+            const msgObj = await (this.client as any).getMessageById(msgId);
+            if (msgObj && typeof msgObj.delete === 'function') {
+              await msgObj.delete(Boolean(payload.everyone), true);
+              fallbackCount++;
+            }
+          } catch (fallbackErr) {
+            console.warn('[deleteMessages] Fallback Message.delete failed for msgId:', msgId, fallbackErr);
+          }
+        }
+        if (fallbackCount > 0) {
+          return { success: true, deletedCount: fallbackCount };
+        }
+      }
+
+      return res || { success: false, deletedCount: 0 };
+    } catch (err: any) {
+      console.error('[WhatsAppService] Error in deleteMessages:', err);
+      return { success: false, deletedCount: 0, error: err?.message || String(err) };
     }
   }
 

@@ -251,6 +251,11 @@ export interface ElectronAPI {
   importStickersFromDisk?: () => Promise<StickerItem[]>;
   saveStickerToLibrary?: (dataUrl: string) => Promise<StickerItem | null>;
   deleteUserSticker?: (stickerId: string) => Promise<boolean>;
+  deleteMessages?: (payload: {
+    chatId: string;
+    messageIds: string[];
+    everyone?: boolean;
+  }) => Promise<{ success: boolean; deletedCount: number; error?: string }>;
   markAsRead: (chatId: string) => Promise<void>;
   markAsUnread?: (chatId: string) => Promise<void>;
   toggleMute?: (chatId: string, mute?: boolean) => Promise<boolean>;
@@ -290,6 +295,9 @@ export interface ElectronAPI {
   onReady: (callback: () => void) => () => void;
   onChatsLoaded: (callback: (chats: ChatSummary[]) => void) => () => void;
   onMessageReceived: (callback: (payload: IncomingMessagePayload) => void) => () => void;
+  onMessageDeleted?: (
+    callback: (payload: { chatId: string; messageId: string; everyone: boolean }) => void
+  ) => () => void;
   onMessageAck?: (callback: (payload: { chatId: string; messageId: string; ack: 'sent' | 'delivered' | 'read' }) => void) => () => void;
   onStatusChange: (callback: (status: { status: WaConnectionState; error?: string | null }) => void) => () => void;
 }

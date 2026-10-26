@@ -531,6 +531,17 @@ function registerIpcHandlers() {
   );
 
   ipcMain.handle(
+    'wa:delete-messages',
+    async (
+      _event,
+      payload: { chatId: string; messageIds: string[]; everyone?: boolean }
+    ) => {
+      if (!waService) return { success: false, deletedCount: 0 };
+      return await waService.deleteMessages(payload);
+    }
+  );
+
+  ipcMain.handle(
     'wa:send-message',
     async (
       _event,

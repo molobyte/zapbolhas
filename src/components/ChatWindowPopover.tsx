@@ -28,6 +28,7 @@ import { FormattedText } from './FormattedText';
 import { ReactionDetailsModal } from './ReactionDetailsModal';
 import { ChatContactSidebar } from './ChatContactSidebar';
 import { ForwardMessagesModal } from './ForwardMessagesModal';
+import { DeleteMessagesModal } from './DeleteMessagesModal';
 
 interface ChatWindowPopoverProps {
   onInteractiveEnter: () => void;
@@ -65,6 +66,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     fetchGroupParticipants,
     togglePinBubble,
     toggleMuteChat,
+    deleteMessages,
     deleteMessagesLocally,
     forwardMessages,
     pinnedChatIds,
@@ -108,6 +110,8 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [showForwardModal, setShowForwardModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeletingMessages, setIsDeletingMessages] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -404,6 +408,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     setIsSelectionMode(false);
     setSelectedMessageIds(new Set());
     setShowForwardModal(false);
+    setShowDeleteModal(false);
     if (highlightTimerRef.current) {
       clearTimeout(highlightTimerRef.current);
     }
@@ -1058,6 +1063,16 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
 
+      // -1.1 Se o modal de confirmação de exclusão estiver aberto, fecha-o
+      if (showDeleteModal) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isDeletingMessages) {
+          setShowDeleteModal(false);
+        }
+        return;
+      }
+
       // -1. Se o modal de encaminhar mensagens estiver aberto, fecha-o
       if (showForwardModal) {
         e.preventDefault();
@@ -1662,16 +1677,53 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     setSelectedMessageIds(new Set());
   }, []);
 
+  const canDeleteForEveryone = useMemo(() => {
+    if (selectedMessageIds.size === 0) return false;
+    const idSet = selectedMessageIds;
+    const selectedList = messages.filter(
+      (m) => idSet.has(m.id) || Array.from(idSet).some((id) => isMatchingMessageId(m.id, id))
+    );
+    if (selectedList.length === 0) return false;
+    return selectedList.every((m) => m.fromMe);
+  }, [messages, selectedMessageIds]);
+
   const handleDeleteSelectedMessages = useCallback(() => {
     if (!currentChatId || selectedMessageIds.size === 0) return;
-    const count = selectedMessageIds.size;
-    deleteMessagesLocally(currentChatId, Array.from(selectedMessageIds));
-    setIsSelectionMode(false);
-    setSelectedMessageIds(new Set());
-    showToast(
-      `${count} mensagem${count > 1 ? 'ns' : ''} apagada${count > 1 ? 's' : ''} localmente.`
-    );
-  }, [currentChatId, selectedMessageIds, deleteMessagesLocally, showToast]);
+    setShowDeleteModal(true);
+  }, [currentChatId, selectedMessageIds]);
+
+  const handleConfirmDeleteMessages = useCallback(
+    async (everyone: boolean) => {
+      if (!currentChatId || selectedMessageIds.size === 0 || isDeletingMessages) return;
+      setIsDeletingMessages(true);
+      const ids = Array.from(selectedMessageIds);
+      const count = ids.length;
+
+      try {
+        const success = await deleteMessages(currentChatId, ids, everyone);
+        setShowDeleteModal(false);
+        setIsSelectionMode(false);
+        setSelectedMessageIds(new Set());
+
+        if (success) {
+          showToast(
+            everyone
+              ? `${count} mensagem${count > 1 ? 'ns' : ''} apagada${count > 1 ? 's' : ''} para todos!`
+              : `${count} mensagem${count > 1 ? 'ns' : ''} apagada${count > 1 ? 's' : ''} no WhatsApp!`
+          );
+        } else {
+          showToast('Mensagens apagadas localmente. Não foi possível sincronizar com o WhatsApp.');
+        }
+      } catch (err) {
+        console.error('[ChatWindowPopover] Erro ao excluir mensagens:', err);
+        setShowDeleteModal(false);
+        showToast('Erro ao apagar mensagens no WhatsApp.');
+      } finally {
+        setIsDeletingMessages(false);
+      }
+    },
+    [currentChatId, selectedMessageIds, isDeletingMessages, deleteMessages, showToast]
+  );
 
   const handleForwardMessages = useCallback(
     async (targetChatId: string) => {
@@ -2174,7 +2226,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
               disabled={selectedMessageIds.size === 0}
               onClick={handleDeleteSelectedMessages}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] bg-[#202C33] text-[#EF4444] border border-[#EF4444]/30 hover:bg-[#EF4444] hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[12px] font-medium cursor-pointer"
-              title="Apagar mensagens localmente nesta conversa"
+              title="Apagar mensagens no WhatsApp"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Apagar</span>
@@ -2538,6 +2590,24 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             selectedCount={selectedMessageIds.size}
             onForward={handleForwardMessages}
             onClose={() => setShowForwardModal(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Modal de Confirmação para Apagar Mensagens no WhatsApp */}
+      <AnimatePresence>
+        {showDeleteModal && (
+          <DeleteMessagesModal
+            selectedCount={selectedMessageIds.size}
+            canDeleteForEveryone={canDeleteForEveryone}
+            isDeleting={isDeletingMessages}
+            onDeleteForEveryone={() => handleConfirmDeleteMessages(true)}
+            onDeleteForMe={() => handleConfirmDeleteMessages(false)}
+            onClose={() => {
+              if (!isDeletingMessages) {
+                setShowDeleteModal(false);
+              }
+            }}
           />
         )}
       </AnimatePresence>
