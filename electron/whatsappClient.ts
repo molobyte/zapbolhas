@@ -471,19 +471,21 @@ export class WhatsAppService {
                 const origFn = mod[fnName];
                 if (typeof origFn === 'function' && !origFn._safePatched) {
                   const safeFn = function (this: any, target: any, ...args: any[]) {
-                    if (!target || (!target.id && !target._serialized && typeof target !== 'string')) {
-                      return false;
-                    }
                     try {
                       return origFn.call(this, target, ...args);
                     } catch (err: any) {
-                      if (err && String(err).includes("it's how we memoize")) {
+                      const errStr = String(err?.message || err || '');
+                      if (
+                        errStr.includes("it's how we memoize") ||
+                        errStr.includes('Getter was called with')
+                      ) {
                         return false;
                       }
                       throw err;
                     }
                   };
-                  safeFn._safePatched = true;
+                  Object.assign(safeFn, origFn);
+                  (safeFn as any)._safePatched = true;
                   mod[fnName] = safeFn;
                 }
               }
@@ -5040,18 +5042,32 @@ export class WhatsAppService {
             }
           };
 
+          const withTimeout = <T>(promise: Promise<T>, ms: number, label = 'op'): Promise<T> => {
+            return Promise.race([
+              Promise.resolve(promise),
+              new Promise<T>((_, reject) =>
+                setTimeout(() => reject(new Error(`Timeout (${ms}ms) em ${label}`)), ms)
+              ),
+            ]);
+          };
+
           const serializeId = (val: any): string => {
             if (!val) return '';
             if (typeof val === 'string') return val;
-            return val._serialized || val.id || '';
+            if (typeof val._serialized === 'string' && val._serialized) return val._serialized;
+            if (typeof val.toString === 'function') {
+              const str = val.toString();
+              if (str && str !== '[object Object]') return str;
+            }
+            return val.id || '';
           };
 
           const matchId = (msgIdA: string, msgIdB: string): boolean => {
             if (!msgIdA || !msgIdB) return false;
             if (msgIdA === msgIdB) return true;
             if (msgIdA.endsWith(`_${msgIdB}`) || msgIdB.endsWith(`_${msgIdA}`)) return true;
-            const partA = msgIdA.includes('_') ? msgIdA.split('_')[2] : msgIdA;
-            const partB = msgIdB.includes('_') ? msgIdB.split('_')[2] : msgIdB;
+            const partA = msgIdA.includes('_') ? msgIdA.split('_').slice(2).join('_') : msgIdA;
+            const partB = msgIdB.includes('_') ? msgIdB.split('_').slice(2).join('_') : msgIdB;
             return Boolean(partA && partB && partA === partB);
           };
 
@@ -5062,17 +5078,9 @@ export class WhatsAppService {
 
           log(`Collections: ChatCol=${Boolean(ChatCol)}, MsgCol=${Boolean(MsgCollection)}, MsgKey=${Boolean(MsgKey)}`);
 
-          // 1. Localiza o Chat
+          // 1. Localiza o Chat (com timeout para nunca travar o evaluate)
           let chat: any = null;
-          if (w.WWebJS?.getChat) {
-            try {
-              chat = await w.WWebJS.getChat(chatId, { getAsModel: false });
-              log(`Chat via WWebJS.getChat: ${Boolean(chat)}`);
-            } catch (e: any) {
-              log(`WWebJS.getChat erro: ${e?.message}`);
-            }
-          }
-          if (!chat && ChatCol) {
+          if (ChatCol) {
             try {
               chat =
                 ChatCol.get?.(chatId) ||
@@ -5080,9 +5088,17 @@ export class WhatsAppService {
               log(`Chat via ChatCol: ${Boolean(chat)}`);
             } catch (_) {}
           }
+          if (!chat && w.WWebJS?.getChat) {
+            try {
+              chat = await withTimeout(w.WWebJS.getChat(chatId, { getAsModel: false }), 3000, 'WWebJS.getChat');
+              log(`Chat via WWebJS.getChat: ${Boolean(chat)}`);
+            } catch (e: any) {
+              log(`WWebJS.getChat erro: ${e?.message}`);
+            }
+          }
           if (!chat && ChatCol?.find) {
             try {
-              chat = await ChatCol.find(chatId);
+              chat = await withTimeout(ChatCol.find(chatId), 3000, 'ChatCol.find');
               log(`Chat via ChatCol.find: ${Boolean(chat)}`);
             } catch (_) {}
           }
@@ -5090,8 +5106,10 @@ export class WhatsAppService {
             const widFactory = safeRequire('WAWebWidFactory');
             const wid = widFactory?.createWid?.(chatId);
             if (wid && ChatCol) {
-              chat = ChatCol.get?.(wid) || (await ChatCol.find?.(wid));
-              log(`Chat via WidFactory: ${Boolean(chat)}`);
+              try {
+                chat = ChatCol.get?.(wid) || (await withTimeout(ChatCol.find?.(wid), 3000, 'ChatCol.find(wid)'));
+                log(`Chat via WidFactory: ${Boolean(chat)}`);
+              } catch (_) {}
             }
           }
 
@@ -5117,7 +5135,11 @@ export class WhatsAppService {
 
             if (!msg && MsgCollection?.getMessagesById) {
               try {
-                const fetched = await MsgCollection.getMessagesById([cleanId, altId, rawMsgId]);
+                const fetched: any = await withTimeout(
+                  MsgCollection.getMessagesById([cleanId, altId, rawMsgId]),
+                  3000,
+                  'getMessagesById'
+                );
                 msg = fetched?.messages?.[0];
               } catch (_) {}
             }
@@ -5170,7 +5192,9 @@ export class WhatsAppService {
               }
               if (m.id?.remote && ChatCol) {
                 try {
-                  chat = ChatCol.get?.(m.id.remote) || (await ChatCol.find?.(m.id.remote));
+                  chat =
+                    ChatCol.get?.(m.id.remote) ||
+                    (await withTimeout(ChatCol.find?.(m.id.remote), 3000, 'ChatCol.find(remote)'));
                   if (chat) break;
                 } catch (_) {}
               }
@@ -5183,213 +5207,260 @@ export class WhatsAppService {
           }
 
           const waWebCmdMod = safeRequire('WAWebCmd');
-          const Cmd = waWebCmdMod?.Cmd || waWebCmdMod || w.Store?.Cmd;
+          const revokeAction = safeRequire('WAWebRevokeMsgAction');
+          const dbMsgDelete = safeRequire('WAWebDBMessageDelete');
+          const lastAddOnPreviewAction = safeRequire('WAWebUpdateLastAddOnPreviewChatAction');
+          const reqDelAddOns = safeRequire('WAWebRequestDeleteAddOns');
+          const lidMigrationUtils = safeRequire('WAWebLidMigrationUtils');
+          const stateUtils = safeRequire('WAWebStateUtils');
+          const sendMsgResultMod = safeRequire('WAWebSendMsgResult');
+          const SendMsgResultOK = sendMsgResultMod?.SendMsgResult?.OK || 'OK';
 
-          const getAllMethods = (obj: any): string[] => {
-            if (!obj) return [];
-            const methods = new Set<string>();
-            let curr = obj;
-            while (curr && curr !== Object.prototype) {
-              for (const name of Object.getOwnPropertyNames(curr)) {
-                try {
-                  if (typeof curr[name] === 'function') methods.add(name);
-                } catch (_) {}
+          log(
+            `Módulos: RevokeMsgAction=${Boolean(revokeAction)}, DBMessageDelete=${Boolean(dbMsgDelete)}, Cmd=${Boolean(waWebCmdMod)}`
+          );
+
+          // Função de verificação real: confirma se a mensagem de fato mudou para 'revoked'/'deleted'
+          const verifyMessageState = async (
+            mModel: any,
+            mChat: any,
+            origKeyStr: string
+          ): Promise<'revoked' | 'deleted' | 'alive'> => {
+            for (let checkAttempt = 0; checkAttempt < 5; checkAttempt++) {
+              if (
+                mModel.type === 'revoked' ||
+                mModel.__x_type === 'revoked' ||
+                mModel.isOverwrittenByRevoke ||
+                mModel.isRevoked
+              ) {
+                return 'revoked';
               }
-              curr = Object.getPrototypeOf(curr);
-            }
-            return Array.from(methods);
-          };
-
-          const cmdMethods = getAllMethods(Cmd);
-          log(`Cmd disponível: ${Boolean(Cmd)}, métodos (${cmdMethods.length}): ${cmdMethods.slice(0, 15).join(', ')}`);
-
-          // Abre a conversa via UI para garantir que os listeners de Cmd estejam montados
-          if (typeof Cmd?.openChatBottom === 'function' && chat) {
-            try {
-              await Cmd.openChatBottom({ chat });
-              log('Cmd.openChatBottom chamado para montar listeners');
-              await new Promise((r) => setTimeout(r, 200));
-            } catch (e: any) {
-              log(`Cmd.openChatBottom erro: ${e?.message}`);
-            }
-          }
-
-          // Inspeciona os eventos registrados no bus Cmd
-          const evKeys = Object.keys(Cmd?._events || {});
-          log(`Cmd._events registrados: ${evKeys.join(', ')}`);
-
-          const getEventListenerFn = (evName: string): any => {
-            const ev = Cmd?._events?.[evName];
-            if (!ev) return null;
-            if (Array.isArray(ev)) {
-              return ev[0]?.callback || ev[0]?.fn || ev[0];
-            }
-            return ev?.callback || ev?.fn || ev;
-          };
-
-          const evRevokeFn = getEventListenerFn('send_revoke_msgs');
-          const evDeleteFn = getEventListenerFn('send_delete_msgs');
-          log(`Listeners Cmd: send_revoke=${Boolean(evRevokeFn)}, send_delete=${Boolean(evDeleteFn)}`);
-
-          // Função de verificação real: confirma se a mensagem de fato mudou para 'revoked'/'isDeleted'
-          const verifyMessageState = async (mModel: any, mChat: any): Promise<'revoked' | 'deleted' | 'alive'> => {
-            for (let checkAttempt = 0; checkAttempt < 6; checkAttempt++) {
-              await new Promise((r) => setTimeout(r, 80));
-              const currentM = MsgCollection?.get?.(mModel.id) || mChat?.msgs?.get?.(mModel.id);
+              if (mModel.isDeleted) return 'deleted';
+              const currentM =
+                (origKeyStr && MsgCollection?.get?.(origKeyStr)) ||
+                MsgCollection?.get?.(mModel.id) ||
+                mChat?.msgs?.get?.(mModel.id);
               if (!currentM) return 'deleted';
-              if (currentM.type === 'revoked' || currentM.__x_type === 'revoked' || currentM.isRevoked) {
+              if (
+                currentM.type === 'revoked' ||
+                currentM.__x_type === 'revoked' ||
+                currentM.isOverwrittenByRevoke ||
+                currentM.isRevoked
+              ) {
                 return 'revoked';
               }
               if (currentM.isDeleted) return 'deleted';
+              await new Promise((r) => setTimeout(r, 60));
             }
             return 'alive';
           };
 
           let deletedCount = 0;
 
-          for (const msg of foundMsgs) {
-            const targetChat =
+          for (const rawMsg of foundMsgs) {
+            const msg = stateUtils?.unproxy ? stateUtils.unproxy(rawMsg) : rawMsg;
+            const origKeyStr = serializeId(msg.id);
+
+            let targetChat =
               msg.chat ||
               (msg.id?.remote && ChatCol?.get?.(msg.id.remote)) ||
-              (msg.id?.remote && (await ChatCol?.find?.(msg.id.remote))) ||
               chat;
+            if (!targetChat && msg.id?.remote && ChatCol?.find) {
+              try {
+                targetChat = await withTimeout(ChatCol.find(msg.id.remote), 2000, 'ChatCol.find(target)');
+              } catch (_) {}
+            }
+            if (targetChat && stateUtils?.unproxy) {
+              targetChat = stateUtils.unproxy(targetChat);
+            }
 
             const isFromMe = Boolean(msg.id?.fromMe);
             const msgCap = safeRequire('WAWebMsgActionCapability');
-            const canSender = msgCap?.canSenderRevokeMsg ? Boolean(msgCap.canSenderRevokeMsg(msg)) : isFromMe;
-            const canAdmin = msgCap?.canAdminRevokeMsg ? Boolean(msgCap.canAdminRevokeMsg(msg)) : false;
+            let canSender = false;
+            let canAdmin = false;
+            try {
+              canSender = msgCap?.canSenderRevokeMsg ? Boolean(msgCap.canSenderRevokeMsg(msg)) : isFromMe;
+            } catch (capErr: any) {
+              log(`canSenderRevokeMsg erro: ${capErr?.message}`);
+              canSender = isFromMe;
+            }
+            try {
+              canAdmin = msgCap?.canAdminRevokeMsg ? Boolean(msgCap.canAdminRevokeMsg(msg)) : false;
+            } catch (capErr: any) {
+              log(`canAdminRevokeMsg erro: ${capErr?.message}`);
+            }
             const canRevoke = canSender || canAdmin;
 
-            log(`Msg ${serializeId(msg.id)}: fromMe=${isFromMe}, canSender=${canSender}, canAdmin=${canAdmin}, canRevoke=${canRevoke}, targetChat=${serializeId(targetChat?.id)}`);
+            log(
+              `Msg ${origKeyStr}: fromMe=${isFromMe}, canSender=${canSender}, canAdmin=${canAdmin}, canRevoke=${canRevoke}, targetChat=${serializeId(targetChat?.id)}`
+            );
 
             let msgHandled = false;
 
-            // 1. Tenta Revoke para todos se solicitado e suportado pelas regras do WhatsApp
-            if (everyone && canRevoke) {
-              log(`Iniciando Revoke para todos na msg ${serializeId(msg.id)}...`);
+            // 1. Tenta Revoke para todos via WAWebRevokeMsgAction se solicitado e elegível
+            if (everyone && canRevoke && revokeAction) {
+              const revokeType = isFromMe
+                ? waWebCmdMod?.Revoke?.Sender || 'Sender'
+                : waWebCmdMod?.Revoke?.Admin || 'Admin';
 
-              // 1.1: Cmd.sendRevokeMsgs legado: (targetChat, [msg], { clearMedia: true, type: 'Sender'|'Admin' })
-              if (!msgHandled && typeof Cmd?.sendRevokeMsgs === 'function') {
-                try {
-                  await Cmd.sendRevokeMsgs(targetChat, [msg], {
-                    clearMedia: true,
-                    type: isFromMe ? 'Sender' : 'Admin',
-                  });
-                  const state = await verifyMessageState(msg, targetChat);
-                  if (state !== 'alive') {
-                    msgHandled = true;
-                    log(`sendRevokeMsgs legado CONFIRMADO (${state})!`);
-                  }
-                } catch (e: any) {
-                  log(`sendRevokeMsgs legado erro: ${e?.message}`);
-                }
-              }
+              log(`Iniciando WAWebRevokeMsgAction (type=${revokeType}) na msg ${origKeyStr}...`);
 
-              // 1.2: Cmd.sendRevokeMsgs moderno: (targetChat, { list: [msg], type: 'message' }, { clearMedia: true })
-              if (!msgHandled && typeof Cmd?.sendRevokeMsgs === 'function') {
+              // 1.1: sendAssociatedChildMsgRevoke (pipeline moderno do WhatsApp Web que trata álbuns/mídias e chama sendRevoke)
+              if (!msgHandled && typeof revokeAction.sendAssociatedChildMsgRevoke === 'function') {
                 try {
-                  await Cmd.sendRevokeMsgs(
-                    targetChat,
-                    { list: [msg], type: 'message' },
-                    { clearMedia: true }
+                  const revRes: any = await withTimeout(
+                    revokeAction.sendAssociatedChildMsgRevoke(msg, revokeType, true),
+                    8000,
+                    'sendAssociatedChildMsgRevoke'
                   );
-                  const state = await verifyMessageState(msg, targetChat);
-                  if (state !== 'alive') {
+                  const state = await verifyMessageState(msg, targetChat, origKeyStr);
+                  log(
+                    `sendAssociatedChildMsgRevoke resultado=${JSON.stringify(revRes)}, state=${state}, msgType=${msg.type}, overwritten=${Boolean(msg.isOverwrittenByRevoke)}`
+                  );
+                  if (
+                    state !== 'alive' ||
+                    revRes?.messageSendResult === SendMsgResultOK ||
+                    msg.type === 'revoked' ||
+                    msg.isOverwrittenByRevoke
+                  ) {
                     msgHandled = true;
-                    log(`sendRevokeMsgs moderno CONFIRMADO (${state})!`);
+                    log(`Revoke via sendAssociatedChildMsgRevoke CONFIRMADO!`);
                   }
                 } catch (e: any) {
-                  log(`sendRevokeMsgs moderno erro: ${e?.message}`);
+                  log(`sendAssociatedChildMsgRevoke erro: ${e?.message || String(e)}`);
                 }
               }
 
-              // 1.3: Invocação direta do listener evRevokeFn
-              if (!msgHandled && typeof evRevokeFn === 'function') {
+              // 1.2: sendRevoke({ type: 'message', data: msg }, revokeType, true)
+              if (!msgHandled && typeof revokeAction.sendRevoke === 'function') {
                 try {
-                  await evRevokeFn(targetChat, [msg], {
-                    clearMedia: true,
-                    type: isFromMe ? 'Sender' : 'Admin',
-                  });
-                  const state = await verifyMessageState(msg, targetChat);
-                  if (state !== 'alive') {
+                  const revRes: any = await withTimeout(
+                    revokeAction.sendRevoke({ type: 'message', data: msg }, revokeType, true),
+                    8000,
+                    'sendRevoke(data)'
+                  );
+                  const state = await verifyMessageState(msg, targetChat, origKeyStr);
+                  log(
+                    `sendRevoke(data) resultado=${JSON.stringify(revRes)}, state=${state}, msgType=${msg.type}`
+                  );
+                  if (
+                    state !== 'alive' ||
+                    revRes?.messageSendResult === SendMsgResultOK ||
+                    msg.type === 'revoked' ||
+                    msg.isOverwrittenByRevoke
+                  ) {
                     msgHandled = true;
-                    log(`evRevokeFn direto CONFIRMADO (${state})!`);
+                    log(`Revoke via sendRevoke(data) CONFIRMADO!`);
                   }
                 } catch (e: any) {
-                  log(`evRevokeFn erro: ${e?.message}`);
+                  log(`sendRevoke(data) erro: ${e?.message || String(e)}`);
+                }
+              }
+
+              // 1.3: revoke(msg, targetChat) legado
+              if (!msgHandled && typeof revokeAction.revoke === 'function') {
+                try {
+                  await withTimeout(revokeAction.revoke(msg, targetChat), 8000, 'revokeAction.revoke');
+                  const state = await verifyMessageState(msg, targetChat, origKeyStr);
+                  if (state !== 'alive' || msg.type === 'revoked' || msg.isOverwrittenByRevoke) {
+                    msgHandled = true;
+                    log(`Revoke via revokeAction.revoke CONFIRMADO!`);
+                  }
+                } catch (e: any) {
+                  log(`revokeAction.revoke erro: ${e?.message || String(e)}`);
                 }
               }
             }
 
-            // 2. Se Revoke não é suportado (tempo expirado) ou se o usuário pediu Delete para mim, ou se Revoke falhou:
+            // 2. Se for "Apagar para mim" (everyone=false) ou se o Revoke não for permitido (ex: conversa consigo mesmo / >60h) ou falhou:
+            // Executa a exclusão completa no IndexedDB (WAWebDBMessageDelete) e nas coleções em memória (targetChat.deleteMessages + msg.delete)
             if (!msgHandled) {
               if (everyone && !canRevoke) {
-                log(`Msg não pode ser revogada para todos (limite de tempo expirado). Executando Delete para mim.`);
-              } else if (everyone && !msgHandled) {
-                log(`Revoke para todos não surtiu efeito. Executando Delete para mim como alternativa.`);
+                log(
+                  `Revoke não aplicável para ${origKeyStr} (ex: conversa consigo mesmo ou tempo expirado). Executando exclusão definitiva (Delete para mim).`
+                );
+              } else if (everyone) {
+                log(`Revoke falhou para ${origKeyStr}. Executando exclusão definitiva (Delete para mim).`);
               } else {
-                log(`Iniciando Delete para mim na msg ${serializeId(msg.id)}...`);
+                log(`Iniciando exclusão definitiva (Delete para mim) para ${origKeyStr}...`);
               }
 
-              // 2.1: Cmd.sendDeleteMsgs padrão: (targetChat, [msg], true)
-              if (!msgHandled && typeof Cmd?.sendDeleteMsgs === 'function') {
-                try {
-                  await Cmd.sendDeleteMsgs(targetChat, [msg], true);
-                  const state = await verifyMessageState(msg, targetChat);
-                  if (state !== 'alive') {
-                    msgHandled = true;
-                    log(`sendDeleteMsgs [msg] CONFIRMADO (${state})!`);
-                  }
-                } catch (e: any) {
-                  log(`sendDeleteMsgs [msg] erro: ${e?.message}`);
+              const keysToDeleteSet = new Set<string>();
+              if (origKeyStr) keysToDeleteSet.add(origKeyStr);
+              if (msg.id?.toString) {
+                const strKey = msg.id.toString();
+                if (strKey && strKey !== '[object Object]') keysToDeleteSet.add(strKey);
+              }
+              try {
+                const altKey = lidMigrationUtils?.getAlternateMsgKey?.(msg.id);
+                if (altKey) {
+                  const altKeyStr = serializeId(altKey);
+                  if (altKeyStr) keysToDeleteSet.add(altKeyStr);
                 }
-              }
+              } catch (_) {}
 
-              // 2.2: Cmd.sendDeleteMsgs moderno: (targetChat, { list: [msg], type: 'message' }, true)
-              if (!msgHandled && typeof Cmd?.sendDeleteMsgs === 'function') {
+              const keysToDelete = Array.from(keysToDeleteSet);
+              log(`Chaves para remoção do histórico/memória: ${keysToDelete.join(', ')}`);
+
+              // 2.1: Remove do IndexedDB (persistência — impede que a mensagem volte ao atualizar)
+              if (typeof dbMsgDelete?.removeMessagesFromHistory === 'function' && keysToDelete.length > 0) {
                 try {
-                  await Cmd.sendDeleteMsgs(
-                    targetChat,
-                    { list: [msg], type: 'message' },
-                    true
+                  await withTimeout(
+                    dbMsgDelete.removeMessagesFromHistory(keysToDelete, { deleteAssociatedMsgs: true }),
+                    5000,
+                    'removeMessagesFromHistory'
                   );
-                  const state = await verifyMessageState(msg, targetChat);
-                  if (state !== 'alive') {
-                    msgHandled = true;
-                    log(`sendDeleteMsgs {list} CONFIRMADO (${state})!`);
-                  }
-                } catch (e: any) {
-                  log(`sendDeleteMsgs {list} erro: ${e?.message}`);
+                  log(`WAWebDBMessageDelete.removeMessagesFromHistory executado com sucesso`);
+                } catch (dbErr: any) {
+                  log(`removeMessagesFromHistory erro: ${dbErr?.message || String(dbErr)}`);
                 }
               }
 
-              // 2.3: Invocação direta do listener evDeleteFn
-              if (!msgHandled && typeof evDeleteFn === 'function') {
+              // 2.2: Limpa previews de add-ons / reações associadas
+              try {
+                lastAddOnPreviewAction?.deleteModelsForLastAddOnPreview?.(keysToDelete);
+              } catch (_) {}
+              if (typeof reqDelAddOns?.requestDeleteAddOns === 'function' && targetChat?.id) {
                 try {
-                  await evDeleteFn(targetChat, [msg], true);
-                  const state = await verifyMessageState(msg, targetChat);
-                  if (state !== 'alive') {
-                    msgHandled = true;
-                    log(`evDeleteFn direto CONFIRMADO (${state})!`);
-                  }
-                } catch (e: any) {
-                  log(`evDeleteFn erro: ${e?.message}`);
-                }
+                  await withTimeout(
+                    reqDelAddOns.requestDeleteAddOns(serializeId(targetChat.id), keysToDelete),
+                    3000,
+                    'requestDeleteAddOns'
+                  );
+                } catch (_) {}
               }
 
-              // 2.4: targetChat.sendDeleteMsgs([msg], targetChat)
-              if (!msgHandled && typeof targetChat?.sendDeleteMsgs === 'function') {
+              // 2.3: Remove da coleção de mensagens do Chat e atualiza lastReceivedKey
+              if (typeof targetChat?.deleteMessages === 'function' && keysToDelete.length > 0) {
                 try {
-                  await targetChat.sendDeleteMsgs([msg], targetChat);
-                  const state = await verifyMessageState(msg, targetChat);
-                  if (state !== 'alive') {
-                    msgHandled = true;
-                    log(`targetChat.sendDeleteMsgs CONFIRMADO (${state})!`);
-                  }
-                } catch (e: any) {
-                  log(`targetChat.sendDeleteMsgs erro: ${e?.message}`);
+                  targetChat.deleteMessages(keysToDelete);
+                  log(`targetChat.deleteMessages executado`);
+                } catch (chatDelErr: any) {
+                  log(`targetChat.deleteMessages erro: ${chatDelErr?.message}`);
                 }
+              } else if (targetChat?.msgs?.remove) {
+                try {
+                  targetChat.msgs.remove(msg);
+                } catch (_) {}
               }
+
+              // 2.4: Remove o modelo da MsgCollection global e limpa o cache de getters
+              if (typeof msg?.delete === 'function') {
+                try {
+                  msg.delete();
+                  log(`msg.delete() executado`);
+                } catch (msgDelErr: any) {
+                  log(`msg.delete() erro: ${msgDelErr?.message}`);
+                }
+              } else if (MsgCollection?.remove) {
+                try {
+                  MsgCollection.remove(msg);
+                } catch (_) {}
+              }
+
+              const afterState = await verifyMessageState(msg, targetChat, origKeyStr);
+              log(`Estado após Delete para mim: ${afterState}`);
+              msgHandled = true;
             }
 
             if (msgHandled) {
@@ -5411,52 +5482,12 @@ export class WhatsAppService {
 
       writeLog(`Resultado evaluate: success=${res?.success}, deletedCount=${res?.deletedCount}`);
 
-      // Fallback Node-side com whatsapp-web.js Message.delete
-      if (!res?.success || res.deletedCount === 0) {
-        writeLog('Evaluate não confirmou exclusão. Tentando fallback Node-side via client.getMessageById...');
-        let fallbackCount = 0;
-        for (const rawMsgId of payload.messageIds) {
-          const cleanId = String(rawMsgId || '').replace(/_out$/, '');
-          const altId = cleanId.endsWith('_out') ? cleanId : `${cleanId}_out`;
-          try {
-            let msgObj = await (this.client as any).getMessageById(cleanId).catch(() => null);
-            if (!msgObj) {
-              msgObj = await (this.client as any).getMessageById(altId).catch(() => null);
-            }
-            writeLog(`getMessageById(${cleanId}): encontrado=${Boolean(msgObj)}`);
-            if (msgObj && typeof msgObj.delete === 'function') {
-              let deleted = false;
-              if (payload.everyone) {
-                try {
-                  writeLog(`Chamando msgObj.delete(everyone=true, clearMedia=true)...`);
-                  await msgObj.delete(true, true);
-                  deleted = true;
-                  writeLog(`msgObj.delete(everyone=true) OK para ${cleanId}`);
-                } catch (revokeErr: any) {
-                  writeLog(`msgObj.delete(everyone=true) falhou (${revokeErr?.message || String(revokeErr)}), tentando delete para mim...`);
-                }
-              }
-              if (!deleted) {
-                try {
-                  writeLog(`Chamando msgObj.delete(everyone=false, clearMedia=true)...`);
-                  await msgObj.delete(false, true);
-                  deleted = true;
-                  writeLog(`msgObj.delete(everyone=false) OK para ${cleanId}`);
-                } catch (delErr: any) {
-                  writeLog(`msgObj.delete(everyone=false) falhou: ${delErr?.message || String(delErr)}`);
-                }
-              }
-              if (deleted) {
-                fallbackCount++;
-              }
-            }
-          } catch (fallbackErr: any) {
-            writeLog(`Fallback Message.delete falhou para ${cleanId}: ${fallbackErr?.message || String(fallbackErr)}`);
-          }
-        }
-        if (fallbackCount > 0) {
-          writeLog(`Fallback Node-side sucesso: deletedCount=${fallbackCount}`);
-          return { success: true, deletedCount: fallbackCount };
+      // Limpa o cache de mídia em memória para as mensagens excluídas
+      if (res?.success && Array.isArray(payload.messageIds)) {
+        for (const rawId of payload.messageIds) {
+          const cleanId = String(rawId || '').replace(/_out$/, '');
+          this.mediaCache.delete(rawId);
+          this.mediaCache.delete(cleanId);
         }
       }
 
