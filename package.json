@@ -61,6 +61,14 @@
       {
         "from": "stickers",
         "to": "stickers"
+      },
+      {
+        "from": "public/icon.ico",
+        "to": "icon.ico"
+      },
+      {
+        "from": "public/tray-icon.png",
+        "to": "tray-icon.png"
       }
     ],
     "asar": true,
@@ -89,7 +97,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "WhatsApp Bubbles"
-    }
+    },
+    "icon": "public/icon.ico"
   },
   "author": "molobyte"
 }

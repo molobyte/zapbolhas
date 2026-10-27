@@ -64,6 +64,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     setBubbleBorderOpacity,
     setBubbleBorderWidth,
     setStartupChatFilter,
+    applyExternalSettingsUpdate,
     minimizeActiveChat,
   } = useBubbleStore();
 
@@ -79,7 +80,21 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
         }
       });
     }
-  }, []);
+    const unsubDisplay = window.electronAPI?.onDisplayChanged
+      ? window.electronAPI.onDisplayChanged((displayId) => {
+          setCurrentDisplayId(displayId);
+        })
+      : () => {};
+    const unsubSettings = window.electronAPI?.onSettingsUpdated
+      ? window.electronAPI.onSettingsUpdated((patch) => {
+          applyExternalSettingsUpdate(patch);
+        })
+      : () => {};
+    return () => {
+      unsubDisplay();
+      unsubSettings();
+    };
+  }, [applyExternalSettingsUpdate]);
 
   const handleSelectDisplay = async (displayId: number) => {
     setCurrentDisplayId(displayId);

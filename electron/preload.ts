@@ -153,6 +153,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('settings:updated', handler);
   },
 
+  onTrayToggleVisibility: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('tray:toggle-visibility', handler);
+    return () => ipcRenderer.removeListener('tray:toggle-visibility', handler);
+  },
+
+  onTraySetVisibility: (callback: (hidden: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, hidden: boolean) => callback(hidden);
+    ipcRenderer.on('tray:set-visibility', handler);
+    return () => ipcRenderer.removeListener('tray:set-visibility', handler);
+  },
+
+  onDisplayChanged: (callback: (displayId: number) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, displayId: number) => callback(displayId);
+    ipcRenderer.on('display:changed', handler);
+    return () => ipcRenderer.removeListener('display:changed', handler);
+  },
+
+  syncTrayState: (state: { hidden?: boolean; soundMuted?: boolean }) => {
+    ipcRenderer.send('tray:sync-state', state);
+  },
+
   logoutWhatsApp: () => {
     return ipcRenderer.invoke('wa:logout');
   },

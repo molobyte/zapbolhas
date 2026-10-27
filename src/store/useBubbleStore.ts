@@ -232,6 +232,13 @@ function saveChatSizes(sizes: Record<string, ChatBubbleSize>): void {
 
 const newlyActiveChatIdsThisSession = new Set<string>();
 const dismissedChatIdsThisSession = new Set<string>();
+let dockAnimTimers: ReturnType<typeof setTimeout>[] = [];
+function clearDockAnimTimers() {
+  while (dockAnimTimers.length > 0) {
+    const t = dockAnimTimers.pop();
+    if (t) clearTimeout(t);
+  }
+}
 
 export function organizeBubbles(
   bubbles: BubbleItem[],
@@ -334,6 +341,8 @@ interface BubbleStoreState {
   savedContacts: SavedContact[];
   isLoadingContacts: boolean;
   activeReactionDetailsMessage: FormattedMessage | null;
+  isDockHidden: boolean;
+  dockAnimPhase: 'visible' | 'merging' | 'zooming-out' | 'hidden' | 'zooming-in' | 'emerging';
 
   // Actions
   setWaStatus: (status: WaConnectionState, error?: string | null) => void;
@@ -369,6 +378,7 @@ interface BubbleStoreState {
   refreshApp: () => Promise<void>;
 
   // Core Business Logic Flows (Specs Section 5)
+  toggleDockVisibility: (targetHidden?: boolean) => void;
   toggleMainButton: () => void;
   selectChatFromList: (chatId: string) => void;
   fetchSavedContacts: (query?: string) => Promise<void>;
@@ -477,6 +487,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   activeReactionDetailsMessage: null,
   savedContacts: [],
   isLoadingContacts: false,
+  isDockHidden: false,
+  dockAnimPhase: 'visible',
 
   setWaStatus: (waStatus, waError = null) => {
     const { activePopover } = get();
@@ -1068,6 +1080,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     });
     set({ soundMuted });
     window.electronAPI?.broadcastSettingsUpdate?.({ soundMuted });
+    window.electronAPI?.syncTrayState?.({ hidden: s.isDockHidden, soundMuted });
   },
 
   setUserSoundPreset: (userSoundPreset, customFileName) => {
@@ -1394,6 +1407,135 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     const status = get().waStatus;
     if (status === 'disconnected' || status === 'error') {
       window.electronAPI?.initWhatsApp?.();
+    }
+  },
+
+  // Alterna visibilidade do ZapBolhas com animação de fusão mercúrio + zoom
+  toggleDockVisibility: (targetHidden?: boolean) => {
+    const {
+      isDockHidden,
+      activeBubbles,
+      pinnedChatIds,
+      maxBubbles,
+      chats,
+      soundMuted,
+    } = get();
+
+    const shouldHide = typeof targetHidden === 'boolean' ? targetHidden : !isDockHidden;
+    if (shouldHide === isDockHidden) return;
+
+    clearDockAnimTimers();
+    window.electronAPI?.syncTrayState?.({ hidden: shouldHide, soundMuted });
+
+    if (shouldHide) {
+      const organizedCurrent = organizeBubbles(activeBubbles, maxBubbles, pinnedChatIds);
+      const hasBubbles = organizedCurrent.length > 0;
+
+      if (hasBubbles) {
+        set({
+          isDockHidden: true,
+          dockAnimPhase: 'merging',
+          activeBubbles: organizedCurrent,
+          activePopover: 'none',
+          activeChatId: null,
+          replyingTo: null,
+          viewingImage: null,
+          activeReactionDetailsMessage: null,
+        });
+
+        dockAnimTimers.push(
+          setTimeout(() => {
+            set({ dockAnimPhase: 'zooming-out' });
+          }, 450)
+        );
+
+        dockAnimTimers.push(
+          setTimeout(() => {
+            set({ dockAnimPhase: 'hidden' });
+          }, 450 + 320)
+        );
+      } else {
+        set({
+          isDockHidden: true,
+          dockAnimPhase: 'zooming-out',
+          activePopover: 'none',
+          activeChatId: null,
+          replyingTo: null,
+          viewingImage: null,
+          activeReactionDetailsMessage: null,
+        });
+
+        dockAnimTimers.push(
+          setTimeout(() => {
+            set({ dockAnimPhase: 'hidden' });
+          }, 320)
+        );
+      }
+    } else {
+      // Revelando o ZapBolhas: restaura o botão do WhatsApp e os chat heads fixos (e não lidos ativos)
+      const metaMap = loadPinnedChatMeta();
+      const chatMap = new Map(chats.map((c) => [c.id, c]));
+
+      let restoredBubbles = activeBubbles.filter(
+        (b) =>
+          b.isPinned ||
+          pinnedChatIds.includes(b.chatId) ||
+          b.unreadCount > 0 ||
+          b.isMarkedUnread ||
+          b.unreadCount === -1
+      );
+
+      for (const pid of pinnedChatIds) {
+        if (!restoredBubbles.some((b) => b.chatId === pid)) {
+          const fresh = chatMap.get(pid);
+          const meta = metaMap[pid];
+          restoredBubbles.push({
+            chatId: pid,
+            name: fresh?.name || meta?.name || pid.split('@')[0],
+            avatar: fresh?.avatar || meta?.avatar || '',
+            unreadCount: fresh?.unreadCount || 0,
+            isMarkedUnread: Boolean(fresh?.isMarkedUnread),
+            isPinned: true,
+            isGroup: fresh?.isGroup ?? meta?.isGroup ?? pid.endsWith('@g.us'),
+            hasMention: Boolean(fresh?.hasMention),
+            lastActivity: meta?.lastActivity || Date.now(),
+          });
+        }
+      }
+
+      // Se o usuário não tiver nenhuma conversa fixada ainda, preserva as bolhas que estavam abertas
+      if (restoredBubbles.length === 0 && activeBubbles.length > 0 && pinnedChatIds.length === 0) {
+        restoredBubbles = [...activeBubbles];
+      }
+
+      const organizedRestored = organizeBubbles(restoredBubbles, maxBubbles, pinnedChatIds);
+      const hasBubbles = organizedRestored.length > 0;
+
+      set({
+        isDockHidden: false,
+        activeBubbles: organizedRestored,
+        dockAnimPhase: 'zooming-in',
+      });
+
+      if (hasBubbles) {
+        dockAnimTimers.push(
+          setTimeout(() => {
+            set({ dockAnimPhase: 'emerging' });
+          }, 250)
+        );
+
+        dockAnimTimers.push(
+          setTimeout(() => {
+            set({ dockAnimPhase: 'visible' });
+          }, 250 + 460)
+        );
+      } else {
+        dockAnimTimers.push(
+          setTimeout(() => {
+            set({ dockAnimPhase: 'visible' });
+          }, 280)
+        );
+      }
     }
   },
 

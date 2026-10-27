@@ -284,6 +284,10 @@ export interface ElectronAPI {
   closeSettingsWindow?: () => void;
   broadcastSettingsUpdate?: (patch: Record<string, unknown>) => void;
   onSettingsUpdated?: (callback: (patch: Record<string, unknown>) => void) => () => void;
+  onTrayToggleVisibility?: (callback: () => void) => () => void;
+  onTraySetVisibility?: (callback: (hidden: boolean) => void) => () => void;
+  onDisplayChanged?: (callback: (displayId: number) => void) => () => void;
+  syncTrayState?: (state: { hidden?: boolean; soundMuted?: boolean }) => void;
   logoutWhatsApp?: () => Promise<boolean>;
   refreshWhatsApp?: () => Promise<ChatSummary[]>;
   reloadWindow?: () => void;

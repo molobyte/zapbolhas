@@ -12,6 +12,8 @@ interface ContactBubbleProps {
   onSelect: (chatId: string) => void;
   onClose: (chatId: string) => void;
   onOpenContextMenu: (bubble: BubbleItem, e: React.MouseEvent) => void;
+  mercuryPhase?: 'visible' | 'merging' | 'zooming-out' | 'hidden' | 'zooming-in' | 'emerging';
+  offsetToLogoPx?: number;
 }
 
 export const ContactBubble: React.FC<ContactBubbleProps> = ({
@@ -20,6 +22,8 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
   onSelect,
   onClose,
   onOpenContextMenu,
+  mercuryPhase = 'visible',
+  offsetToLogoPx = 0,
 }) => {
   const {
     bubbleBorderMode,
@@ -108,23 +112,52 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
     }
   };
 
+  const isMerging = mercuryPhase === 'merging';
+  const isEmerging = mercuryPhase === 'emerging';
+  const isMercuryActive = isMerging || isEmerging;
+
   return (
     <motion.div
-      layout
-      initial={{ scale: 0.3, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
+      layout={!isMercuryActive}
+      initial={
+        isEmerging
+          ? { x: offsetToLogoPx, scale: 0.42, opacity: 1 }
+          : { scale: 0.3, opacity: 0 }
+      }
+      animate={
+        isMerging
+          ? {
+              x: offsetToLogoPx,
+              scale: [1, 1.08, 0.42],
+              opacity: 1,
+            }
+          : {
+              x: 0,
+              scale: 1,
+              opacity: 1,
+            }
+      }
       exit={{ scale: 0.2, opacity: 0 }}
-      transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+      transition={
+        isMerging
+          ? { duration: 0.44, ease: [0.42, 0, 0.2, 1] }
+          : isEmerging
+          ? { duration: 0.45, ease: [0.16, 1, 0.3, 1] }
+          : { type: 'spring', stiffness: 420, damping: 26 }
+      }
       className="relative group select-none w-[48px] h-[48px] shrink-0 flex items-center justify-center"
     >
       {/* Botão Principal da Bolha */}
       <button
         type="button"
-        onClick={() => onSelect(bubble.chatId)}
+        onClick={() => {
+          if (isMercuryActive) return;
+          onSelect(bubble.chatId);
+        }}
         onContextMenu={handleContextMenu}
         onAuxClick={handleAuxClick}
         title={`${bubble.name}${bubble.isPinned ? ' (Fixada)' : ''} (Clique direito para opções)`}
-        style={borderStyle}
+        style={isMercuryActive ? { borderColor: '#25D366', borderWidth: '2px', borderStyle: 'solid' } : borderStyle}
         className="relative w-[48px] h-[48px] rounded-full overflow-hidden shrink-0 block shadow-[0_4px_14px_rgba(0,0,0,0.65)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none"
       >
         <img
@@ -133,11 +166,24 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
           className="w-full h-full object-cover pointer-events-none"
           draggable={false}
         />
+        {/* Camada de Mercúrio Verde durante fusão/separação com o logo do WhatsApp */}
+        <AnimatePresence>
+          {isMercuryActive && (
+            <motion.div
+              key="mercury-tint"
+              initial={{ opacity: isEmerging ? 0.95 : 0 }}
+              animate={{ opacity: isMerging ? 0.95 : 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: isMerging ? 0.34 : 0.38, delay: isEmerging ? 0.06 : 0 }}
+              className="absolute inset-0 rounded-full bg-[#25D366] pointer-events-none"
+            />
+          )}
+        </AnimatePresence>
       </button>
 
       {/* Botão de Controle de Áudio Tocando no Canto Superior Esquerdo (Apenas quando minimizada) */}
       <AnimatePresence>
-        {showBubbleAudioControl && (
+        {!isMercuryActive && showBubbleAudioControl && (
           <motion.button
             key="audio-bubble-indicator"
             type="button"
@@ -166,7 +212,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
       </AnimatePresence>
 
       {/* Ícone de Pin no canto superior direito quando fixada */}
-      {bubble.isPinned ? (
+      {!isMercuryActive && (bubble.isPinned ? (
         <div
           title="Conversa fixada (não pode ser fechada até desfixar)"
           className="absolute -top-1 -right-1 w-[18px] h-[18px] rounded-full bg-[#182229] text-[#25D366] border border-[#25D366]/40 shadow-md flex items-center justify-center z-20 pointer-events-none"
@@ -186,11 +232,11 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
         >
           <X className="w-3 h-3 stroke-[2.5]" />
         </button>
-      )}
+      ))}
 
       {/* Badge de Mensagens Não Lidas / Marcado como Não Lido */}
       <AnimatePresence>
-        {bubble.isMarkedUnread || bubble.unreadCount === -1 ? (
+        {!isMercuryActive && (bubble.isMarkedUnread || bubble.unreadCount === -1) ? (
           <motion.span
             key="marked-unread-badge"
             initial={{ scale: 0.5, opacity: 0 }}
@@ -202,7 +248,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
           >
             <span className="w-2 h-2 rounded-full bg-white shadow-xs" />
           </motion.span>
-        ) : bubble.unreadCount > 0 ? (
+        ) : !isMercuryActive && bubble.unreadCount > 0 ? (
           <motion.span
             key={bubble.unreadCount}
             initial={{ scale: 0.5, opacity: 0 }}
@@ -218,7 +264,7 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
 
       {/* Bolinha de Notificação de Menção no Canto Inferior Esquerdo (@ em #32CAED) */}
       <AnimatePresence>
-        {bubble.hasMention && (bubble.unreadCount > 0 || bubble.isMarkedUnread || bubble.unreadCount === -1) && !isActive && (
+        {!isMercuryActive && bubble.hasMention && (bubble.unreadCount > 0 || bubble.isMarkedUnread || bubble.unreadCount === -1) && !isActive && (
           <motion.span
             key="mention-badge"
             initial={{ scale: 0.5, opacity: 0 }}

@@ -12,6 +12,7 @@ import {
   Check,
   CheckCheck,
   CircleDot,
+  EyeOff,
   X,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
@@ -45,6 +46,8 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
     openSettings,
     logoutWhatsApp,
     refreshApp,
+    dockAnimPhase,
+    toggleDockVisibility,
   } = useBubbleStore();
 
   const [showContextMenu, setShowContextMenu] = useState(false);
@@ -139,6 +142,18 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
             transition={{ duration: 0.14 }}
             className="absolute bottom-full right-0 mb-2.5 w-[215px] bg-[#182229]/95 backdrop-blur-md rounded-[10px] shadow-[0_14px_38px_rgba(0,0,0,0.92)] border border-white/15 py-1.5 z-[100] pointer-events-auto overflow-hidden"
           >
+            <button
+              type="button"
+              onClick={() => {
+                setShowContextMenu(false);
+                toggleDockVisibility(true);
+              }}
+              className="w-full px-3.5 py-2 text-left text-[13px] text-[#E9EDEF] hover:bg-[#202C33] flex items-center gap-2.5 transition-colors"
+            >
+              <EyeOff className="w-4 h-4 text-[#25D366]" />
+              <span>Esconder ZapBolhas</span>
+            </button>
+
             <button
               type="button"
               onClick={() => {
@@ -376,46 +391,118 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
         )}
       </AnimatePresence>
 
+      {/* Filtro SVG Metaball / Mercúrio Líquido para fusão das bolhas com o logo do WhatsApp */}
+      <svg width="0" height="0" className="absolute pointer-events-none opacity-0" aria-hidden="true">
+        <defs>
+          <filter
+            id="zapbolhas-mercury-goo"
+            x="-50%"
+            y="-80%"
+            width="200%"
+            height="260%"
+            colorInterpolationFilters="sRGB"
+          >
+            <feGaussianBlur in="SourceGraphic" stdDeviation="8.5" result="blur" />
+            <feColorMatrix
+              in="blur"
+              mode="matrix"
+              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -9"
+              result="goo"
+            />
+            <feComposite in="SourceGraphic" in2="goo" operator="atop" />
+          </filter>
+        </defs>
+      </svg>
+
       {/* Dock Principal de Bolhas (Escalável em Tempo Real pelo Slider de Zoom) */}
       <div
-        data-interactive="true"
-        onMouseEnter={onInteractiveEnter}
+        data-interactive={dockAnimPhase === 'hidden' ? 'false' : 'true'}
+        onMouseEnter={() => {
+          if (dockAnimPhase !== 'hidden') onInteractiveEnter();
+        }}
         onMouseLeave={onInteractiveLeave}
-        style={{ zoom: bubbleScale }}
-        className="flex items-center justify-end gap-[12px] pointer-events-auto h-[48px]"
+        style={{
+          zoom: bubbleScale,
+          filter:
+            dockAnimPhase === 'merging' || dockAnimPhase === 'emerging'
+              ? 'url(#zapbolhas-mercury-goo)'
+              : undefined,
+        }}
+        className={`flex items-center justify-end gap-[12px] h-[48px] px-4 -mx-4 ${
+          dockAnimPhase === 'hidden'
+            ? 'pointer-events-none opacity-0'
+            : 'pointer-events-auto'
+        }`}
       >
-        <AnimatePresence mode="popLayout">
-          {activeBubbles.map((bubble) => (
-            <ContactBubble
-              key={bubble.chatId}
-              bubble={bubble}
-              isActive={activePopover === 'chat-window' && activeChatId === bubble.chatId}
-              onSelect={(chatId) => {
-                setBubbleMenu(null);
-                toggleBubbleChat(chatId);
-              }}
-              onClose={closeBubble}
-              onOpenContextMenu={handleOpenBubbleMenu}
-            />
-          ))}
-        </AnimatePresence>
+        {(dockAnimPhase === 'visible' ||
+          dockAnimPhase === 'merging' ||
+          dockAnimPhase === 'emerging') && (
+          <AnimatePresence mode="popLayout">
+            {activeBubbles.map((bubble, idx) => {
+              const offsetToLogoPx = (activeBubbles.length - idx) * 60;
+              return (
+                <ContactBubble
+                  key={bubble.chatId}
+                  bubble={bubble}
+                  isActive={activePopover === 'chat-window' && activeChatId === bubble.chatId}
+                  mercuryPhase={dockAnimPhase}
+                  offsetToLogoPx={offsetToLogoPx}
+                  onSelect={(chatId) => {
+                    setBubbleMenu(null);
+                    toggleBubbleChat(chatId);
+                  }}
+                  onClose={closeBubble}
+                  onOpenContextMenu={handleOpenBubbleMenu}
+                />
+              );
+            })}
+          </AnimatePresence>
+        )}
 
         {/* Botão Fixo Verde do WhatsApp (Extrema Direita) */}
         <motion.button
           type="button"
           onClick={() => {
+            if (dockAnimPhase !== 'visible') return;
             setShowContextMenu(false);
             setBubbleMenu(null);
             toggleMainButton();
           }}
-          onContextMenu={handleRightClickLogo}
-          whileTap={{ scale: 0.94 }}
+          onContextMenu={(e) => {
+            if (dockAnimPhase !== 'visible') return;
+            handleRightClickLogo(e);
+          }}
+          whileTap={dockAnimPhase === 'visible' ? { scale: 0.94 } : undefined}
+          animate={
+            dockAnimPhase === 'merging'
+              ? { scale: [1, 1.06, 1.24, 1.15], opacity: 1 }
+              : dockAnimPhase === 'zooming-out'
+              ? { scale: [1.15, 1.36, 0], opacity: [1, 1, 0] }
+              : dockAnimPhase === 'hidden'
+              ? { scale: 0, opacity: 0 }
+              : dockAnimPhase === 'zooming-in'
+              ? { scale: [0, 1.28, 1.08], opacity: [0, 1, 1] }
+              : dockAnimPhase === 'emerging'
+              ? { scale: [1.08, 0.94, 1], opacity: 1 }
+              : { scale: 1, opacity: 1 }
+          }
+          transition={
+            dockAnimPhase === 'merging'
+              ? { duration: 0.44, ease: 'easeInOut' }
+              : dockAnimPhase === 'zooming-out'
+              ? { duration: 0.31, times: [0, 0.34, 1], ease: 'easeInOut' }
+              : dockAnimPhase === 'zooming-in'
+              ? { duration: 0.25, times: [0, 0.68, 1], ease: 'easeOut' }
+              : dockAnimPhase === 'emerging'
+              ? { duration: 0.44, ease: 'easeOut' }
+              : { type: 'spring', stiffness: 420, damping: 25 }
+          }
           title={
             isSyncing
               ? 'Sincronizando conversas do WhatsApp... (Clique direito para opções)'
               : 'WhatsApp Bubbles (Clique esquerdo: conversas | Clique direito: opções)'
           }
-          className="relative w-[48px] h-[48px] shrink-0 rounded-full bg-[#25D366] hover:bg-[#22c55e] text-white shadow-[0_4px_14px_rgba(0,0,0,0.65)] flex items-center justify-center transition-transform duration-150 hover:scale-105 focus:outline-none"
+          className="relative z-30 w-[48px] h-[48px] shrink-0 rounded-full bg-[#25D366] hover:bg-[#22c55e] text-white shadow-[0_4px_14px_rgba(0,0,0,0.65)] flex items-center justify-center focus:outline-none"
         >
           {/* Ícone Oficial do WhatsApp */}
           <svg
@@ -427,7 +514,7 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
           >
             <path d="M12.031 2c-5.516 0-9.969 4.453-9.969 9.969 0 1.766.469 3.484 1.359 5.016L2 22l5.156-1.359c1.484.813 3.156 1.25 4.875 1.25 5.516 0 9.969-4.453 9.969-9.969S17.547 2 12.031 2zm0 18.25c-1.5 0-2.969-.406-4.266-1.172l-.313-.188-3.047.797.813-2.969-.203-.313c-.844-1.344-1.281-2.891-1.281-4.484 0-4.594 3.734-8.328 8.328-8.328 4.578 0 8.313 3.734 8.313 8.328 0 4.594-3.734 8.328-8.344 8.328zm4.563-6.219c-.25-.125-1.484-.734-1.719-.813-.234-.078-.391-.125-.563.125-.172.25-.641.813-.797.984-.141.172-.297.188-.547.063-.25-.125-1.063-.391-2.016-1.25-.75-.672-1.25-1.484-1.406-1.734-.141-.25-.016-.391.109-.516.109-.109.25-.297.375-.438.125-.141.172-.25.25-.422.078-.172.047-.313-.016-.438-.063-.125-.563-1.359-.766-1.859-.203-.484-.406-.422-.563-.422-.141-.016-.313-.016-.484-.016s-.438.063-.672.313c-.234.25-.891.875-.891 2.125s.906 2.469 1.031 2.641c.125.172 1.781 2.719 4.313 3.813.609.266 1.078.422 1.453.531.609.188 1.156.172 1.594.109.484-.078 1.484-.609 1.688-1.203.219-.594.219-1.094.156-1.203-.063-.094-.234-.156-.484-.281z" />
           </svg>
-          {isSyncing && (
+          {isSyncing && dockAnimPhase === 'visible' && (
             <>
               <span
                 title="Sincronizando WhatsApp..."

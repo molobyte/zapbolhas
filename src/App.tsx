@@ -19,6 +19,10 @@ export const App: React.FC = () => {
     updateMessageAck,
     deleteMessagesLocally,
     applyExternalSettingsUpdate,
+    isDockHidden,
+    dockAnimPhase,
+    soundMuted,
+    toggleDockVisibility,
   } = useBubbleStore();
 
   const isSettingsWindow =
@@ -63,6 +67,10 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (isSettingsWindow) return;
+    if (isDockHidden || dockAnimPhase === 'hidden') {
+      setIgnoreMouse(true);
+      return;
+    }
     if (activePopover === 'none') {
       const isOverInteractive = Boolean(
         document.querySelector(':hover')?.closest('[data-interactive="true"]')
@@ -71,7 +79,13 @@ export const App: React.FC = () => {
         setIgnoreMouse(true);
       }
     }
-  }, [activePopover, setIgnoreMouse, isSettingsWindow]);
+  }, [activePopover, isDockHidden, dockAnimPhase, setIgnoreMouse, isSettingsWindow]);
+
+  // Sincroniza estado inicial e alterações de visibilidade/áudio com o System Tray
+  useEffect(() => {
+    if (isSettingsWindow) return;
+    window.electronAPI?.syncTrayState?.({ hidden: isDockHidden, soundMuted });
+  }, [isDockHidden, soundMuted, isSettingsWindow]);
 
   // Inicializa automaticamente a sessão do WhatsApp (LocalAuth) em segundo plano ao abrir o app
   // e escuta todos os eventos IPC em tempo real (apenas na janela principal das bolhas).
@@ -134,6 +148,18 @@ export const App: React.FC = () => {
         })
       : () => {};
 
+    const unsubTrayToggle = api.onTrayToggleVisibility
+      ? api.onTrayToggleVisibility(() => {
+          toggleDockVisibility();
+        })
+      : () => {};
+
+    const unsubTraySet = api.onTraySetVisibility
+      ? api.onTraySetVisibility((hidden) => {
+          toggleDockVisibility(hidden);
+        })
+      : () => {};
+
     return () => {
       unsubQr();
       unsubReady();
@@ -144,6 +170,8 @@ export const App: React.FC = () => {
       unsubDeleted();
       unsubStatus();
       unsubSettings();
+      unsubTrayToggle();
+      unsubTraySet();
     };
   }, [
     isSettingsWindow,
@@ -155,6 +183,7 @@ export const App: React.FC = () => {
     updateMessageAck,
     deleteMessagesLocally,
     applyExternalSettingsUpdate,
+    toggleDockVisibility,
   ]);
 
   // Quando aberta como Dialog Box separada (?view=settings), renderiza apenas a janela de Configurações
