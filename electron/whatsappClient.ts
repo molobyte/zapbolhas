@@ -10,6 +10,12 @@ let ffmpegExecutablePath: string | null = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   ffmpegExecutablePath = require('ffmpeg-static');
+  if (ffmpegExecutablePath && ffmpegExecutablePath.includes('app.asar')) {
+    const unpacked = ffmpegExecutablePath.replace('app.asar', 'app.asar.unpacked');
+    if (fs.existsSync(unpacked)) {
+      ffmpegExecutablePath = unpacked;
+    }
+  }
 } catch (err) {
   console.warn('[WhatsAppService] ffmpeg-static não disponível:', err);
 }
@@ -329,7 +335,8 @@ function mapAck(ack?: number): 'sent' | 'delivered' | 'read' {
 
 function logMediaDebug(msg: string) {
   try {
-    const p = path.join(process.cwd(), 'media_debug.log');
+    const dir = app.isPackaged ? app.getPath('userData') : process.cwd();
+    const p = path.join(dir, 'media_debug.log');
     fs.appendFileSync(p, `[${new Date().toISOString()}] ${msg}\n`, 'utf8');
   } catch {}
 }
@@ -4997,7 +5004,8 @@ export class WhatsAppService {
     messageIds: string[];
     everyone?: boolean;
   }): Promise<{ success: boolean; deletedCount: number; error?: string }> {
-    const logPath = path.join(process.cwd(), 'delete_debug.log');
+    const dir = app.isPackaged ? app.getPath('userData') : process.cwd();
+    const logPath = path.join(dir, 'delete_debug.log');
     const writeLog = (msg: string) => {
       const line = `[${new Date().toISOString()}] ${msg}\n`;
       try {

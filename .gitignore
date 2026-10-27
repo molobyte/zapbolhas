@@ -31,3 +31,7 @@ GEMINI.md
 .agent/
 _agents/
 _agent/
+
+# Release and installers
+release/
+dist-installer/

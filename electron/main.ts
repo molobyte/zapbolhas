@@ -391,6 +391,8 @@ function registerIpcHandlers() {
       }
 
       const searchDirs = [
+        path.join(app.getPath('userData'), 'sfx'),
+        path.join(process.resourcesPath, 'sfx'),
         path.join(process.cwd(), 'sfx'),
         path.join(__dirname, '../sfx'),
         path.join(__dirname, '../public/sfx'),
@@ -440,7 +442,7 @@ function registerIpcHandlers() {
         ext === '.mp3' ? 'audio/mpeg' : ext === '.ogg' ? 'audio/ogg' : 'audio/wav';
       const prefix = type === 'group' ? 'group' : 'user';
 
-      const sfxDir = path.join(process.cwd(), 'sfx');
+      const sfxDir = path.join(app.getPath('userData'), 'sfx');
       if (!fs.existsSync(sfxDir)) {
         fs.mkdirSync(sfxDir, { recursive: true });
       }
@@ -650,8 +652,8 @@ function registerIpcHandlers() {
     return await waService.getWhatsAppStickers();
   });
 
-  const getStickersDir = () => {
-    const dir = path.join(process.cwd(), 'stickers');
+  const getUserStickersDir = () => {
+    const dir = path.join(app.getPath('userData'), 'stickers');
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
@@ -668,15 +670,36 @@ function registerIpcHandlers() {
 
   ipcMain.handle('wa:get-user-stickers', async () => {
     try {
-      const dir = getStickersDir();
-      const files = fs
-        .readdirSync(dir)
-        .filter((f) => /\.(webp|png|jpg|jpeg|gif)$/i.test(f));
+      const userDir = getUserStickersDir();
+      const defaultDirs = [
+        path.join(process.resourcesPath, 'stickers'),
+        path.join(process.cwd(), 'stickers'),
+      ];
 
-      // Ordena pelos mais recentes primeiro
-      const withStats = files
-        .map((fileName) => {
-          const fullPath = path.join(dir, fileName);
+      const foundFiles = new Map<string, string>();
+
+      // Lê primeiro os stickers do usuário salvos em userData
+      if (fs.existsSync(userDir)) {
+        for (const f of fs.readdirSync(userDir)) {
+          if (/\.(webp|png|jpg|jpeg|gif)$/i.test(f)) {
+            foundFiles.set(f, path.join(userDir, f));
+          }
+        }
+      }
+
+      // Lê stickers empacotados padrão
+      for (const defDir of defaultDirs) {
+        if (fs.existsSync(defDir)) {
+          for (const f of fs.readdirSync(defDir)) {
+            if (/\.(webp|png|jpg|jpeg|gif)$/i.test(f) && !foundFiles.has(f)) {
+              foundFiles.set(f, path.join(defDir, f));
+            }
+          }
+        }
+      }
+
+      const withStats = Array.from(foundFiles.entries())
+        .map(([fileName, fullPath]) => {
           const stat = fs.statSync(fullPath);
           return { fileName, fullPath, mtime: stat.mtimeMs };
         })
@@ -716,7 +739,7 @@ function registerIpcHandlers() {
         return [];
       }
 
-      const dir = getStickersDir();
+      const dir = getUserStickersDir();
       const imported: Array<{
         id: string;
         name: string;
@@ -764,7 +787,7 @@ function registerIpcHandlers() {
           : '.jpg';
       const buf = Buffer.from(base64Data, 'base64');
       const hash = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 14);
-      const dir = getStickersDir();
+      const dir = getUserStickersDir();
       const targetFileName = `sticker-${hash}${ext}`;
       const targetPath = path.join(dir, targetFileName);
       fs.writeFileSync(targetPath, buf);
@@ -783,7 +806,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('wa:delete-user-sticker', async (_event, stickerId: string) => {
     try {
-      const dir = getStickersDir();
+      const dir = getUserStickersDir();
       const safeName = path.basename(stickerId);
       const targetPath = path.join(dir, safeName);
       if (fs.existsSync(targetPath)) {
