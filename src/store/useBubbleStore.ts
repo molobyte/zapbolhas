@@ -1042,7 +1042,14 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
   setReplyingTo: (replyingTo) => set({ replyingTo }),
 
-  setViewingImage: (viewingImage) => set({ viewingImage }),
+  setViewingImage: (viewingImage) => {
+    if (viewingImage && window.electronAPI?.openMediaViewerWindow) {
+      window.electronAPI.openMediaViewerWindow(viewingImage);
+      set({ viewingImage: null });
+      return;
+    }
+    set({ viewingImage });
+  },
 
   setActiveReactionDetailsMessage: (activeReactionDetailsMessage) =>
     set({ activeReactionDetailsMessage }),

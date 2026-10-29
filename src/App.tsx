@@ -6,11 +6,13 @@ import { ChatListPopover } from './components/ChatListPopover';
 import { ChatWindowPopover } from './components/ChatWindowPopover';
 import { QRCodePopover } from './components/QRCodePopover';
 import { SettingsPopover } from './components/SettingsPopover';
+import { MediaViewerModal } from './components/MediaViewerModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 export const App: React.FC = () => {
   const {
     activePopover,
+    viewingImage,
     setQrDataUrl,
     setWaStatus,
     applyRealWhatsAppChats,
@@ -29,7 +31,12 @@ export const App: React.FC = () => {
 
   const isSettingsWindow =
     typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('view') === 'settings';
+    (new URLSearchParams(window.location.search).get('view') === 'settings' ||
+      new URLSearchParams(window.location.search).get('view') === 'media-viewer');
+
+  const isMediaViewerWindow =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('view') === 'media-viewer';
 
   const isIgnoringMouseRef = useRef<boolean>(true);
 
@@ -204,6 +211,18 @@ export const App: React.FC = () => {
     logoutWhatsApp,
   ]);
 
+  if (isMediaViewerWindow) {
+    return (
+      <div className="w-screen h-screen bg-transparent p-1 overflow-hidden select-none">
+        <MediaViewerModal
+          isStandaloneWindow
+          onInteractiveEnter={handleInteractiveEnter}
+          onInteractiveLeave={handleInteractiveLeave}
+        />
+      </div>
+    );
+  }
+
   // Quando aberta como Dialog Box separada (?view=settings), renderiza apenas a janela de Configurações
   if (isSettingsWindow) {
     return (
@@ -219,6 +238,17 @@ export const App: React.FC = () => {
 
   return (
     <div className="w-screen h-screen bg-transparent pointer-events-none flex flex-col justify-end items-end pb-[12px] pr-[16px] overflow-hidden select-none">
+      {/* Modal Externo Redimensionável de Visualização de Imagem/Vídeo */}
+      <AnimatePresence>
+        {viewingImage && (
+          <MediaViewerModal
+            key="media-viewer-modal"
+            onInteractiveEnter={handleInteractiveEnter}
+            onInteractiveLeave={handleInteractiveLeave}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Área Superior de Popovers Flutuantes (apenas um aberto por vez) */}
       <div className="mb-[12px] flex flex-col items-end pointer-events-none">
         <ErrorBoundary name="Popovers">

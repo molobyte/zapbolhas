@@ -2505,7 +2505,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
       {/* Modal Lightbox Visualizador de Imagens */}
       <AnimatePresence>
-        {viewingImage && (
+        {viewingImage && Boolean(0) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

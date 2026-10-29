@@ -272,7 +272,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           imageUrl: imageUrl || '',
           videoUrl: targetVideoUrl,
           caption: text || undefined,
-          senderName: fromMe ? 'Você' : senderName || 'Contato',
+          senderName: fromMe
+            ? 'Você'
+            : senderName ||
+              useBubbleStore.getState().chats.find((c) => c.id === message.chatId)?.name ||
+              useBubbleStore.getState().activeBubbles.find((b) => b.chatId === message.chatId)?.name ||
+              'Contato',
           timestamp,
         });
       }
@@ -310,7 +315,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         mediaType: 'image',
         imageUrl: targetUrl,
         caption: text || undefined,
-        senderName: fromMe ? 'Você' : senderName || 'Contato',
+        senderName: fromMe
+          ? 'Você'
+          : senderName ||
+            useBubbleStore.getState().chats.find((c) => c.id === message.chatId)?.name ||
+            useBubbleStore.getState().activeBubbles.find((b) => b.chatId === message.chatId)?.name ||
+            'Contato',
         timestamp,
       });
     }

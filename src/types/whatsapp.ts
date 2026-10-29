@@ -329,6 +329,24 @@ export interface ElectronAPI {
   setDisplay?: (displayId: number) => Promise<boolean>;
   openSettingsWindow?: () => Promise<void>;
   closeSettingsWindow?: () => void;
+  openMediaViewerWindow?: (payload: ViewingImageState) => Promise<void>;
+  closeMediaViewerWindow?: () => void;
+  getMediaViewerData?: () => Promise<ViewingImageState | null>;
+  onMediaViewerData?: (callback: (payload: ViewingImageState) => void) => () => void;
+  getMediaViewerBounds?: () => Promise<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    isMaximized: boolean;
+  } | null>;
+  setMediaViewerBounds?: (bounds: {
+    x?: number;
+    y?: number;
+    width: number;
+    height: number;
+  }) => void;
+  toggleMaximizeMediaViewer?: () => Promise<boolean>;
   broadcastSettingsUpdate?: (patch: Record<string, unknown>) => void;
   onSettingsUpdated?: (callback: (patch: Record<string, unknown>) => void) => () => void;
   onTrayToggleVisibility?: (callback: () => void) => () => void;

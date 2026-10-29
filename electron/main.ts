@@ -6,6 +6,8 @@ import { WhatsAppService } from './whatsappClient';
 
 let mainWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
+let mediaViewerWindow: BrowserWindow | null = null;
+let currentMediaViewerData: Record<string, unknown> | null = null;
 let waService: WhatsAppService | null = null;
 let selectedDisplayId: number | null = null;
 let appTray: Tray | null = null;
@@ -87,6 +89,63 @@ async function openSettingsWindow() {
 
   settingsWindow.on('closed', () => {
     settingsWindow = null;
+  });
+}
+
+async function openMediaViewerWindow(payload: Record<string, unknown>) {
+  currentMediaViewerData = payload;
+
+  if (mediaViewerWindow && !mediaViewerWindow.isDestroyed()) {
+    if (mediaViewerWindow.isMinimized()) {
+      mediaViewerWindow.restore();
+    }
+    mediaViewerWindow.webContents.send('media-viewer:data', payload);
+    mediaViewerWindow.show();
+    mediaViewerWindow.focus();
+    return;
+  }
+
+  const targetDisplay = getTargetDisplay();
+  const { x, y, width, height } = targetDisplay.workArea;
+  const dialogWidth = Math.min(860, Math.round(width * 0.72));
+  const dialogHeight = Math.min(640, Math.round(height * 0.76));
+
+  mediaViewerWindow = new BrowserWindow({
+    width: dialogWidth,
+    height: dialogHeight,
+    minWidth: 420,
+    minHeight: 340,
+    x: Math.round(x + (width - dialogWidth) / 2),
+    y: Math.round(y + (height - dialogHeight) / 2),
+    title: 'Visualizador de Mídia — WhatsApp Bubbles',
+    transparent: true,
+    frame: false,
+    resizable: true,
+    minimizable: true,
+    maximizable: true,
+    alwaysOnTop: true,
+    hasShadow: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  mediaViewerWindow.setAlwaysOnTop(true, 'pop-up-menu');
+
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devServerUrl) {
+    await mediaViewerWindow.loadURL(`${devServerUrl}?view=media-viewer`);
+  } else {
+    await mediaViewerWindow.loadFile(path.join(__dirname, '../dist/index.html'), {
+      query: { view: 'media-viewer' },
+    });
+  }
+
+  mediaViewerWindow.on('closed', () => {
+    mediaViewerWindow = null;
   });
 }
 
@@ -393,6 +452,10 @@ function createOverlayWindow() {
   }
 
   mainWindow.on('closed', () => {
+    if (mediaViewerWindow && !mediaViewerWindow.isDestroyed()) {
+      mediaViewerWindow.close();
+      mediaViewerWindow = null;
+    }
     mainWindow = null;
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.close();
@@ -438,6 +501,57 @@ function registerIpcHandlers() {
 
   ipcMain.handle('window:open-settings', async () => {
     await openSettingsWindow();
+  });
+
+  ipcMain.handle('window:open-media-viewer', async (_event, payload: Record<string, unknown>) => {
+    await openMediaViewerWindow(payload);
+  });
+
+  ipcMain.on('window:close-media-viewer', () => {
+    if (mediaViewerWindow && !mediaViewerWindow.isDestroyed()) {
+      mediaViewerWindow.close();
+      mediaViewerWindow = null;
+    }
+  });
+
+  ipcMain.handle('window:get-media-viewer-data', () => {
+    return currentMediaViewerData;
+  });
+
+  ipcMain.handle('window:get-media-viewer-bounds', () => {
+    if (!mediaViewerWindow || mediaViewerWindow.isDestroyed()) return null;
+    return {
+      ...mediaViewerWindow.getBounds(),
+      isMaximized: mediaViewerWindow.isMaximized(),
+    };
+  });
+
+  ipcMain.on(
+    'window:set-media-viewer-bounds',
+    (_event, bounds: { x?: number; y?: number; width: number; height: number }) => {
+      if (!mediaViewerWindow || mediaViewerWindow.isDestroyed()) return;
+      if (mediaViewerWindow.isMaximized()) {
+        mediaViewerWindow.unmaximize();
+      }
+      const current = mediaViewerWindow.getBounds();
+      mediaViewerWindow.setBounds({
+        x: typeof bounds.x === 'number' ? Math.round(bounds.x) : current.x,
+        y: typeof bounds.y === 'number' ? Math.round(bounds.y) : current.y,
+        width: Math.max(420, Math.round(bounds.width)),
+        height: Math.max(340, Math.round(bounds.height)),
+      });
+    }
+  );
+
+  ipcMain.handle('window:toggle-maximize-media-viewer', () => {
+    if (!mediaViewerWindow || mediaViewerWindow.isDestroyed()) return false;
+    if (mediaViewerWindow.isMaximized()) {
+      mediaViewerWindow.unmaximize();
+      return false;
+    } else {
+      mediaViewerWindow.maximize();
+      return true;
+    }
   });
 
   ipcMain.on('window:close-settings', () => {

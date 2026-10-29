@@ -142,6 +142,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('window:close-settings');
   },
 
+  openMediaViewerWindow: (payload: Record<string, unknown>) => {
+    return ipcRenderer.invoke('window:open-media-viewer', payload);
+  },
+
+  closeMediaViewerWindow: () => {
+    ipcRenderer.send('window:close-media-viewer');
+  },
+
+  getMediaViewerData: () => {
+    return ipcRenderer.invoke('window:get-media-viewer-data');
+  },
+
+  onMediaViewerData: (callback: (payload: Record<string, unknown>) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: Record<string, unknown>) =>
+      callback(payload);
+    ipcRenderer.on('media-viewer:data', handler);
+    return () => ipcRenderer.removeListener('media-viewer:data', handler);
+  },
+
+  getMediaViewerBounds: () => {
+    return ipcRenderer.invoke('window:get-media-viewer-bounds');
+  },
+
+  setMediaViewerBounds: (bounds: { x?: number; y?: number; width: number; height: number }) => {
+    ipcRenderer.send('window:set-media-viewer-bounds', bounds);
+  },
+
+  toggleMaximizeMediaViewer: () => {
+    return ipcRenderer.invoke('window:toggle-maximize-media-viewer');
+  },
+
   broadcastSettingsUpdate: (patch: Record<string, unknown>) => {
     ipcRenderer.send('settings:broadcast', patch);
   },
