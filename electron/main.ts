@@ -50,8 +50,8 @@ async function openSettingsWindow() {
 
   const targetDisplay = getTargetDisplay();
   const { x, y, width, height } = targetDisplay.workArea;
-  const dialogWidth = 410;
-  const dialogHeight = 580;
+  const dialogWidth = 720;
+  const dialogHeight = 510;
 
   settingsWindow = new BrowserWindow({
     width: dialogWidth,
