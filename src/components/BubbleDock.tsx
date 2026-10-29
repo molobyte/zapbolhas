@@ -1,10 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Settings,
-  LogOut,
-  Power,
-  RotateCw,
   Pin,
   PinOff,
   Maximize2,
@@ -12,7 +8,6 @@ import {
   Check,
   CheckCheck,
   CircleDot,
-  EyeOff,
   X,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
@@ -43,41 +38,23 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
     setChatBubbleSize,
     markChatAsUnread,
     markChatAsRead,
-    openSettings,
-    logoutWhatsApp,
-    refreshApp,
     dockAnimPhase,
     toggleDockVisibility,
   } = useBubbleStore();
 
-  const [showContextMenu, setShowContextMenu] = useState(false);
   const [bubbleMenu, setBubbleMenu] = useState<{
     bubble: BubbleItem;
     rightPx: number;
   } | null>(null);
   const [showSizeSubmenu, setShowSizeSubmenu] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const dockContainerRef = useRef<HTMLDivElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const bubbleMenuRef = useRef<HTMLDivElement | null>(null);
 
   const isSyncing =
     waStatus === 'initializing' ||
     waStatus === 'authenticated' ||
     (waStatus === 'ready' && !hasSyncedRealChats);
-
-  // Fecha menu do WhatsApp ao clicar fora
-  useEffect(() => {
-    if (!showContextMenu) return;
-    const handleOutsideClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setShowContextMenu(false);
-      }
-    };
-    window.addEventListener('mousedown', handleOutsideClick);
-    return () => window.removeEventListener('mousedown', handleOutsideClick);
-  }, [showContextMenu]);
 
   // Fecha menu da bolha ao clicar fora ou ao pressionar Escape
   useEffect(() => {
@@ -110,15 +87,7 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
     }
   }, [activeBubbles, bubbleMenu]);
 
-  const handleRightClickLogo = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setBubbleMenu(null);
-    setShowContextMenu((prev) => !prev);
-  };
-
   const handleOpenBubbleMenu = (bubble: BubbleItem, e: React.MouseEvent) => {
-    setShowContextMenu(false);
     if (!dockContainerRef.current) return;
     const dockRect = dockContainerRef.current.getBoundingClientRect();
     const targetRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -128,100 +97,6 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
 
   return (
     <div ref={dockContainerRef} className="relative flex flex-col items-end">
-      {/* Menu de Contexto Flutuante (Botão Direito no Logo do WhatsApp) */}
-      <AnimatePresence>
-        {showContextMenu && (
-          <motion.div
-            ref={menuRef}
-            data-interactive="true"
-            onMouseEnter={onInteractiveEnter}
-            onMouseLeave={onInteractiveLeave}
-            initial={{ opacity: 0, y: 8, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.95 }}
-            transition={{ duration: 0.14 }}
-            className="absolute bottom-full right-0 mb-2.5 w-[215px] bg-[#182229]/95 backdrop-blur-md rounded-[10px] shadow-[0_14px_38px_rgba(0,0,0,0.92)] border border-white/15 py-1.5 z-[100] pointer-events-auto overflow-hidden"
-          >
-            <button
-              type="button"
-              onClick={() => {
-                setShowContextMenu(false);
-                toggleDockVisibility(true);
-              }}
-              className="w-full px-3.5 py-2 text-left text-[13px] text-[#E9EDEF] hover:bg-[#202C33] flex items-center gap-2.5 transition-colors"
-            >
-              <EyeOff className="w-4 h-4 text-[#25D366]" />
-              <span>Esconder ZapBolhas</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setShowContextMenu(false);
-                openSettings();
-              }}
-              className="w-full px-3.5 py-2 text-left text-[13px] text-[#E9EDEF] hover:bg-[#202C33] flex items-center gap-2.5 transition-colors"
-            >
-              <Settings className="w-4 h-4 text-[#25D366]" />
-              <span>Configurações</span>
-            </button>
-
-            <button
-              type="button"
-              disabled={isRefreshing}
-              onClick={async (e) => {
-                setIsRefreshing(true);
-                try {
-                  if (e.ctrlKey || e.shiftKey) {
-                    window.electronAPI?.reloadWindow?.();
-                    return;
-                  }
-                  await refreshApp();
-                } finally {
-                  setTimeout(() => {
-                    setIsRefreshing(false);
-                    setShowContextMenu(false);
-                  }, 350);
-                }
-              }}
-              className="w-full px-3.5 py-2 text-left text-[13px] text-[#E9EDEF] hover:bg-[#202C33] flex items-center gap-2.5 transition-colors disabled:opacity-60"
-            >
-              <RotateCw
-                className={`w-4 h-4 text-[#00A884] ${isRefreshing ? 'animate-spin' : ''}`}
-              />
-              <span>{isRefreshing ? 'Recarregando...' : 'Recarregar'}</span>
-            </button>
-
-            {/* Deslogar no padrão das opções de cima: texto branco e ícone sutil */}
-            <button
-              type="button"
-              onClick={async () => {
-                setShowContextMenu(false);
-                await logoutWhatsApp();
-              }}
-              className="w-full px-3.5 py-2 text-left text-[13px] text-[#E9EDEF] hover:bg-[#202C33] flex items-center gap-2.5 transition-colors"
-            >
-              <LogOut className="w-4 h-4 text-[#8696A0]" />
-              <span>Deslogar do WhatsApp</span>
-            </button>
-
-            <div className="my-1 border-t border-white/[0.08]" />
-
-            <button
-              type="button"
-              onClick={() => {
-                setShowContextMenu(false);
-                window.electronAPI?.quitApp?.();
-              }}
-              className="w-full px-3.5 py-2 text-left text-[13px] text-[#EF4444] hover:bg-[#202C33] flex items-center gap-2.5 transition-colors"
-            >
-              <Power className="w-4 h-4 text-[#EF4444]" />
-              <span>Sair do aplicativo</span>
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Menu de Contexto Flutuante das Bolhas de Contato (Visualmente idêntico ao de 10.png) */}
       <AnimatePresence>
         {bubbleMenu && (
@@ -464,13 +339,11 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
           type="button"
           onClick={() => {
             if (dockAnimPhase !== 'visible') return;
-            setShowContextMenu(false);
             setBubbleMenu(null);
             toggleMainButton();
           }}
           onContextMenu={(e) => {
-            if (dockAnimPhase !== 'visible') return;
-            handleRightClickLogo(e);
+            e.preventDefault();
           }}
           whileTap={dockAnimPhase === 'visible' ? { scale: 0.94 } : undefined}
           animate={
@@ -499,8 +372,8 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
           }
           title={
             isSyncing
-              ? 'Sincronizando conversas do WhatsApp... (Clique direito para opções)'
-              : 'WhatsApp Bubbles (Clique esquerdo: conversas | Clique direito: opções)'
+              ? 'Sincronizando conversas do WhatsApp...'
+              : 'WhatsApp Bubbles (Clique para abrir/fechar conversas)'
           }
           className="relative z-30 w-[48px] h-[48px] shrink-0 rounded-full bg-[#25D366] hover:bg-[#22c55e] text-white shadow-[0_4px_14px_rgba(0,0,0,0.65)] flex items-center justify-center focus:outline-none"
         >

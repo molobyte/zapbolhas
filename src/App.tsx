@@ -23,6 +23,8 @@ export const App: React.FC = () => {
     dockAnimPhase,
     soundMuted,
     toggleDockVisibility,
+    refreshApp,
+    logoutWhatsApp,
   } = useBubbleStore();
 
   const isSettingsWindow =
@@ -154,6 +156,18 @@ export const App: React.FC = () => {
         })
       : () => {};
 
+    const unsubTrayRefresh = api.onTrayRefresh
+      ? api.onTrayRefresh(() => {
+          refreshApp();
+        })
+      : () => {};
+
+    const unsubTrayLogout = api.onTrayLogout
+      ? api.onTrayLogout(() => {
+          logoutWhatsApp();
+        })
+      : () => {};
+
     const unsubTraySet = api.onTraySetVisibility
       ? api.onTraySetVisibility((hidden) => {
           toggleDockVisibility(hidden);
@@ -172,6 +186,8 @@ export const App: React.FC = () => {
       unsubSettings();
       unsubTrayToggle();
       unsubTraySet();
+      unsubTrayRefresh();
+      unsubTrayLogout();
     };
   }, [
     isSettingsWindow,
@@ -184,6 +200,8 @@ export const App: React.FC = () => {
     deleteMessagesLocally,
     applyExternalSettingsUpdate,
     toggleDockVisibility,
+    refreshApp,
+    logoutWhatsApp,
   ]);
 
   // Quando aberta como Dialog Box separada (?view=settings), renderiza apenas a janela de Configurações

@@ -11,6 +11,7 @@ let selectedDisplayId: number | null = null;
 let appTray: Tray | null = null;
 let isZapBolhasHidden = false;
 let isSoundMuted = false;
+let currentTrayMenu: Menu | null = null;
 
 const TRAY_ICON_FALLBACK_DATA_URL = 'data:image/png;base64,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';
 
@@ -36,6 +37,58 @@ function getAppIconImage(): Electron.NativeImage {
     } catch {}
   }
   return nativeImage.createFromDataURL(TRAY_ICON_FALLBACK_DATA_URL);
+}
+
+async function openSettingsWindow() {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    if (settingsWindow.isMinimized()) {
+      settingsWindow.restore();
+    }
+    settingsWindow.show();
+    settingsWindow.focus();
+    return;
+  }
+
+  const targetDisplay = getTargetDisplay();
+  const { x, y, width, height } = targetDisplay.workArea;
+  const dialogWidth = 410;
+  const dialogHeight = 580;
+
+  settingsWindow = new BrowserWindow({
+    width: dialogWidth,
+    height: dialogHeight,
+    x: Math.round(x + (width - dialogWidth) / 2),
+    y: Math.round(y + (height - dialogHeight) / 2),
+    title: 'Configurações — WhatsApp Bubbles',
+    transparent: true,
+    frame: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    hasShadow: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  settingsWindow.setAlwaysOnTop(true, 'pop-up-menu');
+
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devServerUrl) {
+    await settingsWindow.loadURL(`${devServerUrl}?view=settings`);
+  } else {
+    await settingsWindow.loadFile(path.join(__dirname, '../dist/index.html'), {
+      query: { view: 'settings' },
+    });
+  }
+
+  settingsWindow.on('closed', () => {
+    settingsWindow = null;
+  });
 }
 
 function updateTrayMenu() {
@@ -78,6 +131,34 @@ function updateTrayMenu() {
         }
       },
     },
+    { type: 'separator' },
+    {
+      label: 'Configurações',
+      click: () => {
+        openSettingsWindow();
+      },
+    },
+    {
+      label: 'Recarregar',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('tray:action-refresh');
+        } else if (waService) {
+          waService.refresh();
+        }
+      },
+    },
+    {
+      label: 'Deslogar do WhatsApp',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('tray:action-logout');
+        } else if (waService) {
+          waService.logout();
+        }
+      },
+    },
+    { type: 'separator' },
     {
       label: 'Tela',
       submenu: displaySubmenu,
@@ -106,11 +187,8 @@ function updateTrayMenu() {
     },
   ]);
 
-  appTray.setToolTip(
-    isZapBolhasHidden
-      ? 'ZapBolhas (Escondido — Clique para revelar)'
-      : 'ZapBolhas (Ativo — Clique para esconder)'
-  );
+  currentTrayMenu = contextMenu;
+  appTray.setToolTip('ZapBolhas');
   appTray.setContextMenu(contextMenu);
 }
 
@@ -120,8 +198,12 @@ function createSystemTray() {
   appTray = new Tray(icon);
 
   appTray.on('click', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('tray:toggle-visibility');
+    if (appTray) {
+      if (currentTrayMenu) {
+        appTray.popUpContextMenu(currentTrayMenu);
+      } else {
+        appTray.popUpContextMenu();
+      }
     }
   });
 
@@ -357,55 +439,7 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('window:open-settings', async () => {
-    if (settingsWindow && !settingsWindow.isDestroyed()) {
-      if (settingsWindow.isMinimized()) {
-        settingsWindow.restore();
-      }
-      settingsWindow.show();
-      settingsWindow.focus();
-      return;
-    }
-
-    const targetDisplay = getTargetDisplay();
-    const { x, y, width, height } = targetDisplay.workArea;
-    const dialogWidth = 410;
-    const dialogHeight = 580;
-
-    settingsWindow = new BrowserWindow({
-      width: dialogWidth,
-      height: dialogHeight,
-      x: Math.round(x + (width - dialogWidth) / 2),
-      y: Math.round(y + (height - dialogHeight) / 2),
-      title: 'Configurações — WhatsApp Bubbles',
-      transparent: true,
-      frame: false,
-      resizable: false,
-      minimizable: false,
-      maximizable: false,
-      alwaysOnTop: true,
-      hasShadow: true,
-      backgroundColor: '#00000000',
-      webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
-      },
-    });
-
-    settingsWindow.setAlwaysOnTop(true, 'pop-up-menu');
-
-    const devServerUrl = process.env.VITE_DEV_SERVER_URL;
-    if (devServerUrl) {
-      await settingsWindow.loadURL(`${devServerUrl}?view=settings`);
-    } else {
-      await settingsWindow.loadFile(path.join(__dirname, '../dist/index.html'), {
-        query: { view: 'settings' },
-      });
-    }
-
-    settingsWindow.on('closed', () => {
-      settingsWindow = null;
-    });
+    await openSettingsWindow();
   });
 
   ipcMain.on('window:close-settings', () => {

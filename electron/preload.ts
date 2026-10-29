@@ -165,6 +165,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('tray:set-visibility', handler);
   },
 
+  onTrayRefresh: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('tray:action-refresh', handler);
+    return () => ipcRenderer.removeListener('tray:action-refresh', handler);
+  },
+
+  onTrayLogout: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('tray:action-logout', handler);
+    return () => ipcRenderer.removeListener('tray:action-logout', handler);
+  },
+
   onDisplayChanged: (callback: (displayId: number) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, displayId: number) => callback(displayId);
     ipcRenderer.on('display:changed', handler);
