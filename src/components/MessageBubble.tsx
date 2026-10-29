@@ -201,12 +201,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   }, [showQuickReactions, showFullPicker]);
 
   const displayCaption = text && !isRawMediaBase64OrKey(text) ? text : '';
-  // Mensagem de visualização única protegida pelo WhatsApp
+  // Mensagem de visualização única protegida pelo WhatsApp (aplicável apenas a mídias de foto/vídeo)
+  const isMediaMsgType =
+    type === 'image' ||
+    type === 'video' ||
+    (message as any).rawType === 'view_once' ||
+    (message as any).rawType === 'image' ||
+    (message as any).rawType === 'video';
+
   const isViewOnceMsg =
     Boolean(message.isViewOnce) ||
-    (!displayCaption &&
+    (isMediaMsgType &&
       !imageUrl &&
       !videoUrl &&
+      !displayCaption &&
       !audioData &&
       type !== 'audio' &&
       type !== 'sticker');

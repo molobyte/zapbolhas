@@ -309,21 +309,38 @@ function isRawMediaBase64OrKey(str?: string | null): boolean {
   if (!str || typeof str !== 'string') return false;
   const trimmed = str.trim();
   if (/\s/.test(trimmed)) return false;
-  if (trimmed.length >= 24) {
-    if (
-      trimmed.startsWith('/9j/') ||
-      trimmed.startsWith('iVBORw0KGgo') ||
-      trimmed.startsWith('R0lGODlh') ||
-      trimmed.startsWith('UklGR') ||
-      trimmed.startsWith('data:image/') ||
-      trimmed.startsWith('data:video/')
-    ) {
-      return true;
-    }
-    if (/^[A-Za-z0-9+/=]{32,}$/.test(trimmed)) {
+
+  if (
+    trimmed.startsWith('data:image/') ||
+    trimmed.startsWith('data:video/') ||
+    trimmed.startsWith('/9j/') ||
+    trimmed.startsWith('iVBORw0KGgo') ||
+    trimmed.startsWith('R0lGODlh') ||
+    trimmed.startsWith('UklGR')
+  ) {
+    return true;
+  }
+
+  if (trimmed.length < 32) return false;
+  if (/^[A-Za-zÀ-ÿ]+$/.test(trimmed)) return false;
+
+  const uniqueChars = new Set(trimmed);
+  if (uniqueChars.size <= 5) return false;
+
+  if (/^[A-Za-z0-9+/=]{40,70}$/.test(trimmed) && trimmed.endsWith('=') && /[0-9]/.test(trimmed)) {
+    return true;
+  }
+
+  if (trimmed.length >= 100 && /^[A-Za-z0-9+/=]+$/.test(trimmed)) {
+    const hasSymbols = /[+/=]/.test(trimmed);
+    const hasDigits = /[0-9]/.test(trimmed);
+    const hasUpper = /[A-Z]/.test(trimmed);
+    const hasLower = /[a-z]/.test(trimmed);
+    if (hasDigits && (hasSymbols || (hasUpper && hasLower))) {
       return true;
     }
   }
+
   return false;
 }
 
@@ -965,21 +982,38 @@ export class WhatsAppService {
           if (!str || typeof str !== 'string') return false;
           const trimmed = str.trim();
           if (/\s/.test(trimmed)) return false;
-          if (trimmed.length >= 24) {
-            if (
-              trimmed.startsWith('/9j/') ||
-              trimmed.startsWith('iVBORw0KGgo') ||
-              trimmed.startsWith('R0lGODlh') ||
-              trimmed.startsWith('UklGR') ||
-              trimmed.startsWith('data:image/') ||
-              trimmed.startsWith('data:video/')
-            ) {
-              return true;
-            }
-            if (/^[A-Za-z0-9+/=]{32,}$/.test(trimmed)) {
+
+          if (
+            trimmed.startsWith('data:image/') ||
+            trimmed.startsWith('data:video/') ||
+            trimmed.startsWith('/9j/') ||
+            trimmed.startsWith('iVBORw0KGgo') ||
+            trimmed.startsWith('R0lGODlh') ||
+            trimmed.startsWith('UklGR')
+          ) {
+            return true;
+          }
+
+          if (trimmed.length < 32) return false;
+          if (/^[A-Za-zÀ-ÿ]+$/.test(trimmed)) return false;
+
+          const uniqueChars = new Set(trimmed);
+          if (uniqueChars.size <= 5) return false;
+
+          if (/^[A-Za-z0-9+/=]{40,70}$/.test(trimmed) && trimmed.endsWith('=') && /[0-9]/.test(trimmed)) {
+            return true;
+          }
+
+          if (trimmed.length >= 100 && /^[A-Za-z0-9+/=]+$/.test(trimmed)) {
+            const hasSymbols = /[+/=]/.test(trimmed);
+            const hasDigits = /[0-9]/.test(trimmed);
+            const hasUpper = /[A-Z]/.test(trimmed);
+            const hasLower = /[a-z]/.test(trimmed);
+            if (hasDigits && (hasSymbols || (hasUpper && hasLower))) {
               return true;
             }
           }
+
           return false;
         };
 
@@ -1085,6 +1119,7 @@ export class WhatsAppService {
             !caption &&
             !directPath &&
             !renderableUrl &&
+            rawType !== 'chat' &&
             rawType !== 'ptt' &&
             rawType !== 'audio' &&
             rawType !== 'sticker' &&
@@ -2115,6 +2150,7 @@ export class WhatsAppService {
               !caption &&
               !directPath &&
               !renderableUrl &&
+              rawType !== 'chat' &&
               rawType !== 'ptt' &&
               rawType !== 'audio' &&
               rawType !== 'sticker' &&
@@ -2131,21 +2167,38 @@ export class WhatsAppService {
             if (!str || typeof str !== 'string') return false;
             const trimmed = str.trim();
             if (/\s/.test(trimmed)) return false;
-            if (trimmed.length >= 24) {
-              if (
-                trimmed.startsWith('/9j/') ||
-                trimmed.startsWith('iVBORw0KGgo') ||
-                trimmed.startsWith('R0lGODlh') ||
-                trimmed.startsWith('UklGR') ||
-                trimmed.startsWith('data:image/') ||
-                trimmed.startsWith('data:video/')
-              ) {
-                return true;
-              }
-              if (/^[A-Za-z0-9+/=]{32,}$/.test(trimmed)) {
+
+            if (
+              trimmed.startsWith('data:image/') ||
+              trimmed.startsWith('data:video/') ||
+              trimmed.startsWith('/9j/') ||
+              trimmed.startsWith('iVBORw0KGgo') ||
+              trimmed.startsWith('R0lGODlh') ||
+              trimmed.startsWith('UklGR')
+            ) {
+              return true;
+            }
+
+            if (trimmed.length < 32) return false;
+            if (/^[A-Za-zÀ-ÿ]+$/.test(trimmed)) return false;
+
+            const uniqueChars = new Set(trimmed);
+            if (uniqueChars.size <= 5) return false;
+
+            if (/^[A-Za-z0-9+/=]{40,70}$/.test(trimmed) && trimmed.endsWith('=') && /[0-9]/.test(trimmed)) {
+              return true;
+            }
+
+            if (trimmed.length >= 100 && /^[A-Za-z0-9+/=]+$/.test(trimmed)) {
+              const hasSymbols = /[+/=]/.test(trimmed);
+              const hasDigits = /[0-9]/.test(trimmed);
+              const hasUpper = /[A-Z]/.test(trimmed);
+              const hasLower = /[a-z]/.test(trimmed);
+              if (hasDigits && (hasSymbols || (hasUpper && hasLower))) {
                 return true;
               }
             }
+
             return false;
           };
 
@@ -3191,21 +3244,38 @@ export class WhatsAppService {
           if (!str || typeof str !== 'string') return false;
           const trimmed = str.trim();
           if (/\s/.test(trimmed)) return false;
-          if (trimmed.length >= 24) {
-            if (
-              trimmed.startsWith('/9j/') ||
-              trimmed.startsWith('iVBORw0KGgo') ||
-              trimmed.startsWith('R0lGODlh') ||
-              trimmed.startsWith('UklGR') ||
-              trimmed.startsWith('data:image/') ||
-              trimmed.startsWith('data:video/')
-            ) {
-              return true;
-            }
-            if (/^[A-Za-z0-9+/=]{32,}$/.test(trimmed)) {
+
+          if (
+            trimmed.startsWith('data:image/') ||
+            trimmed.startsWith('data:video/') ||
+            trimmed.startsWith('/9j/') ||
+            trimmed.startsWith('iVBORw0KGgo') ||
+            trimmed.startsWith('R0lGODlh') ||
+            trimmed.startsWith('UklGR')
+          ) {
+            return true;
+          }
+
+          if (trimmed.length < 32) return false;
+          if (/^[A-Za-zÀ-ÿ]+$/.test(trimmed)) return false;
+
+          const uniqueChars = new Set(trimmed);
+          if (uniqueChars.size <= 5) return false;
+
+          if (/^[A-Za-z0-9+/=]{40,70}$/.test(trimmed) && trimmed.endsWith('=') && /[0-9]/.test(trimmed)) {
+            return true;
+          }
+
+          if (trimmed.length >= 100 && /^[A-Za-z0-9+/=]+$/.test(trimmed)) {
+            const hasSymbols = /[+/=]/.test(trimmed);
+            const hasDigits = /[0-9]/.test(trimmed);
+            const hasUpper = /[A-Z]/.test(trimmed);
+            const hasLower = /[a-z]/.test(trimmed);
+            if (hasDigits && (hasSymbols || (hasUpper && hasLower))) {
               return true;
             }
           }
+
           return false;
         };
 
@@ -3311,6 +3381,7 @@ export class WhatsAppService {
             !caption &&
             !directPath &&
             !renderableUrl &&
+            rawType !== 'chat' &&
             rawType !== 'ptt' &&
             rawType !== 'audio' &&
             rawType !== 'sticker' &&
