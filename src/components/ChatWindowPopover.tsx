@@ -29,6 +29,8 @@ import { ReactionDetailsModal } from './ReactionDetailsModal';
 import { ChatContactSidebar } from './ChatContactSidebar';
 import { ForwardMessagesModal } from './ForwardMessagesModal';
 import { DeleteMessagesModal } from './DeleteMessagesModal';
+import { TextFormatToolbar } from './TextFormatToolbar';
+import { formatSelectedText, getSelectionHorizontalOffset, FormatType } from '../utils/formatText';
 
 interface ChatWindowPopoverProps {
   onInteractiveEnter: () => void;
@@ -126,6 +128,13 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const messagesContentRef = useRef<HTMLDivElement | null>(null);
   const unreadDividerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const [selectionToolbar, setSelectionToolbar] = useState<{
+    start: number;
+    end: number;
+    centerX: number;
+    containerWidth: number;
+  } | null>(null);
   const userHasScrolledUpRef = useRef<boolean>(false);
   const isAtBottomRef = useRef<boolean>(true);
   const initialUnreadScrolledForChatRef = useRef<string | null>(null);
@@ -545,12 +554,23 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     setViewingImage(null);
     setPickerOpen(false);
     setShowMentionPopover(false);
+    setSelectionToolbar(null);
     setZoom(1);
   }, [activeChatId, setViewingImage]);
 
   useEffect(() => {
     setZoom(1);
   }, [viewingImage]);
+
+  useEffect(() => {
+    const handleGlobalMouseDown = (e: MouseEvent) => {
+      if (formRef.current && !formRef.current.contains(e.target as Node)) {
+        setSelectionToolbar(null);
+      }
+    };
+    window.addEventListener('mousedown', handleGlobalMouseDown);
+    return () => window.removeEventListener('mousedown', handleGlobalMouseDown);
+  }, []);
 
   // Carrega os 10 primeiros colaboradores ao abrir o grupo
   useEffect(() => {
@@ -859,6 +879,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
       setPickerOpen(false);
       setShowMentionPopover(false);
+    setSelectionToolbar(null);
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -1136,6 +1157,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         e.preventDefault();
         e.stopPropagation();
         setShowMentionPopover(false);
+    setSelectionToolbar(null);
         return;
       }
 
@@ -1200,6 +1222,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     const nextText = `${before}${replacement}${after}`;
     setInputText(nextText);
     setShowMentionPopover(false);
+    setSelectionToolbar(null);
 
     const userTag = participant.user || (participant.rawId || participant.id).split('@')[0];
     const mentionData: TrackedMentionData = {
@@ -1224,6 +1247,63 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     });
   };
 
+  const handleCheckTextSelection = () => {
+    const textarea = inputRef.current;
+    const form = formRef.current;
+    if (!textarea || !form) {
+      setSelectionToolbar(null);
+      return;
+    }
+
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+
+    if (start >= end) {
+      setSelectionToolbar(null);
+      return;
+    }
+
+    const selectedStr = textarea.value.substring(start, end);
+    if (!selectedStr.trim()) {
+      setSelectionToolbar(null);
+      return;
+    }
+
+    const formRect = form.getBoundingClientRect();
+    const textareaRect = textarea.getBoundingClientRect();
+    const offsetInsideTextarea = getSelectionHorizontalOffset(textarea, start, end);
+    const centerX = textareaRect.left - formRect.left + offsetInsideTextarea;
+
+    setSelectionToolbar({
+      start,
+      end,
+      centerX,
+      containerWidth: formRect.width,
+    });
+  };
+
+  const handleApplyFormat = (type: FormatType) => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    if (start >= end) return;
+
+    const currentVal = textarea.value;
+    const result = formatSelectedText(type, currentVal, start, end);
+
+    setInputText(result.nextText);
+
+    requestAnimationFrame(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.setSelectionRange(result.newStart, result.newEnd);
+        handleCheckTextSelection();
+      }
+    });
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     const cursorPos = e.target.selectionStart ?? value.length;
@@ -1231,6 +1311,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
     if (!isGroupChat) {
       setShowMentionPopover(false);
+    setSelectionToolbar(null);
       return;
     }
 
@@ -1247,6 +1328,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       }
     }
     setShowMentionPopover(false);
+    setSelectionToolbar(null);
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1276,8 +1358,44 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         e.preventDefault();
         e.stopPropagation();
         setShowMentionPopover(false);
+    setSelectionToolbar(null);
         return;
       }
+    }
+
+    // Atalhos de teclado estilo WhatsApp Web para formatação quando há texto selecionado
+    if ((e.ctrlKey || e.metaKey) && inputRef.current) {
+      const start = inputRef.current.selectionStart ?? 0;
+      const end = inputRef.current.selectionEnd ?? 0;
+      if (start < end) {
+        const key = e.key.toLowerCase();
+        if (key === 'b') {
+          e.preventDefault();
+          handleApplyFormat('bold');
+          return;
+        }
+        if (key === 'i') {
+          e.preventDefault();
+          handleApplyFormat('italic');
+          return;
+        }
+        if ((e.shiftKey && key === 'x') || key === 'u') {
+          e.preventDefault();
+          handleApplyFormat('strikethrough');
+          return;
+        }
+        if (e.shiftKey && key === 'm') {
+          e.preventDefault();
+          handleApplyFormat('monospace');
+          return;
+        }
+      }
+    }
+
+    if (e.key === 'Escape' && selectionToolbar) {
+      e.preventDefault();
+      setSelectionToolbar(null);
+      return;
     }
 
     // Regra: Shift + Enter insere nova linha no chat sem enviar; Enter normal envia diretamente
@@ -1344,6 +1462,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     setInputText('');
     setPickerOpen(false);
     setShowMentionPopover(false);
+    setSelectionToolbar(null);
     setTrackedMentions(new Map());
     isAtBottomRef.current = true;
     userHasScrolledUpRef.current = false;
@@ -2241,7 +2360,20 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
           </div>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="relative z-20 px-2 pb-2 pt-1">
+        <form ref={formRef} onSubmit={handleSubmit} className="relative z-20 px-2 pb-2 pt-1">
+          {/* Barra Flutuante de Formatação de Texto (WhatsApp Web) */}
+          <AnimatePresence>
+            {selectionToolbar && !showMentionPopover && !isRecording && (
+              <TextFormatToolbar
+                fullText={inputText}
+                selectionStart={selectionToolbar.start}
+                selectionEnd={selectionToolbar.end}
+                centerX={selectionToolbar.centerX}
+                containerWidth={selectionToolbar.containerWidth}
+                onApplyFormat={handleApplyFormat}
+              />
+            )}
+          </AnimatePresence>
         {isRecording ? (
           <div className="h-[42px] bg-[#202C33] rounded-[8px] px-3 flex items-center justify-between gap-2 shadow-[0_2px_8px_rgba(0,0,0,0.45)] select-none">
             {/* Botão Cancelar / Lixeira (Vermelho) */}
@@ -2335,6 +2467,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
               value={inputText}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
+              onSelect={handleCheckTextSelection}
+              onKeyUp={handleCheckTextSelection}
+              onMouseUp={handleCheckTextSelection}
               onPaste={handleClipboardPaste}
               placeholder={
                 isGroupChat
@@ -2536,6 +2671,29 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                 value={pendingCaption}
                 onChange={(e) => setPendingCaption(e.target.value)}
                 onKeyDown={(e) => {
+                  if (e.ctrlKey || e.metaKey) {
+                    const input = e.currentTarget;
+                    const start = input.selectionStart ?? 0;
+                    const end = input.selectionEnd ?? 0;
+                    if (start < end) {
+                      const key = e.key.toLowerCase();
+                      let fType: FormatType | null = null;
+                      if (key === 'b') fType = 'bold';
+                      else if (key === 'i') fType = 'italic';
+                      else if ((e.shiftKey && key === 'x') || key === 'u') fType = 'strikethrough';
+                      else if (e.shiftKey && key === 'm') fType = 'monospace';
+
+                      if (fType) {
+                        e.preventDefault();
+                        const res = formatSelectedText(fType, pendingCaption, start, end);
+                        setPendingCaption(res.nextText);
+                        requestAnimationFrame(() => {
+                          input.setSelectionRange(res.newStart, res.newEnd);
+                        });
+                        return;
+                      }
+                    }
+                  }
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     handleConfirmPendingMedia();
