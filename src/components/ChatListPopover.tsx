@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, Search, Plus, X, ArrowLeft, User, Pin } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
-import { ChatSummary, SavedContact } from '../types/whatsapp';
+import { ChatSummary, SavedContact, CHAT_LIST_SIZE_CONFIG } from '../types/whatsapp';
 import { MessageCheckIcon } from './MessageCheckIcon';
 
 interface ChatListPopoverProps {
@@ -62,6 +62,8 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
     fetchSavedContacts,
     startChatWithContact,
     pinnedChatIds,
+    chatListSize,
+    bubbleScale,
   } = useBubbleStore();
 
   const [view, setView] = React.useState<'chats' | 'contacts'>('chats');
@@ -204,6 +206,9 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
     );
   };
 
+  const currentSize = CHAT_LIST_SIZE_CONFIG[chatListSize] || CHAT_LIST_SIZE_CONFIG.padrao;
+  const arrowRightPx = Math.max(8, Math.round(24 * bubbleScale - 8));
+
   return (
     <motion.div
       data-interactive="true"
@@ -213,7 +218,11 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 12, scale: 0.96 }}
       transition={{ type: 'spring', stiffness: 420, damping: 28 }}
-      className="relative w-[316px] h-[456px] bg-[#18191B] rounded-[6px] shadow-[0_14px_40px_rgba(0,0,0,0.85)] border border-white/[0.05] flex flex-col pointer-events-auto group/list"
+      style={{
+        width: `${currentSize.width}px`,
+        height: `${currentSize.height}px`,
+      }}
+      className={`relative ${currentSize.widthClass} ${currentSize.heightClass} max-h-[calc(100vh-84px)] bg-[#18191B] rounded-[6px] shadow-[0_14px_40px_rgba(0,0,0,0.85)] border border-white/[0.05] flex flex-col pointer-events-auto group/list transition-[width,height] duration-200`}
     >
       {view === 'chats' ? (
         <>
@@ -482,8 +491,11 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
 
       {/* Seta / Triângulo Inferior Direito Apontando exatamente para o Centro do Botão Verde do WhatsApp */}
       <div
-        style={{ clipPath: 'polygon(0 0, 100% 0, 50% 100%)' }}
-        className="w-[16px] h-[8px] bg-[#18191B] absolute top-full -mt-[1px] right-[16px] pointer-events-none z-30"
+        style={{
+          right: `${arrowRightPx}px`,
+          clipPath: 'polygon(0 0, 100% 0, 50% 100%)',
+        }}
+        className="w-[16px] h-[8px] bg-[#18191B] absolute top-full -mt-[1px] pointer-events-none z-30"
         aria-hidden="true"
       />
     </motion.div>

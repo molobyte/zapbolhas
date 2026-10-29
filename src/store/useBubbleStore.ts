@@ -4,6 +4,7 @@ import {
   ActivePopover,
   BubbleItem,
   ChatBubbleSize,
+  ChatListSize,
   ChatSummary,
   ConnectionMode,
   FormattedMessage,
@@ -48,6 +49,7 @@ function computeFirstUnreadMsgId(
 }
 
 interface SavedUserSettings {
+  chatListSize: ChatListSize;
   bubbleScale: number;
   maxBubbles: number;
   soundMuted: boolean;
@@ -106,6 +108,12 @@ function loadUserSettings(): SavedUserSettings {
           parsed.startupChatFilter === 'pinned_only'
             ? 'pinned_only'
             : 'pinned_and_unread_48h',
+        chatListSize:
+          parsed.chatListSize === 'pequeno' ||
+          parsed.chatListSize === 'medio' ||
+          parsed.chatListSize === 'grande'
+            ? parsed.chatListSize
+            : 'padrao',
       };
     }
   } catch {
@@ -122,6 +130,7 @@ function loadUserSettings(): SavedUserSettings {
     bubbleBorderOpacity: 80,
     bubbleBorderWidth: 1.5,
     startupChatFilter: 'pinned_and_unread_48h',
+    chatListSize: 'padrao',
   };
 }
 
@@ -324,6 +333,7 @@ interface BubbleStoreState {
   bubbleBorderOpacity: number;
   bubbleBorderWidth: number;
   startupChatFilter: StartupChatFilter;
+  chatListSize: ChatListSize;
 
   chats: ChatSummary[];
   activeBubbles: BubbleItem[];
@@ -372,6 +382,7 @@ interface BubbleStoreState {
   setBubbleBorderOpacity: (opacity: number) => void;
   setBubbleBorderWidth: (width: number) => void;
   setStartupChatFilter: (filter: StartupChatFilter) => void;
+  setChatListSize: (chatListSize: ChatListSize) => void;
   applyExternalSettingsUpdate: (patch: Record<string, unknown>) => void;
   openSettings: () => void;
   logoutWhatsApp: () => Promise<void>;
@@ -494,6 +505,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   bubbleBorderOpacity: initialSettings.bubbleBorderOpacity,
   bubbleBorderWidth: initialSettings.bubbleBorderWidth,
   startupChatFilter: initialSettings.startupChatFilter,
+  chatListSize: initialSettings.chatListSize,
 
   chats: [],
   activeBubbles: [],
@@ -1051,6 +1063,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: s.bubbleBorderOpacity,
       bubbleBorderWidth: s.bubbleBorderWidth,
       startupChatFilter: s.startupChatFilter,
+      chatListSize: s.chatListSize,
     });
     set({ bubbleScale: clamped });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleScale: clamped });
@@ -1072,6 +1085,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: s.bubbleBorderOpacity,
       bubbleBorderWidth: s.bubbleBorderWidth,
       startupChatFilter: s.startupChatFilter,
+      chatListSize: s.chatListSize,
     });
     const trimmedBubbles = organizeBubbles(s.activeBubbles, clamped, s.pinnedChatIds);
     const activeStillExists =
@@ -1103,6 +1117,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: s.bubbleBorderOpacity,
       bubbleBorderWidth: s.bubbleBorderWidth,
       startupChatFilter: s.startupChatFilter,
+      chatListSize: s.chatListSize,
     });
     set({ soundMuted });
     window.electronAPI?.broadcastSettingsUpdate?.({ soundMuted });
@@ -1126,6 +1141,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: s.bubbleBorderOpacity,
       bubbleBorderWidth: s.bubbleBorderWidth,
       startupChatFilter: s.startupChatFilter,
+      chatListSize: s.chatListSize,
     });
     set({ userSoundPreset, customUserSoundName: updatedCustomName });
     window.electronAPI?.broadcastSettingsUpdate?.({
@@ -1151,6 +1167,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: s.bubbleBorderOpacity,
       bubbleBorderWidth: s.bubbleBorderWidth,
       startupChatFilter: s.startupChatFilter,
+      chatListSize: s.chatListSize,
     });
     set({ groupSoundPreset, customGroupSoundName: updatedCustomName });
     window.electronAPI?.broadcastSettingsUpdate?.({
@@ -1174,6 +1191,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: s.bubbleBorderOpacity,
       bubbleBorderWidth: s.bubbleBorderWidth,
       startupChatFilter: s.startupChatFilter,
+      chatListSize: s.chatListSize,
     });
     set({ bubbleBorderMode });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderMode });
@@ -1194,6 +1212,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: s.bubbleBorderOpacity,
       bubbleBorderWidth: s.bubbleBorderWidth,
       startupChatFilter: s.startupChatFilter,
+      chatListSize: s.chatListSize,
     });
     set({ bubbleBorderColor });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderColor });
@@ -1215,6 +1234,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: clamped,
       bubbleBorderWidth: s.bubbleBorderWidth,
       startupChatFilter: s.startupChatFilter,
+      chatListSize: s.chatListSize,
     });
     set({ bubbleBorderOpacity: clamped });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderOpacity: clamped });
@@ -1236,6 +1256,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: s.bubbleBorderOpacity,
       bubbleBorderWidth: clamped,
       startupChatFilter: s.startupChatFilter,
+      chatListSize: s.chatListSize,
     });
     set({ bubbleBorderWidth: clamped });
     window.electronAPI?.broadcastSettingsUpdate?.({ bubbleBorderWidth: clamped });
@@ -1256,10 +1277,32 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: s.bubbleBorderOpacity,
       bubbleBorderWidth: s.bubbleBorderWidth,
       startupChatFilter,
+      chatListSize: s.chatListSize,
     });
 
     set({ startupChatFilter });
     window.electronAPI?.broadcastSettingsUpdate?.({ startupChatFilter });
+  },
+
+  setChatListSize: (chatListSize: ChatListSize) => {
+    const s = get();
+    saveUserSettings({
+      bubbleScale: s.bubbleScale,
+      maxBubbles: s.maxBubbles,
+      soundMuted: s.soundMuted,
+      userSoundPreset: s.userSoundPreset,
+      groupSoundPreset: s.groupSoundPreset,
+      customUserSoundName: s.customUserSoundName,
+      customGroupSoundName: s.customGroupSoundName,
+      bubbleBorderMode: s.bubbleBorderMode,
+      bubbleBorderColor: s.bubbleBorderColor,
+      bubbleBorderOpacity: s.bubbleBorderOpacity,
+      bubbleBorderWidth: s.bubbleBorderWidth,
+      startupChatFilter: s.startupChatFilter,
+      chatListSize,
+    });
+    set({ chatListSize });
+    window.electronAPI?.broadcastSettingsUpdate?.({ chatListSize });
   },
 
   applyExternalSettingsUpdate: (patch) => {
@@ -1300,6 +1343,13 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       patch.startupChatFilter === 'pinned_only' || patch.startupChatFilter === 'pinned_and_unread_48h'
         ? (patch.startupChatFilter as StartupChatFilter)
         : s.startupChatFilter;
+    const nextChatListSize =
+      patch.chatListSize === 'pequeno' ||
+      patch.chatListSize === 'padrao' ||
+      patch.chatListSize === 'medio' ||
+      patch.chatListSize === 'grande'
+        ? (patch.chatListSize as ChatListSize)
+        : s.chatListSize;
 
     const trimmedBubbles = organizeBubbles(s.activeBubbles, nextMaxBubbles, s.pinnedChatIds);
     const activeStillExists =
@@ -1318,6 +1368,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: nextBorderOpacity,
       bubbleBorderWidth: nextBorderWidth,
       startupChatFilter: nextStartupChatFilter,
+      chatListSize: nextChatListSize,
     });
 
     set({
@@ -1333,6 +1384,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       bubbleBorderOpacity: nextBorderOpacity,
       bubbleBorderWidth: nextBorderWidth,
       startupChatFilter: nextStartupChatFilter,
+      chatListSize: nextChatListSize,
       activeBubbles: trimmedBubbles,
       activeChatId: activeStillExists ? s.activeChatId : null,
       activePopover:

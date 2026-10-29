@@ -121,6 +121,53 @@ export const CHAT_SIZE_CONFIG: Record<
   },
 };
 
+export type ChatListSize = 'pequeno' | 'padrao' | 'medio' | 'grande';
+
+export const CHAT_LIST_SIZE_CONFIG: Record<
+  ChatListSize,
+  {
+    width: number;
+    height: number;
+    widthClass: string;
+    heightClass: string;
+    label: string;
+    description: string;
+  }
+> = {
+  pequeno: {
+    width: 280,
+    height: 390,
+    widthClass: 'w-[280px]',
+    heightClass: 'h-[390px]',
+    label: 'Pequeno',
+    description: 'Compacto (280 × 390px)',
+  },
+  padrao: {
+    width: 316,
+    height: 456,
+    widthClass: 'w-[316px]',
+    heightClass: 'h-[456px]',
+    label: 'Padrão',
+    description: 'Padrão (316 × 456px)',
+  },
+  medio: {
+    width: 370,
+    height: 520,
+    widthClass: 'w-[370px]',
+    heightClass: 'h-[520px]',
+    label: 'Médio',
+    description: 'Mais espaçoso (370 × 520px)',
+  },
+  grande: {
+    width: 430,
+    height: 590,
+    widthClass: 'w-[430px]',
+    heightClass: 'h-[590px]',
+    label: 'Grande',
+    description: 'Máxima visão (430 × 590px)',
+  },
+};
+
 export interface BubbleItem {
   chatId: string;
   name: string;

@@ -13,9 +13,10 @@ import {
   Pipette,
   RotateCcw,
   Pin,
+  MessageSquare,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
-import { BubbleBorderMode, DisplayInfo, SoundPreset, StartupChatFilter } from '../types/whatsapp';
+import { BubbleBorderMode, DisplayInfo, SoundPreset, StartupChatFilter, ChatListSize, CHAT_LIST_SIZE_CONFIG } from '../types/whatsapp';
 import { previewNotificationSound } from '../utils/notificationSound';
 import { hexToRgba } from '../utils/colorUtils';
 
@@ -54,6 +55,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     bubbleBorderOpacity,
     bubbleBorderWidth,
     startupChatFilter,
+    chatListSize,
     setBubbleScale,
     setMaxBubbles,
     setSoundMuted,
@@ -64,6 +66,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     setBubbleBorderOpacity,
     setBubbleBorderWidth,
     setStartupChatFilter,
+    setChatListSize,
     applyExternalSettingsUpdate,
     minimizeActiveChat,
   } = useBubbleStore();
@@ -237,7 +240,63 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           </div>
         </div>
 
-        {/* 3. Conversas ao Abrir o Zapbolhas */}
+        {/* 3. Tamanho da Janela de Conversas e Contatos */}
+        <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <MessageSquare className="w-3.5 h-3.5 text-[#25D366]" />
+              <span className="text-[12.5px] font-medium text-[#E9EDEF]">
+                Tamanho da Janela de Conversas
+              </span>
+            </div>
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#202C33] text-[#25D366] font-semibold border border-[#25D366]/30">
+              {CHAT_LIST_SIZE_CONFIG[chatListSize]?.width} × {CHAT_LIST_SIZE_CONFIG[chatListSize]?.height} px
+            </span>
+          </div>
+          <p className="text-[11px] text-[#8696A0] leading-snug">
+            Aumente ou diminua as dimensões da janela que lista conversas e contatos ao clicar no botão do WhatsApp:
+          </p>
+
+          {/* Seletor de Tamanho: Pequeno, Padrão, Médio, Grande */}
+          <div className="grid grid-cols-4 gap-1.5 bg-[#202C33] p-1 rounded-[8px] border border-white/10">
+            {(['pequeno', 'padrao', 'medio', 'grande'] as ChatListSize[]).map((sizeKey) => {
+              const isSelected = chatListSize === sizeKey;
+              const config = CHAT_LIST_SIZE_CONFIG[sizeKey];
+              return (
+                <button
+                  key={sizeKey}
+                  type="button"
+                  onClick={() => setChatListSize(sizeKey)}
+                  className={`py-1.5 px-1 rounded-[6px] text-center transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-[#005C4B] text-[#E9EDEF] font-bold shadow-xs border border-[#25D366]/50'
+                      : 'text-[#8696A0] hover:text-[#E9EDEF] hover:bg-[#2A3942]'
+                  }`}
+                >
+                  <div className="text-[11.5px] leading-tight">{config.label}</div>
+                  <div className={`text-[9.5px] mt-0.5 ${isSelected ? 'text-[#25D366]' : 'text-[#8696A0]'}`}>
+                    {config.width}px
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="text-[10.5px] text-[#8696A0] flex items-center justify-between px-0.5 pt-0.5">
+            <span>{CHAT_LIST_SIZE_CONFIG[chatListSize]?.description}</span>
+            {chatListSize !== 'padrao' && (
+              <button
+                type="button"
+                onClick={() => setChatListSize('padrao')}
+                className="text-[10.5px] text-[#25D366] hover:underline cursor-pointer"
+              >
+                Restaurar padrão
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 4. Conversas ao Abrir o Zapbolhas */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-2.5">
           <div className="flex items-center gap-1.5">
             <Pin className="w-3.5 h-3.5 text-[#25D366]" />
@@ -333,7 +392,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           </div>
         </div>
 
-        {/* 4. Borda das Bubbles (Modos: Padrão, Minimalista, Avançado, Personalizada) */}
+        {/* 5. Borda das Bubbles (Modos: Padrão, Minimalista, Avançado, Personalizada) */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
@@ -732,7 +791,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           )}
         </div>
 
-        {/* 6. Áudio das Notificações (Mutar ou Mudar Som) */}
+        {/* 7. Áudio das Notificações (Mutar ou Mudar Som) */}
         <div className="bg-[#111B21]/90 rounded-[8px] p-3 border border-white/[0.05] space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
