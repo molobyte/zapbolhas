@@ -267,7 +267,8 @@ function createSystemTray() {
   updateTrayMenu();
 }
 
-const MAX_OVERLAY_WIDTH = 1200;
+// Overlay full-screen transparente cobre a área de trabalho do monitor
+const MAX_OVERLAY_WIDTH = 9999;
 
 interface SavedDisplayPref {
   displayId: number;

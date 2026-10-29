@@ -237,7 +237,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="w-screen h-screen bg-transparent pointer-events-none flex flex-col justify-end items-end pb-[12px] pr-[16px] overflow-hidden select-none">
+    <div className="w-screen h-screen bg-transparent pointer-events-none select-none relative overflow-visible">
       {/* Modal Externo Redimensionável de Visualização de Imagem/Vídeo */}
       <AnimatePresence>
         {viewingImage && (
@@ -249,7 +249,9 @@ export const App: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Área Superior de Popovers Flutuantes (apenas um aberto por vez) */}
+      {/* Área do Dock e Popovers Flutuantes (Fixos no canto inferior direito) */}
+      <div className="w-full h-full pointer-events-none flex flex-col justify-end items-end pb-[12px] pr-[16px] overflow-hidden">
+        {/* Área Superior de Popovers Flutuantes (apenas um aberto por vez) */}
       <div className="mb-[12px] flex flex-col items-end pointer-events-none">
         <ErrorBoundary name="Popovers">
           <AnimatePresence mode="wait">
@@ -293,6 +295,7 @@ export const App: React.FC = () => {
         onInteractiveEnter={handleInteractiveEnter}
         onInteractiveLeave={handleInteractiveLeave}
       />
+      </div>
     </div>
   );
 };
