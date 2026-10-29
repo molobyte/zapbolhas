@@ -451,6 +451,30 @@ export function isMatchingMessageId(msgId: string, targetId: string): boolean {
   return Boolean(partA && partB && partA === partB);
 }
 
+function isPhoneOnlyLabel(val?: string): boolean {
+  if (!val || typeof val !== 'string') return true;
+  const trimmed = val.replace(/^~/, '').trim();
+  if (!trimmed || trimmed === 'Contato') return true;
+  if (trimmed.startsWith('+')) return true;
+  const digits = trimmed.replace(/\D/g, '');
+  const letters = trimmed.replace(/[^a-zA-Z\u00C0-\u00FF]/g, '');
+  return digits.length >= 8 && letters.length === 0;
+}
+
+function chooseBestContactName(...candidates: (string | undefined)[]): string {
+  for (const c of candidates) {
+    if (c && !isPhoneOnlyLabel(c)) {
+      return c;
+    }
+  }
+  for (const c of candidates) {
+    if (c && c.trim()) {
+      return c;
+    }
+  }
+  return 'Contato';
+}
+
 export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   mode: 'whatsapp',
   waStatus: 'initializing',
@@ -566,7 +590,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         const existingBubble = currentActive.find((b) => b.chatId === pid);
         const meta = metaMap[pid];
 
-        const name = realChat?.name || existingBubble?.name || meta?.name || pid.split('@')[0];
+        const name = chooseBestContactName(realChat?.name, existingBubble?.name, meta?.name, pid.split('@')[0]);
         const avatar = realChat?.avatar || existingBubble?.avatar || meta?.avatar || '';
         const isGroup = realChat?.isGroup ?? existingBubble?.isGroup ?? meta?.isGroup ?? pid.endsWith('@g.us');
         const lastActivity =
@@ -702,13 +726,15 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         ? false
         : Boolean(fresh.hasMention);
 
+      const resolvedBubbleName = chooseBestContactName(fresh.name, b.name, metaMap[b.chatId]?.name);
+
       // Mantém metadata atualizado para conversas fixadas
       if (b.isPinned || currentPinnedIds.includes(b.chatId)) {
         if (
           metaMap[b.chatId] &&
-          (metaMap[b.chatId].name !== fresh.name || metaMap[b.chatId].avatar !== fresh.avatar)
+          (metaMap[b.chatId].name !== resolvedBubbleName || metaMap[b.chatId].avatar !== fresh.avatar)
         ) {
-          metaMap[b.chatId].name = fresh.name;
+          metaMap[b.chatId].name = resolvedBubbleName;
           metaMap[b.chatId].avatar = fresh.avatar;
           metaChanged = true;
         }
@@ -716,7 +742,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
       return {
         ...b,
-        name: fresh.name,
+        name: resolvedBubbleName,
         avatar: fresh.avatar,
         unreadCount,
         isMarkedUnread,

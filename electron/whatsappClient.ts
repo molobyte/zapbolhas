@@ -645,6 +645,18 @@ export class WhatsAppService {
         this.emitToRenderer('wa:chats-loaded', chats);
       }
 
+      // Re-sincronizações rápidas após o boot inicial caso a agenda/IndexedDB do WhatsApp Web termine de hidratar alguns segundos depois do evento ready
+      for (const delayMs of [1800, 4200]) {
+        setTimeout(async () => {
+          if (this.status === 'ready') {
+            const hydratedChats = await this.getRecentChats();
+            if (hydratedChats.length > 0) {
+              this.emitToRenderer('wa:chats-loaded', hydratedChats);
+            }
+          }
+        }, delayMs);
+      }
+
       // Sincronização leve periódica para manter contadores e novas conversas atualizados
       if (this.syncTimer) clearInterval(this.syncTimer);
       this.syncTimer = setInterval(async () => {
@@ -777,7 +789,7 @@ export class WhatsAppService {
             const info = await this.client.pupPage.evaluate(async (sJid: string) => {
               const w = window as any;
               const c = w.require?.('WAWebCollections')?.Contact?.get?.(sJid);
-              const name = c?.formattedTitle || c?.name || c?.pushname || '';
+              const name = c?.name || c?.shortName || c?.displayName || c?.pushname || c?.formattedTitle || '';
               const pic = w.require?.('WAWebCollections')?.ProfilePicThumb?.get?.(sJid);
               const avatar = pic?.eurl || pic?.img || pic?.imgFull || '';
               return { name, avatar };
@@ -1115,22 +1127,42 @@ export class WhatsAppService {
                     clearTimeout(timer);
                     const list = ev.target.result || [];
                     const map = new Map<string, any>();
+                    const toBrKey = (val: string) => {
+                      const d = (val || '').split('@')[0].replace(/\D/g, '');
+                      if (d.startsWith('55') && (d.length === 12 || d.length === 13)) {
+                        return `br:${d.slice(0, 4)}${d.slice(-8)}`;
+                      }
+                      return '';
+                    };
+                    const setWithPriority = (k: string, item: any) => {
+                      if (!k) return;
+                      const prev = map.get(k);
+                      if (!prev || (!prev.name && (item.name || item.shortName || item.displayName))) {
+                        map.set(k, item);
+                      }
+                    };
                     for (const item of list) {
                       if (item && item.id) {
                         const strId =
                           typeof item.id === 'string'
                             ? item.id
                             : item.id._serialized || '';
-                        if (strId) map.set(strId, item);
+                        if (strId) {
+                          setWithPriority(strId, item);
+                          const cleanId = strId.split('@')[0];
+                          if (cleanId) setWithPriority(cleanId, item);
+                          setWithPriority(toBrKey(strId), item);
+                        }
                         if (item.phoneNumber) {
                           const pn =
                             typeof item.phoneNumber === 'string'
                               ? item.phoneNumber
                               : item.phoneNumber._serialized || '';
                           if (pn) {
-                            map.set(pn, item);
+                            setWithPriority(pn, item);
                             const clean = pn.split('@')[0];
-                            if (clean) map.set(clean, item);
+                            if (clean) setWithPriority(clean, item);
+                            setWithPriority(toBrKey(pn), item);
                           }
                         }
                       }
@@ -1155,7 +1187,149 @@ export class WhatsAppService {
 
         const idbMap = await loadIdbContactMap();
 
+        const getBrPhoneKey = (val: string): string => {
+          const d = (val || '').split('@')[0].replace(/\D/g, '');
+          if (d.startsWith('55') && (d.length === 12 || d.length === 13)) {
+            return `br:${d.slice(0, 4)}${d.slice(-8)}`;
+          }
+          return '';
+        };
+
+        const isPhoneLikeStr = (val: any): boolean => {
+          if (!val || typeof val !== 'string') return true;
+          const trimmed = val.replace(/^~/, '').trim();
+          if (!trimmed) return true;
+          if (trimmed.startsWith('+')) return true;
+          if (trimmed.endsWith('@c.us') || trimmed.endsWith('@lid') || trimmed.endsWith('@g.us')) return true;
+          const digits = trimmed.replace(/\D/g, '');
+          const letters = trimmed.replace(/[^a-zA-Z\u00C0-\u00FF]/g, '');
+          if (digits.length >= 8 && letters.length === 0) return true;
+          return false;
+        };
+
+        const hasExplicitSavedName = (obj: any): boolean => {
+          if (!obj) return false;
+          const raw =
+            (ContactGetters?.getName ? (() => { try { return ContactGetters.getName(obj); } catch { return ''; } })() : '') ||
+            (typeof obj.get === 'function' ? (() => { try { return obj.get('name') || obj.get('shortName') || obj.get('displayName'); } catch { return ''; } })() : '') ||
+            obj.name ||
+            obj.shortName ||
+            obj.displayName ||
+            obj.attributes?.name ||
+            obj.attributes?.shortName ||
+            obj.attributes?.displayName ||
+            obj.__x_name ||
+            obj._data?.name ||
+            '';
+          return Boolean(raw && !isPhoneLikeStr(String(raw)));
+        };
+
+        const extractRealSavedName = (obj: any): string => {
+          if (!obj) return '';
+          const candidates: any[] = [];
+          if (ContactGetters?.getName) {
+            try { candidates.push(ContactGetters.getName(obj)); } catch (_) {}
+          }
+          if (typeof obj.get === 'function') {
+            try {
+              candidates.push(obj.get('name'), obj.get('shortName'), obj.get('displayName'));
+            } catch (_) {}
+          }
+          candidates.push(
+            obj.name,
+            obj.shortName,
+            obj.displayName,
+            obj.attributes?.name,
+            obj.attributes?.shortName,
+            obj.attributes?.displayName,
+            obj.__x_name,
+            obj.__x_shortName,
+            obj.__x_displayName,
+            obj._data?.name,
+            obj._data?.shortName,
+            obj._data?.displayName
+          );
+          if (obj.isBusiness || obj.isEnterprise) {
+            candidates.push(
+              obj.verifiedName,
+              obj.attributes?.verifiedName,
+              ContactGetters?.getVerifiedName ? (() => { try { return ContactGetters.getVerifiedName(obj); } catch { return ''; } })() : ''
+            );
+          }
+
+          for (const c of candidates) {
+            if (typeof c === 'string') {
+              const clean = c.replace(/^~/, '').trim();
+              if (clean && !isPhoneLikeStr(clean)) {
+                return clean;
+              }
+            }
+          }
+
+          // Fallback para formattedTitle apenas se não for número de telefone e for um contato salvo
+          const ft =
+            (typeof obj.get === 'function' ? (() => { try { return obj.get('formattedTitle'); } catch { return ''; } })() : '') ||
+            obj.formattedTitle ||
+            obj.attributes?.formattedTitle ||
+            '';
+          if (typeof ft === 'string') {
+            const cleanFt = ft.replace(/^~/, '').trim();
+            if (cleanFt && !isPhoneLikeStr(cleanFt)) {
+              const push = String(
+                (typeof obj.get === 'function' ? (() => { try { return obj.get('pushname') || obj.get('notifyName'); } catch { return ''; } })() : '') ||
+                obj.pushname ||
+                obj.notifyName ||
+                obj.attributes?.pushname ||
+                obj.attributes?.notifyName ||
+                ''
+              ).replace(/^~/, '').trim();
+              if (
+                obj.isMyContact ||
+                obj.isAddressBookContact ||
+                obj.attributes?.isMyContact ||
+                obj.attributes?.isAddressBookContact ||
+                cleanFt !== push
+              ) {
+                return cleanFt;
+              }
+            }
+          }
+          return '';
+        };
+
+        const extractPushnameFromObj = (obj: any): string => {
+          if (!obj) return '';
+          let p = '';
+          if (ContactGetters?.getPushname) {
+            try { p = ContactGetters.getPushname(obj) || ''; } catch (_) {}
+          }
+          if (!p) {
+            p =
+              (typeof obj.get === 'function'
+                ? (() => { try { return obj.get('pushname') || obj.get('notifyName'); } catch { return ''; } })()
+                : '') ||
+              obj.pushname ||
+              obj.notifyName ||
+              obj.attributes?.pushname ||
+              obj.attributes?.notifyName ||
+              obj.__x_pushname ||
+              obj.__x_notifyName ||
+              obj._data?.pushname ||
+              obj._data?.notifyName ||
+              '';
+          }
+          const clean = String(p || '').replace(/^~/, '').trim();
+          return clean && !isPhoneLikeStr(clean) ? clean : '';
+        };
+
         const contactIndex = new Map<string, any>();
+        const setContactIndex = (k: string, cm: any) => {
+          if (!k || !cm) return;
+          const prev = contactIndex.get(k);
+          if (!prev || (!hasExplicitSavedName(prev) && hasExplicitSavedName(cm))) {
+            contactIndex.set(k, cm);
+          }
+        };
         try {
           if (ContactCol?.getModelsArray) {
             const arr = ContactCol.getModelsArray();
@@ -1163,24 +1337,26 @@ export class WhatsAppService {
               if (!cm) continue;
               const sid = serializeId(cm.id);
               if (sid) {
-                contactIndex.set(sid, cm);
+                setContactIndex(sid, cm);
                 const user = sid.split('@')[0];
-                if (user) contactIndex.set(user, cm);
+                if (user) setContactIndex(user, cm);
+                setContactIndex(getBrPhoneKey(sid), cm);
               }
               if (cm.lid) {
                 const lidSid = serializeId(cm.lid);
                 if (lidSid) {
-                  contactIndex.set(lidSid, cm);
+                  setContactIndex(lidSid, cm);
                   const lidUser = lidSid.split('@')[0];
-                  if (lidUser) contactIndex.set(lidUser, cm);
+                  if (lidUser) setContactIndex(lidUser, cm);
                 }
               }
               if (cm.phoneNumber) {
                 const pnSid = serializeId(cm.phoneNumber);
                 if (pnSid) {
-                  contactIndex.set(pnSid, cm);
+                  setContactIndex(pnSid, cm);
                   const pnUser = pnSid.split('@')[0];
-                  if (pnUser) contactIndex.set(pnUser, cm);
+                  if (pnUser) setContactIndex(pnUser, cm);
+                  setContactIndex(getBrPhoneKey(pnSid), cm);
                 }
               }
             }
@@ -1214,13 +1390,19 @@ export class WhatsAppService {
             };
           }
 
-          let contact: any = null;
+          const candidateContacts: any[] = [];
+          const addCandidateContact = (c: any) => {
+            if (c && !candidateContacts.includes(c)) candidateContacts.push(c);
+          };
+
           if (rawAuthor && typeof rawAuthor === 'object') {
-            try { contact = ContactCol?.get(rawAuthor); } catch (_) {}
+            try { addCandidateContact(ContactCol?.get(rawAuthor)); } catch (_) {}
           }
-          if (!contact && authorId) {
-            try { contact = ContactCol?.get(authorId); } catch (_) {}
-            if (!contact) contact = contactIndex.get(authorId);
+          if (authorId) {
+            try { addCandidateContact(ContactCol?.get(authorId)); } catch (_) {}
+            addCandidateContact(contactIndex.get(authorId));
+            const rawUser = authorId.split('@')[0];
+            if (rawUser) addCandidateContact(contactIndex.get(rawUser));
           }
 
           let pnWidStr = '';
@@ -1234,34 +1416,61 @@ export class WhatsAppService {
                 const pnWid = lidUtils.toPn(targetWid);
                 if (pnWid) {
                   pnWidStr = serializeId(pnWid);
-                  if (!contact) {
-                    contact = ContactCol?.get(pnWid) || contactIndex.get(pnWidStr);
+                  try { addCandidateContact(ContactCol?.get(pnWid)); } catch (_) {}
+                  if (pnWidStr) {
+                    addCandidateContact(contactIndex.get(pnWidStr));
+                    addCandidateContact(contactIndex.get(pnWidStr.split('@')[0]));
                   }
                 }
               }
             } catch (_) {}
           }
 
-          const idbItem =
-            (authorId && idbMap.get(authorId)) ||
-            (pnWidStr && idbMap.get(pnWidStr)) ||
-            null;
-
-          const idbPhone = idbItem?.phoneNumber
-            ? serializeId(idbItem.phoneNumber) || String(idbItem.phoneNumber)
-            : '';
-
-          if (!contact && idbPhone) {
-            contact =
-              ContactCol?.get(idbPhone) ||
-              contactIndex.get(idbPhone) ||
-              contactIndex.get(idbPhone.split('@')[0]);
+          // Extrai phoneNumber de qualquer candidato já encontrado
+          for (const cc of [...candidateContacts]) {
+            const cPn = serializeId(cc?.phoneNumber);
+            if (cPn) {
+              if (!pnWidStr) pnWidStr = cPn;
+              try { addCandidateContact(ContactCol?.get(cPn)); } catch (_) {}
+              addCandidateContact(contactIndex.get(cPn));
+              addCandidateContact(contactIndex.get(cPn.split('@')[0]));
+            }
           }
 
-          if (!contact && authorId) {
-            const rawUser = authorId.split('@')[0];
-            if (rawUser) {
-              contact = contactIndex.get(rawUser);
+          const brKeyAuthor = getBrPhoneKey(pnWidStr || authorId);
+          if (brKeyAuthor) {
+            addCandidateContact(contactIndex.get(brKeyAuthor));
+          }
+
+          const candidateIdbItems: any[] = [];
+          const addCandidateIdb = (item: any) => {
+            if (item && !candidateIdbItems.includes(item)) candidateIdbItems.push(item);
+          };
+          if (authorId) {
+            addCandidateIdb(idbMap.get(authorId));
+            addCandidateIdb(idbMap.get(authorId.split('@')[0]));
+          }
+          if (pnWidStr) {
+            addCandidateIdb(idbMap.get(pnWidStr));
+            addCandidateIdb(idbMap.get(pnWidStr.split('@')[0]));
+          }
+          if (brKeyAuthor) {
+            addCandidateIdb(idbMap.get(brKeyAuthor));
+          }
+
+          const idbItemWithPhone = candidateIdbItems.find((it) => it?.phoneNumber);
+          const idbPhone = idbItemWithPhone?.phoneNumber
+            ? serializeId(idbItemWithPhone.phoneNumber) || String(idbItemWithPhone.phoneNumber)
+            : '';
+
+          if (idbPhone) {
+            try { addCandidateContact(ContactCol?.get(idbPhone)); } catch (_) {}
+            addCandidateContact(contactIndex.get(idbPhone));
+            addCandidateContact(contactIndex.get(idbPhone.split('@')[0]));
+            const brKeyIdb = getBrPhoneKey(idbPhone);
+            if (brKeyIdb) {
+              addCandidateContact(contactIndex.get(brKeyIdb));
+              addCandidateIdb(idbMap.get(brKeyIdb));
             }
           }
 
@@ -1273,81 +1482,46 @@ export class WhatsAppService {
             ? resolvedPhone.split('@')[0]
             : authorId.split('@')[0];
 
-          let savedName = '';
-          if (contact) {
-            if (ContactGetters?.getName) {
-              try { savedName = ContactGetters.getName(contact) || ''; } catch (_) {}
-            }
-            if (!savedName) {
-              savedName =
-                (typeof contact.get === 'function'
-                  ? contact.get('name') || contact.get('displayName') || contact.get('formattedTitle')
-                  : '') ||
-                contact.name ||
-                contact.displayName ||
-                contact.formattedTitle ||
-                contact.attributes?.name ||
-                contact.attributes?.displayName ||
-                contact.attributes?.formattedTitle ||
-                '';
-            }
-            if (!savedName && (contact.isBusiness || contact.isEnterprise)) {
-              savedName =
-                contact.verifiedName ||
-                contact.attributes?.verifiedName ||
-                (ContactGetters?.getVerifiedName ? ContactGetters.getVerifiedName(contact) : '') ||
-                '';
-            }
-          }
+          const contact =
+            candidateContacts.find((c) => extractRealSavedName(c)) ||
+            candidateContacts[0] ||
+            null;
+          const idbItem =
+            candidateIdbItems.find((it) => extractRealSavedName(it)) ||
+            candidateIdbItems[0] ||
+            null;
 
-          if (!savedName && idbItem) {
-            savedName = idbItem.name || idbItem.displayName || idbItem.formattedTitle || '';
+          let savedName = '';
+          for (const cc of candidateContacts) {
+            savedName = extractRealSavedName(cc);
+            if (savedName) break;
+          }
+          if (!savedName) {
+            for (const it of candidateIdbItems) {
+              savedName = extractRealSavedName(it);
+              if (savedName) break;
+            }
           }
 
           const cleanSaved = savedName ? savedName.replace(/^~/, '').trim() : '';
-
-          const digitsOnlySaved = cleanSaved.replace(/\D/g, '');
-          const digitsOnlyPhone = cleanPhone.replace(/\D/g, '');
-          const isPhoneEquivalent =
-            cleanSaved.startsWith('+') ||
-            (digitsOnlySaved.length >= 8 && digitsOnlySaved === digitsOnlyPhone) ||
-            cleanSaved === authorId ||
-            cleanSaved === cleanPhone;
-
-          const isRealSavedName = Boolean(
-            cleanSaved &&
-            !isPhoneEquivalent &&
-            (
-              contact?.isAddressBookContact ||
-              contact?.isMyContact ||
-              contact?.name ||
-              idbItem?.name ||
-              (contact && cleanSaved !== contact.pushname && cleanSaved !== contact.notifyName)
-            )
-          );
+          const isRealSavedName = Boolean(cleanSaved && !isPhoneLikeStr(cleanSaved));
 
           let pushname = '';
-          if (contact) {
-            if (ContactGetters?.getPushname) {
-              try { pushname = ContactGetters.getPushname(contact) || ''; } catch (_) {}
-            }
-            if (!pushname) {
-              pushname =
-                (typeof contact.get === 'function'
-                  ? contact.get('pushname') || contact.get('notifyName')
-                  : '') ||
-                contact.pushname ||
-                contact.notifyName ||
-                contact.attributes?.pushname ||
-                contact.attributes?.notifyName ||
-                '';
-            }
+          for (const cc of candidateContacts) {
+            pushname = extractPushnameFromObj(cc);
+            if (pushname) break;
           }
-          if (!pushname && idbItem) {
-            pushname = idbItem.pushname || idbItem.notifyName || '';
+          if (!pushname) {
+            for (const it of candidateIdbItems) {
+              pushname = extractPushnameFromObj(it);
+              if (pushname) break;
+            }
           }
           if (!pushname && notifyName) {
-            pushname = notifyName;
+            const cleanN = notifyName.replace(/^~/, '').trim();
+            if (cleanN && !isPhoneLikeStr(cleanN)) {
+              pushname = cleanN;
+            }
           }
           const cleanPushname = pushname ? pushname.replace(/^~/, '').trim() : '';
 
@@ -1568,15 +1742,40 @@ export class WhatsAppService {
           const lastIncomingMsg = [...msgs].reverse().find((m: any) => !m.id?.fromMe);
 
           const isGroup = Boolean(c.groupMetadata || c.id?.server === 'g.us' || id.endsWith('@g.us'));
-          const name: string =
-            c.formattedTitle ||
-            c.name ||
-            contactModel?.name ||
-            contactModel?.pushname ||
-            contactModel?.verifiedName ||
-            (!isGroup && lastIncomingMsg?.notifyName) ||
-            c.id?.user ||
-            'Contato';
+          let name: string = 'Contato';
+          if (isGroup) {
+            name =
+              c.formattedTitle ||
+              c.name ||
+              contactModel?.name ||
+              c.id?.user ||
+              'Grupo';
+          } else {
+            const senderInfo = resolveSender(c.id, lastIncomingMsg?.notifyName);
+            const savedContactName =
+              senderInfo.savedName ||
+              extractRealSavedName(c.contact) ||
+              extractRealSavedName(contactModel) ||
+              extractRealSavedName(c);
+            const rawChatName = typeof c.name === 'string' ? c.name.trim() : '';
+            const rawFormattedTitle = typeof c.formattedTitle === 'string' ? c.formattedTitle.trim() : '';
+            const nonPhoneTitle =
+              (rawChatName && !isPhoneLikeStr(rawChatName) ? rawChatName : '') ||
+              (rawFormattedTitle && !isPhoneLikeStr(rawFormattedTitle) ? rawFormattedTitle : '');
+
+            name =
+              savedContactName ||
+              nonPhoneTitle ||
+              senderInfo.pushname ||
+              extractPushnameFromObj(contactModel) ||
+              extractPushnameFromObj(c.contact) ||
+              (lastIncomingMsg?.notifyName && !isPhoneLikeStr(lastIncomingMsg.notifyName) ? lastIncomingMsg.notifyName : '') ||
+              rawFormattedTitle ||
+              rawChatName ||
+              senderInfo.senderName ||
+              c.id?.user ||
+              'Contato';
+          }
 
           let avatar = '';
           try {
@@ -2152,17 +2351,20 @@ export class WhatsAppService {
                 try { savedName = ContactGetters.getName(contact) || ''; } catch (_) {}
               }
               if (!savedName) {
-                savedName =
+                const candidate =
                   (typeof contact.get === 'function'
-                    ? contact.get('name') || contact.get('displayName') || contact.get('formattedTitle')
+                    ? contact.get('name') || contact.get('shortName') || contact.get('displayName')
                     : '') ||
                   contact.name ||
+                  contact.shortName ||
                   contact.displayName ||
-                  contact.formattedTitle ||
                   contact.attributes?.name ||
+                  contact.attributes?.shortName ||
                   contact.attributes?.displayName ||
-                  contact.attributes?.formattedTitle ||
                   '';
+                if (candidate && !String(candidate).trim().startsWith('+')) {
+                  savedName = candidate;
+                }
               }
               if (!savedName && (contact.isBusiness || contact.isEnterprise)) {
                 savedName =
@@ -2667,13 +2869,16 @@ export class WhatsAppService {
               senderName = info.senderName;
               senderAvatar = authorId ? authorAvatarMap[authorId] || '' : '';
             } else if (!fromMe && !isGroup) {
+              const info = resolveSender(targetChatId, m.notifyName);
               const chatContact = ContactCol?.get(targetChatId) || chat.contact;
               senderName =
-                chat.formattedTitle ||
-                chat.name ||
+                info.savedName ||
                 chatContact?.name ||
+                info.pushname ||
                 m.notifyName ||
                 chatContact?.pushname ||
+                chat.name ||
+                chat.formattedTitle ||
                 '';
             }
 
@@ -3589,17 +3794,20 @@ export class WhatsAppService {
                   try { savedName = ContactGetters.getName(contact) || ''; } catch (_) {}
                 }
                 if (!savedName) {
-                  savedName =
+                  const candidate =
                     (typeof contact.get === 'function'
-                      ? contact.get('name') || contact.get('displayName') || contact.get('formattedTitle')
+                      ? contact.get('name') || contact.get('shortName') || contact.get('displayName')
                       : '') ||
                     contact.name ||
+                    contact.shortName ||
                     contact.displayName ||
-                    contact.formattedTitle ||
                     contact.attributes?.name ||
+                    contact.attributes?.shortName ||
                     contact.attributes?.displayName ||
-                    contact.attributes?.formattedTitle ||
                     '';
+                  if (candidate && !String(candidate).trim().startsWith('+')) {
+                    savedName = candidate;
+                  }
                 }
                 if (!savedName && (contact.isBusiness || contact.isEnterprise)) {
                   savedName =
@@ -4198,34 +4406,67 @@ export class WhatsAppService {
             dedupKey = targetChatId;
           }
 
+          const isPhoneOnly = (val: any): boolean => {
+            if (!val || typeof val !== 'string') return true;
+            const t = val.replace(/^~/, '').trim();
+            if (!t || t.startsWith('+')) return true;
+            const d = t.replace(/\D/g, '');
+            const l = t.replace(/[^a-zA-Z\u00C0-\u00FF]/g, '');
+            return d.length >= 8 && l.length === 0;
+          };
+
           let savedName = '';
           if (ContactGetters?.getName) {
-            try { savedName = ContactGetters.getName(item) || ''; } catch (_) {}
+            try {
+              const gn = ContactGetters.getName(item) || '';
+              if (gn && !isPhoneOnly(gn)) savedName = gn;
+            } catch (_) {}
           }
           if (!savedName) {
-            savedName =
+            const cand =
               (typeof item.get === 'function'
-                ? item.get('name') || item.get('displayName') || item.get('formattedTitle')
+                ? item.get('name') || item.get('shortName') || item.get('displayName')
                 : '') ||
               item.name ||
+              item.shortName ||
               item.displayName ||
-              item.formattedTitle ||
               item.attributes?.name ||
+              item.attributes?.shortName ||
               item.attributes?.displayName ||
-              item.attributes?.formattedTitle ||
+              item._data?.name ||
               '';
+            if (cand && !isPhoneOnly(cand)) {
+              savedName = cand;
+            }
           }
           if (!savedName && (item.isBusiness || item.isEnterprise)) {
-            savedName =
+            const vn =
               item.verifiedName ||
               item.attributes?.verifiedName ||
               (ContactGetters?.getVerifiedName ? ContactGetters.getVerifiedName(item) : '') ||
               '';
+            if (vn && !isPhoneOnly(vn)) {
+              savedName = vn;
+            }
           }
 
-          const idbItem = idbMap.get(rawId) || idbMap.get(targetChatId);
+          const idbItem = idbMap.get(rawId) || idbMap.get(targetChatId) || idbMap.get(phoneDigits);
           if (!savedName && idbItem) {
-            savedName = idbItem.name || idbItem.displayName || idbItem.formattedTitle || '';
+            const idbCand = idbItem.name || idbItem.shortName || idbItem.displayName || '';
+            if (idbCand && !isPhoneOnly(idbCand)) {
+              savedName = idbCand;
+            }
+          }
+          if (!savedName) {
+            const ft =
+              (typeof item.get === 'function' ? item.get('formattedTitle') : '') ||
+              item.formattedTitle ||
+              item.attributes?.formattedTitle ||
+              idbItem?.formattedTitle ||
+              '';
+            if (ft && !isPhoneOnly(ft)) {
+              savedName = ft;
+            }
           }
 
           const cleanSaved = (savedName || '').replace(/^~/, '').trim();
@@ -4238,12 +4479,16 @@ export class WhatsAppService {
             item.isAddressBookContact ||
             idbItem?.isMyContact ||
             idbItem?.isAddressBookContact ||
-            (cleanSaved && cleanSaved !== phoneDigits && cleanSaved !== formattedPhone && cleanSaved !== pushname)
+            (cleanSaved && !isPhoneOnly(cleanSaved) && cleanSaved !== pushname)
           );
 
           if (!q && !isSavedContact) continue;
 
-          const displayName = cleanSaved || pushname || formattedPhone || phoneDigits;
+          const displayName =
+            (cleanSaved && !isPhoneOnly(cleanSaved) ? cleanSaved : '') ||
+            (pushname && !isPhoneOnly(pushname) ? pushname : '') ||
+            formattedPhone ||
+            phoneDigits;
           if (!displayName) continue;
 
           if (q) {
@@ -4261,16 +4506,29 @@ export class WhatsAppService {
             }
           }
 
-          // Se já existe um registro para esse mesmo número, faz merge inteligente preservando o melhor modelo/avatar
+          // Se já existe um registro para esse mesmo número, faz merge inteligente preservando o melhor nome/modelo/avatar
           if (resultMap.has(dedupKey)) {
             const existing = resultMap.get(dedupKey);
             const isFromContactCol = Boolean(item.attributes || typeof item.get === 'function');
             if (isFromContactCol) {
               existing.rawModel = item;
             }
-            if (!existing.isMyContact && isSavedContact) {
+            const existingIsPhone = isPhoneOnly(existing.name);
+            const newHasRealSaved = Boolean(cleanSaved && !isPhoneOnly(cleanSaved));
+            const newHasRealDisplay = !isPhoneOnly(displayName);
+
+            if (
+              (!existing.isMyContact && isSavedContact) ||
+              (existingIsPhone && newHasRealDisplay) ||
+              (newHasRealSaved && existing.name === existing.pushname)
+            ) {
               existing.name = displayName;
+            }
+            if (isSavedContact) {
               existing.isMyContact = true;
+            }
+            if (!existing.pushname && pushname) {
+              existing.pushname = pushname;
             }
             if (targetChatId.endsWith('@c.us')) {
               existing.id = targetChatId;
