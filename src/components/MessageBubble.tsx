@@ -24,6 +24,7 @@ import {
   EmojiEntry,
 } from './EmojiStickerPicker';
 import { FormattedText } from './FormattedText';
+import { LinkPreviewCard } from './LinkPreviewCard';
 import { Emoji } from './Emoji';
 import { isRawMediaBase64OrKey } from '../utils/textUtils';
 import { MessageCheckIcon } from './MessageCheckIcon';
@@ -792,6 +793,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     </div>
                   )}
                 </>
+              )}
+
+              {type === 'text' && displayCaption && (
+                <LinkPreviewCard text={displayCaption} fromMe={fromMe} />
               )}
 
               {displayCaption && <FormattedText text={displayCaption} mentions={message.mentions} />}

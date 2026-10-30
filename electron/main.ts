@@ -818,6 +818,211 @@ function registerIpcHandlers() {
     }
   });
 
+  const linkPreviewCache = new Map<string, any>();
+
+  const fetchJsonWithTimeout = async (url: string, timeoutMs = 5500): Promise<any | null> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) WhatsAppBubbles/1.0',
+          Accept: 'application/json',
+        },
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const decodeHtmlEntities = (str: string): string => {
+    return str
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/?[^>]+(>|$)/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/&mdash;/g, '—')
+      .replace(/&ndash;/g, '–')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&#(\d+);/g, (_m, dec) => String.fromCharCode(Number(dec)))
+      .trim();
+  };
+
+  ipcMain.handle('wa:fetch-link-preview', async (_event, rawUrl: string) => {
+    try {
+      if (!rawUrl || typeof rawUrl !== 'string') return null;
+      let target = rawUrl.trim();
+      if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(target)) {
+        target = `https://${target}`;
+      }
+
+      if (linkPreviewCache.has(target)) {
+        return linkPreviewCache.get(target);
+      }
+
+      // 1. YouTube detection
+      const ytMatch =
+        /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i.exec(
+          target
+        );
+      if (ytMatch && ytMatch[1]) {
+        const videoId = ytMatch[1];
+        const cacheKey = `yt:${videoId}`;
+        if (linkPreviewCache.has(cacheKey)) {
+          return linkPreviewCache.get(cacheKey);
+        }
+
+        const canonicalYtUrl = `https://www.youtube.com/watch?v=${videoId}`;
+        const oembed =
+          (await fetchJsonWithTimeout(
+            `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalYtUrl)}&format=json`
+          )) ||
+          (await fetchJsonWithTimeout(
+            `https://noembed.com/embed?url=${encodeURIComponent(canonicalYtUrl)}`
+          ));
+
+        const preview = {
+          provider: 'youtube' as const,
+          url: target,
+          videoId,
+          title: oembed?.title || 'Vídeo do YouTube',
+          authorName: oembed?.author_name || 'YouTube',
+          thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          mediaType: 'video' as const,
+        };
+
+        linkPreviewCache.set(cacheKey, preview);
+        linkPreviewCache.set(target, preview);
+        return preview;
+      }
+
+      // 2. Twitter / X detection
+      const twMatch =
+        /(?:twitter\.com|x\.com|fxtwitter\.com|vxtwitter\.com|fixupx\.com)\/(?:([^/?#]+)\/status(?:es)?\/|i\/(?:web\/)?status\/)(\d+)/i.exec(
+          target
+        );
+      if (twMatch && twMatch[2]) {
+        const urlHandle = twMatch[1] && twMatch[1].toLowerCase() !== 'i' ? twMatch[1] : undefined;
+        const tweetId = twMatch[2];
+        const cacheKey = `tw:${tweetId}`;
+        if (linkPreviewCache.has(cacheKey)) {
+          return linkPreviewCache.get(cacheKey);
+        }
+
+        // Try FxTwitter public API first (returns avatar, name, handle, full text, media)
+        const fxData = await fetchJsonWithTimeout(`https://api.fxtwitter.com/status/${tweetId}`);
+        if (fxData?.tweet) {
+          const t = fxData.tweet;
+          const hasVideo = Boolean(t.media?.videos?.length);
+          const hasPhoto = Boolean(t.media?.photos?.length);
+          const thumb =
+            t.media?.photos?.[0]?.url ||
+            t.media?.videos?.[0]?.thumbnail_url ||
+            t.media?.mosaic?.formats?.jpeg ||
+            undefined;
+
+          const preview = {
+            provider: 'twitter' as const,
+            url: target,
+            tweetId,
+            authorName: t.author?.name || urlHandle || 'Post no X',
+            authorHandle: t.author?.screen_name
+              ? `@${t.author.screen_name}`
+              : urlHandle
+              ? `@${urlHandle}`
+              : undefined,
+            authorAvatar: t.author?.avatar_url || undefined,
+            description: t.text || '',
+            thumbnailUrl: thumb,
+            mediaType: hasVideo ? ('video' as const) : hasPhoto ? ('photo' as const) : undefined,
+          };
+
+          linkPreviewCache.set(cacheKey, preview);
+          linkPreviewCache.set(target, preview);
+          return preview;
+        }
+
+        // Fallback 1: VxTwitter API
+        const vxData = await fetchJsonWithTimeout(
+          `https://api.vxtwitter.com/Twitter/status/${tweetId}`
+        );
+        if (vxData && (vxData.text || vxData.user_name)) {
+          const firstMedia = vxData.media_extended?.[0];
+          const isVid = firstMedia?.type === 'video' || firstMedia?.type === 'gif';
+          const thumb =
+            firstMedia?.thumbnail_url || firstMedia?.url || vxData.mediaURLs?.[0] || undefined;
+
+          const preview = {
+            provider: 'twitter' as const,
+            url: target,
+            tweetId,
+            authorName: vxData.user_name || urlHandle || 'Post no X',
+            authorHandle: vxData.user_screen_name
+              ? `@${vxData.user_screen_name}`
+              : urlHandle
+              ? `@${urlHandle}`
+              : undefined,
+            authorAvatar: vxData.user_profile_image_url || undefined,
+            description: vxData.text || '',
+            thumbnailUrl: thumb,
+            mediaType: isVid ? ('video' as const) : thumb ? ('photo' as const) : undefined,
+          };
+
+          linkPreviewCache.set(cacheKey, preview);
+          linkPreviewCache.set(target, preview);
+          return preview;
+        }
+
+        // Fallback 2: Official Twitter oEmbed
+        const oembed = await fetchJsonWithTimeout(
+          `https://publish.twitter.com/oembed?url=${encodeURIComponent(
+            `https://twitter.com/i/status/${tweetId}`
+          )}&omit_script=true`
+        );
+        if (oembed) {
+          let tweetText = '';
+          if (typeof oembed.html === 'string') {
+            const pMatch = /<p[^>]*>([\s\S]*?)<\/p>/i.exec(oembed.html);
+            if (pMatch && pMatch[1]) {
+              tweetText = decodeHtmlEntities(pMatch[1]);
+            }
+          }
+          let handleFromAuthorUrl = urlHandle ? `@${urlHandle}` : undefined;
+          if (typeof oembed.author_url === 'string') {
+            const m = /(?:twitter\.com|x\.com)\/([^/?#]+)/i.exec(oembed.author_url);
+            if (m && m[1]) handleFromAuthorUrl = `@${m[1]}`;
+          }
+
+          const preview = {
+            provider: 'twitter' as const,
+            url: target,
+            tweetId,
+            authorName: oembed.author_name || urlHandle || 'Post no X',
+            authorHandle: handleFromAuthorUrl,
+            description: tweetText,
+          };
+
+          linkPreviewCache.set(cacheKey, preview);
+          linkPreviewCache.set(target, preview);
+          return preview;
+        }
+      }
+
+      return null;
+    } catch (err) {
+      console.error('[main] Error fetching link preview:', err);
+      return null;
+    }
+  });
+
   ipcMain.handle(
     'wa:forward-messages',
     async (

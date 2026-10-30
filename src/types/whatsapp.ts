@@ -266,7 +266,22 @@ export interface GroupMetadataInfo {
   owner?: string;
 }
 
+export interface LinkPreviewData {
+  provider: 'youtube' | 'twitter';
+  url: string;
+  videoId?: string;
+  tweetId?: string;
+  title?: string;
+  description?: string;
+  authorName?: string;
+  authorHandle?: string;
+  authorAvatar?: string;
+  thumbnailUrl?: string;
+  mediaType?: 'photo' | 'video';
+}
+
 export interface ElectronAPI {
+  fetchLinkPreview?: (url: string) => Promise<LinkPreviewData | null>;
   setIgnoreMouseEvents: (ignore: boolean) => void;
   getMessages: (chatId: string, limit?: number) => Promise<FormattedMessage[]>;
   getGroupParticipants?: (

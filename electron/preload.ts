@@ -118,6 +118,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:open-external-url', url);
   },
 
+  fetchLinkPreview: (url: string) => {
+    return ipcRenderer.invoke('wa:fetch-link-preview', url);
+  },
+
   getSfxDataUrl: (type: 'user' | 'group', preset?: string) => {
     return ipcRenderer.invoke('wa:get-sfx', type, preset);
   },
