@@ -96,6 +96,13 @@ export const App: React.FC = () => {
     window.electronAPI?.syncTrayState?.({ hidden: isDockHidden, soundMuted });
   }, [isDockHidden, soundMuted, isSettingsWindow]);
 
+  // Expande a largura do overlay apenas quando o visualizador de mídia está aberto,
+  // evitando cobrir players de vídeo no lado esquerdo da tela ou disparar oclusão no navegador.
+  useEffect(() => {
+    if (isSettingsWindow) return;
+    window.electronAPI?.setOverlayExpanded?.(Boolean(viewingImage));
+  }, [viewingImage, isSettingsWindow]);
+
   // Inicializa automaticamente a sessão do WhatsApp (LocalAuth) em segundo plano ao abrir o app
   // e escuta todos os eventos IPC em tempo real (apenas na janela principal das bolhas).
   useEffect(() => {

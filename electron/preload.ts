@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('window:set-ignore-mouse', ignore);
   },
 
+  setOverlayExpanded: (expanded: boolean) => {
+    ipcRenderer.send('window:set-overlay-expanded', expanded);
+  },
+
   getMessages: (chatId: string, limit?: number) => {
     return ipcRenderer.invoke('wa:get-messages', chatId, limit);
   },

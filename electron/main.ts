@@ -267,8 +267,12 @@ function createSystemTray() {
   updateTrayMenu();
 }
 
-// Overlay full-screen transparente cobre a área de trabalho do monitor
-const MAX_OVERLAY_WIDTH = 9999;
+// Largura padrão do overlay para as bolhas/conversas (evita cobrir o lado esquerdo do monitor
+// onde ficam players de vídeo do navegador) e margem anti-oclusão de 4px para que o Chromium/Edge
+// (NativeWindowOcclusionTrackerWin) nunca considere a janela maximizada do navegador 100% ocluída.
+const DEFAULT_OVERLAY_WIDTH = 1200;
+const OCCLUSION_SAFE_MARGIN_PX = 4;
+let isOverlayFullWidth = false;
 
 interface SavedDisplayPref {
   displayId: number;
@@ -345,8 +349,12 @@ function positionWindowBottomRight(win: BrowserWindow) {
   if (!win || win.isDestroyed()) return;
   const targetDisplay = getTargetDisplay();
   const { x, y, width, height } = targetDisplay.workArea;
-  const overlayWidth = Math.min(width, MAX_OVERLAY_WIDTH);
-  const overlayHeight = height;
+  const maxSafeWidth = Math.max(400, width - OCCLUSION_SAFE_MARGIN_PX);
+  const maxSafeHeight = Math.max(400, height - OCCLUSION_SAFE_MARGIN_PX);
+  const overlayWidth = isOverlayFullWidth
+    ? maxSafeWidth
+    : Math.min(maxSafeWidth, DEFAULT_OVERLAY_WIDTH);
+  const overlayHeight = maxSafeHeight;
   const targetX = Math.round(x + width - overlayWidth);
   const targetY = Math.round(y + height - overlayHeight);
 
@@ -362,8 +370,12 @@ function createOverlayWindow() {
   const targetDisplay = getTargetDisplay();
   selectedDisplayId = targetDisplay.id;
   const { x, y, width, height } = targetDisplay.workArea;
-  const overlayWidth = Math.min(width, MAX_OVERLAY_WIDTH);
-  const overlayHeight = height;
+  const maxSafeWidth = Math.max(400, width - OCCLUSION_SAFE_MARGIN_PX);
+  const maxSafeHeight = Math.max(400, height - OCCLUSION_SAFE_MARGIN_PX);
+  const overlayWidth = isOverlayFullWidth
+    ? maxSafeWidth
+    : Math.min(maxSafeWidth, DEFAULT_OVERLAY_WIDTH);
+  const overlayHeight = maxSafeHeight;
   const targetX = Math.round(x + width - overlayWidth);
   const targetY = Math.round(y + height - overlayHeight);
 
@@ -493,6 +505,15 @@ function registerIpcHandlers() {
       mainWindow.setIgnoreMouseEvents(true, { forward: true });
     } else {
       mainWindow.setIgnoreMouseEvents(false);
+    }
+  });
+
+  ipcMain.on('window:set-overlay-expanded', (_event, expanded: boolean) => {
+    const next = Boolean(expanded);
+    if (isOverlayFullWidth === next) return;
+    isOverlayFullWidth = next;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      positionWindowBottomRight(mainWindow);
     }
   });
 

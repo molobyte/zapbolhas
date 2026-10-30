@@ -283,6 +283,7 @@ export interface LinkPreviewData {
 export interface ElectronAPI {
   fetchLinkPreview?: (url: string) => Promise<LinkPreviewData | null>;
   setIgnoreMouseEvents: (ignore: boolean) => void;
+  setOverlayExpanded?: (expanded: boolean) => void;
   getMessages: (chatId: string, limit?: number) => Promise<FormattedMessage[]>;
   getGroupParticipants?: (
     chatId: string,
