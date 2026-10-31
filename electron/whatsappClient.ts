@@ -358,6 +358,14 @@ function logMediaDebug(msg: string) {
   } catch {}
 }
 
+function logPresenceDebug(msg: string) {
+  try {
+    const dir = app.isPackaged ? app.getPath('userData') : process.cwd();
+    const p = path.join(dir, 'presence_debug.log');
+    fs.appendFileSync(p, `[${new Date().toISOString()}] ${msg}\n`, 'utf8');
+  } catch {}
+}
+
 export class WhatsAppService {
   private client: Client | null = null;
   private mainWindow: BrowserWindow | null = null;
@@ -643,9 +651,13 @@ export class WhatsAppService {
     this.client.on('ready', async () => {
       this.qrDataUrl = null;
       await this.patchWWebJSGetChatModel();
-      await this.setupPresenceObserver();
       this.updateStatus('ready');
+      await this.setupPresenceObserver();
       this.emitToRenderer('wa:ready');
+
+      try {
+        await (this.client as any).sendPresenceAvailable?.().catch?.(() => {});
+      } catch {}
 
       try {
         if (this.client?.info?.wid?._serialized) {
@@ -661,6 +673,7 @@ export class WhatsAppService {
       const chats = await this.getRecentChats();
       if (chats.length > 0) {
         this.emitToRenderer('wa:chats-loaded', chats);
+        this.subscribePresence(chats.slice(0, 25).map((c) => c.id)).catch(() => {});
       }
 
       // Re-sincronizações rápidas após o boot inicial caso a agenda/IndexedDB do WhatsApp Web termine de hidratar alguns segundos depois do evento ready
@@ -670,6 +683,7 @@ export class WhatsAppService {
             const hydratedChats = await this.getRecentChats();
             if (hydratedChats.length > 0) {
               this.emitToRenderer('wa:chats-loaded', hydratedChats);
+              this.subscribePresence(hydratedChats.slice(0, 25).map((c) => c.id)).catch(() => {});
             }
           }
         }, delayMs);
@@ -5932,9 +5946,11 @@ export class WhatsAppService {
     }
 
     try {
+      await this.setupPresenceObserver().catch(() => {});
       const chats = await this.getRecentChats();
       if (chats.length > 0) {
         this.emitToRenderer('wa:chats-loaded', chats);
+        this.subscribePresence(chats.slice(0, 25).map((c) => c.id)).catch(() => {});
       }
       return chats;
     } catch (err) {
@@ -5955,6 +5971,7 @@ export class WhatsAppService {
             Array<{ id: string; name?: string; state: 'typing' | 'recording' }>
           >
         ) => {
+          logPresenceDebug(`Snapshot emitido: ${JSON.stringify(presenceByChat)}`);
           this.emitToRenderer('wa:chat-presence', presenceByChat);
         }
       );
@@ -5963,9 +5980,39 @@ export class WhatsAppService {
     }
 
     try {
+      await this.client.pupPage.exposeFunction('onWaPresenceDebugLog', (msg: string) => {
+        logPresenceDebug(msg);
+      });
+    } catch {
+      // Function already exposed on page
+    }
+
+    try {
       await this.client.pupPage.evaluate(() => {
         const w = window as any;
-        if (typeof w.require !== 'function') return;
+        const debugLog = (m: string) => {
+          try {
+            w.onWaPresenceDebugLog?.(m);
+          } catch {}
+        };
+
+        if (typeof w.require !== 'function') {
+          debugLog('setupPresenceObserver abortado: w.require não é função');
+          return;
+        }
+
+        // 1. Garante que a janela headless do Chromium seja sempre vista como visível e focada pelo WhatsApp Web
+        try {
+          document.hasFocus = () => true;
+          Object.defineProperty(document, 'hidden', {
+            get: () => false,
+            configurable: true,
+          });
+          Object.defineProperty(document, 'visibilityState', {
+            get: () => 'visible',
+            configurable: true,
+          });
+        } catch {}
 
         if (w.__waPresenceInterval) {
           clearInterval(w.__waPresenceInterval);
@@ -5976,49 +6023,85 @@ export class WhatsAppService {
           w.__waPresenceResubInterval = null;
         }
 
-        const collections = w.require('WAWebCollections');
-        if (!collections) return;
+        const safeReq = (name: string) => {
+          try {
+            return w.require(name);
+          } catch {
+            return null;
+          }
+        };
 
-        const PresenceCol = collections.Presence;
+        const collections = safeReq('WAWebCollections');
+        if (!collections) {
+          debugLog('setupPresenceObserver abortado: WAWebCollections indisponível');
+          return;
+        }
+
+        const PresenceCol = collections.Presence || safeReq('WAWebPresenceCollection')?.PresenceCollection;
         const ChatCol = collections.Chat;
         const ContactCol = collections.Contact;
         const MsgCol = collections.Msg;
-        const widFactory = (() => {
+        const widFactory = safeReq('WAWebWidFactory');
+        const ContactGetters = safeReq('WAWebContactGetters');
+        const lidUtils = safeReq('WAWebLidMigrationUtils');
+        const apiContact = safeReq('WAWebApiContact');
+        const stateUtils = safeReq('WAWebStateUtils');
+        const presenceChatAction = safeReq('WAWebPresenceChatAction');
+        const streamMod = safeReq('WAWebStreamModel');
+
+        const unproxy = (obj: any): any => {
+          if (!obj || typeof obj !== 'object') return obj;
           try {
-            return w.require('WAWebWidFactory');
+            return stateUtils?.unproxy ? stateUtils.unproxy(obj) : obj;
           } catch {
-            return null;
+            return obj;
           }
-        })();
-        const ContactGetters = (() => {
+        };
+
+        // 2. Mantém a sessão online/available no servidor do WhatsApp para receber pacotes <chatstate>
+        const ensureClientAvailable = () => {
           try {
-            return w.require('WAWebContactGetters');
-          } catch {
-            return null;
-          }
-        })();
-        const lidUtils = (() => {
+            if (presenceChatAction) {
+              if (
+                typeof presenceChatAction.sendPresenceUnavailable === 'function' &&
+                !presenceChatAction.sendPresenceUnavailable._noopPatched
+              ) {
+                const nop = () => Promise.resolve();
+                (nop as any)._noopPatched = true;
+                presenceChatAction.sendPresenceUnavailable = nop;
+              }
+              if (typeof presenceChatAction.sendPresenceAvailable === 'function') {
+                presenceChatAction.sendPresenceAvailable().catch?.(() => {});
+              }
+            }
+          } catch {}
           try {
-            return w.require('WAWebLidMigrationUtils');
-          } catch {
-            return null;
-          }
-        })();
-        const apiContact = (() => {
-          try {
-            return w.require('WAWebApiContact');
-          } catch {
-            return null;
-          }
-        })();
+            const Stream = streamMod?.Stream;
+            if (Stream) {
+              if (typeof Stream.markUnavailable === 'function' && !Stream.markUnavailable._noopPatched) {
+                const nop = () => {};
+                (nop as any)._noopPatched = true;
+                Stream.markUnavailable = nop;
+              }
+              Stream.markAvailable?.();
+            }
+          } catch {}
+        };
+        ensureClientAvailable();
 
         const serializeId = (val: any): string => {
           if (!val) return '';
           if (typeof val === 'string') return val;
           if (typeof val._serialized === 'string' && val._serialized) return val._serialized;
+          if (val.id && typeof val.id === 'object' && typeof val.id._serialized === 'string') {
+            return val.id._serialized;
+          }
           if (typeof val.toString === 'function') {
             const s = val.toString();
             if (s && s !== '[object Object]') return s;
+          }
+          if (typeof val.user === 'string' && typeof val.server === 'string') {
+            return `${val.user}@${val.server}`;
           }
           return '';
         };
@@ -6063,8 +6146,8 @@ export class WhatsAppService {
         const myIds = new Set<string>();
         const refreshMyIds = () => {
           try {
-            const mePrefs = w.require('WAWebUserPrefsMeUser') || {};
-            const connMod = w.require('WAWebConnModel') || {};
+            const mePrefs = safeReq('WAWebUserPrefsMeUser') || {};
+            const connMod = safeReq('WAWebConnModel') || {};
             const addMe = (val: any) => {
               const sid = serializeId(val);
               if (sid) {
@@ -6085,7 +6168,10 @@ export class WhatsAppService {
           const partId = serializeId(rawParticipant);
           const candidates: any[] = [];
           const addContact = (c: any) => {
+            if (!c) return;
+            const uc = unproxy(c);
             if (c && !candidates.includes(c)) candidates.push(c);
+            if (uc && uc !== c && !candidates.includes(uc)) candidates.push(uc);
           };
 
           if (rawParticipant && typeof rawParticipant === 'object') {
@@ -6123,6 +6209,22 @@ export class WhatsAppService {
                 }
               }
             } catch {}
+          }
+
+          if (ContactCol?.getModelsArray) {
+            for (const cm of ContactCol.getModelsArray()) {
+              const ucm = unproxy(cm);
+              const cid = serializeId(cm?.id) || serializeId(ucm?.id);
+              const clid = serializeId(cm?.lid) || serializeId(ucm?.lid);
+              const cpn = serializeId(cm?.phoneNumber) || serializeId(ucm?.phoneNumber);
+              if (
+                (partId && (cid === partId || clid === partId || cpn === partId)) ||
+                (pnWidStr && (cid === pnWidStr || clid === pnWidStr || cpn === pnWidStr))
+              ) {
+                addContact(cm);
+                if (cpn && !pnWidStr) pnWidStr = cpn;
+              }
+            }
           }
 
           for (const cc of [...candidates]) {
@@ -6187,14 +6289,28 @@ export class WhatsAppService {
             }
           }
 
-          if (fallbackChat && !fallbackChat.isGroup) {
-            const chatTitle = String(
-              fallbackChat.formattedTitle || fallbackChat.name || ''
-            )
-              .replace(/^~/, '')
-              .trim();
-            if (chatTitle && !isPhoneLikeStr(chatTitle)) {
-              return chatTitle;
+          if (fallbackChat) {
+            const uChat = unproxy(fallbackChat);
+            const isGrp = Boolean(
+              fallbackChat.isGroup ||
+                uChat?.isGroup ||
+                fallbackChat.groupMetadata ||
+                uChat?.groupMetadata ||
+                serializeId(fallbackChat.id).endsWith('@g.us')
+            );
+            if (!isGrp) {
+              const chatTitle = String(
+                fallbackChat.formattedTitle ||
+                  uChat?.formattedTitle ||
+                  fallbackChat.name ||
+                  uChat?.name ||
+                  ''
+              )
+                .replace(/^~/, '')
+                .trim();
+              if (chatTitle && !isPhoneLikeStr(chatTitle)) {
+                return chatTitle;
+              }
             }
           }
 
@@ -6206,6 +6322,48 @@ export class WhatsAppService {
           w.__waPresenceActiveSince = new Map<string, number>();
         }
         const activeSinceMap: Map<string, number> = w.__waPresenceActiveSince;
+
+        // Mapa de eventos capturados diretamente de handlers de protocolo/stanza
+        if (!w.__waDirectChatStates) {
+          w.__waDirectChatStates = new Map<
+            string,
+            { chatId: string; partId: string; rawType: 'composing' | 'recording'; ts: number }
+          >();
+        }
+        const directChatStates: Map<
+          string,
+          { chatId: string; partId: string; rawType: 'composing' | 'recording'; ts: number }
+        > = w.__waDirectChatStates;
+
+        const extractCsType = (obj: any): string => {
+          if (!obj) return '';
+          if (typeof obj === 'string') return obj.toLowerCase();
+          const u = unproxy(obj);
+          const candidates = [
+            obj.type,
+            u?.type,
+            obj.__x_type,
+            u?.__x_type,
+            typeof obj.get === 'function' ? (() => { try { return obj.get('type'); } catch { return undefined; } })() : undefined,
+            typeof u?.get === 'function' ? (() => { try { return u.get('type'); } catch { return undefined; } })() : undefined,
+            obj.attributes?.type,
+            u?.attributes?.type,
+            obj._data?.type,
+            u?._data?.type,
+            obj.chatstate?.type,
+            u?.chatstate?.type,
+            obj.chatstate?.__x_type,
+            u?.chatstate?.__x_type,
+            typeof obj.chatstate === 'string' ? obj.chatstate : undefined,
+            typeof u?.chatstate === 'string' ? u.chatstate : undefined,
+          ];
+          for (const val of candidates) {
+            if (typeof val === 'string' && val.trim()) {
+              return val.trim().toLowerCase();
+            }
+          }
+          return '';
+        };
 
         let lastSnapshotJson = '';
         let emitScheduled = false;
@@ -6220,21 +6378,104 @@ export class WhatsAppService {
               Array<{ id: string; name?: string; state: 'typing' | 'recording' }>
             > = {};
 
+            // Constrói mapa bidirecional @lid <-> @c.us a partir de ContactCol e ChatCol
+            const aliasMap = new Map<string, Set<string>>();
+            const linkIds = (idA: string, idB: string) => {
+              if (!idA || !idB || idA === idB) return;
+              if (!aliasMap.has(idA)) aliasMap.set(idA, new Set());
+              if (!aliasMap.has(idB)) aliasMap.set(idB, new Set());
+              aliasMap.get(idA)!.add(idB);
+              aliasMap.get(idB)!.add(idA);
+            };
+
+            if (ContactCol?.getModelsArray) {
+              for (const cm of ContactCol.getModelsArray()) {
+                const ucm = unproxy(cm);
+                const cid = serializeId(cm?.id) || serializeId(ucm?.id);
+                const clid = serializeId(cm?.lid) || serializeId(ucm?.lid);
+                const cpn = serializeId(cm?.phoneNumber) || serializeId(ucm?.phoneNumber);
+                if (cid && clid) linkIds(cid, clid);
+                if (cid && cpn) linkIds(cid, cpn);
+                if (clid && cpn) linkIds(clid, cpn);
+              }
+            }
+
+            const allChats: any[] = ChatCol?.getModelsArray ? ChatCol.getModelsArray() : [];
+            for (const c of allChats) {
+              const uc = unproxy(c);
+              const cid = serializeId(c?.id) || serializeId(uc?.id);
+              if (cid && !cid.endsWith('@g.us')) {
+                const contact = c?.contact || uc?.contact;
+                const uContact = unproxy(contact);
+                const clid = serializeId(contact?.lid) || serializeId(uContact?.lid);
+                const cpn = serializeId(contact?.phoneNumber) || serializeId(uContact?.phoneNumber);
+                const ccid = serializeId(contact?.id) || serializeId(uContact?.id);
+                if (clid) linkIds(cid, clid);
+                if (cpn) linkIds(cid, cpn);
+                if (ccid) linkIds(cid, ccid);
+              }
+            }
+
             const presenceModels = new Set<any>();
             if (PresenceCol?.getModelsArray) {
               for (const p of PresenceCol.getModelsArray()) {
-                if (p) presenceModels.add(p);
+                if (p) {
+                  presenceModels.add(p);
+                  const up = unproxy(p);
+                  if (up && up !== p) presenceModels.add(up);
+                }
               }
             }
-            const allChats: any[] = ChatCol?.getModelsArray ? ChatCol.getModelsArray() : [];
             for (const c of allChats) {
-              if (c?.presence) presenceModels.add(c.presence);
+              const uc = unproxy(c);
+              if (c?.presence) {
+                presenceModels.add(c.presence);
+                const up = unproxy(c.presence);
+                if (up && up !== c.presence) presenceModels.add(up);
+              }
+              if (uc?.presence) {
+                presenceModels.add(uc.presence);
+                const up2 = unproxy(uc.presence);
+                if (up2 && up2 !== uc.presence) presenceModels.add(up2);
+              }
             }
 
             const activeKeysThisPass = new Set<string>();
 
+            // Agrupa entradas ativas por rawPresId
+            const activeByPresId = new Map<
+              string,
+              Array<{ partId: string; rawPartObj: any; stateType: 'typing' | 'recording' }>
+            >();
+
+            const addActiveEntry = (
+              rawPresId: string,
+              partId: string,
+              rawPartObj: any,
+              rawType: 'composing' | 'recording'
+            ) => {
+              const stateKey = `${rawPresId}::${partId}::${rawType}`;
+              activeKeysThisPass.add(stateKey);
+              if (!activeSinceMap.has(stateKey)) {
+                activeSinceMap.set(stateKey, now);
+                debugLog(`Novo estado ativo detectado: chat=${rawPresId} part=${partId} type=${rawType}`);
+              }
+              const startedAt = activeSinceMap.get(stateKey) || now;
+              if (now - startedAt <= 25000) {
+                if (!activeByPresId.has(rawPresId)) {
+                  activeByPresId.set(rawPresId, []);
+                }
+                activeByPresId.get(rawPresId)!.push({
+                  partId,
+                  rawPartObj,
+                  stateType: rawType === 'recording' ? 'recording' : 'typing',
+                });
+              }
+            };
+
             for (const pres of presenceModels) {
-              const rawPresId = serializeId(pres?.id);
+              const uPres = unproxy(pres);
+              const rawPresId = serializeId(pres?.id) || serializeId(uPres?.id);
               if (
                 !rawPresId ||
                 rawPresId === 'status@broadcast' ||
@@ -6243,77 +6484,101 @@ export class WhatsAppService {
                 continue;
               }
 
-              const csCollection = pres.chatstates;
+              const csCollection = pres.chatstates || uPres?.chatstates;
+              const uCsCol = unproxy(csCollection);
               let statesList: any[] = [];
               if (csCollection) {
                 if (typeof csCollection.getModelsArray === 'function') {
                   statesList = csCollection.getModelsArray();
+                } else if (typeof uCsCol?.getModelsArray === 'function') {
+                  statesList = uCsCol.getModelsArray();
                 } else if (Array.isArray(csCollection._models)) {
                   statesList = csCollection._models;
+                } else if (Array.isArray(uCsCol?._models)) {
+                  statesList = uCsCol._models;
+                } else if (Array.isArray(csCollection.models)) {
+                  statesList = csCollection.models;
                 } else if (Array.isArray(csCollection)) {
                   statesList = csCollection;
                 }
               }
-              if (statesList.length === 0 && pres.chatstate) {
-                statesList = [pres.chatstate];
+              if (statesList.length === 0) {
+                const singleCs = pres.chatstate || uPres?.chatstate;
+                if (singleCs) statesList = [singleCs];
               }
-
-              const activeEntries: Array<{
-                cs: any;
-                stateType: 'typing' | 'recording';
-              }> = [];
 
               for (const cs of statesList) {
                 if (!cs) continue;
-                const rawType = String(
-                  cs.type || cs.__x_type || cs.attributes?.type || ''
-                ).toLowerCase();
+                const uCs = unproxy(cs);
+                const rawType = extractCsType(cs);
                 if (rawType === 'composing' || rawType === 'recording') {
-                  const csPartId = serializeId(cs.id) || rawPresId;
-                  const stateKey = `${rawPresId}::${csPartId}::${rawType}`;
-                  activeKeysThisPass.add(stateKey);
-                  if (!activeSinceMap.has(stateKey)) {
-                    activeSinceMap.set(stateKey, now);
-                  }
-                  const startedAt = activeSinceMap.get(stateKey) || now;
-                  // Expiração de segurança de 26s caso o pacote de 'paused' tenha sido perdido
-                  if (now - startedAt <= 26000) {
-                    activeEntries.push({
-                      cs,
-                      stateType: rawType === 'recording' ? 'recording' : 'typing',
-                    });
-                  }
+                  const csPartId =
+                    serializeId(cs.id) || serializeId(uCs?.id) || rawPresId;
+                  addActiveEntry(rawPresId, csPartId, cs.id || uCs?.id || rawPresId, rawType);
+                } else if (rawType === 'paused' || rawType === 'idle' || rawType === 'available') {
+                  const csPartId =
+                    serializeId(cs.id) || serializeId(uCs?.id) || rawPresId;
+                  directChatStates.delete(`${rawPresId}::${csPartId}`);
                 }
               }
 
+              // Também verifica se o próprio modelo Presence expõe o chatstate diretamente
+              const directPresType = extractCsType(pres);
+              if (directPresType === 'composing' || directPresType === 'recording') {
+                addActiveEntry(rawPresId, rawPresId, pres.id || rawPresId, directPresType);
+              }
+            }
+
+            // Mescla entradas capturadas diretamente pelos hooks de módulos/stanzas
+            for (const [dKey, entry] of Array.from(directChatStates.entries())) {
+              if (now - entry.ts > 20000) {
+                directChatStates.delete(dKey);
+                continue;
+              }
+              addActiveEntry(entry.chatId, entry.partId, entry.partId, entry.rawType);
+            }
+
+            for (const [rawPresId, activeEntries] of Array.from(activeByPresId.entries())) {
               if (activeEntries.length === 0) continue;
 
               const targetChatIds = new Set<string>([rawPresId]);
               let matchedChat = ChatCol?.get?.(rawPresId) || null;
 
               if (!rawPresId.endsWith('@g.us')) {
+                // Expande aliases conhecidos (@lid <-> @c.us)
+                const expandAliases = (seedId: string) => {
+                  const directAliases = aliasMap.get(seedId);
+                  if (directAliases) {
+                    for (const al of Array.from(directAliases)) {
+                      targetChatIds.add(al);
+                      if (!matchedChat) matchedChat = ChatCol?.get?.(al) || null;
+                    }
+                  }
+                };
+                expandAliases(rawPresId);
+
                 try {
-                  const widObj =
-                    pres.id && typeof pres.id === 'object'
-                      ? pres.id
-                      : widFactory?.createWid?.(rawPresId);
+                  const widObj = widFactory?.createWid?.(rawPresId);
                   if (widObj) {
                     const pnWid = lidUtils?.toPn?.(widObj);
                     const pnStr = serializeId(pnWid);
                     if (pnStr) {
                       targetChatIds.add(pnStr);
+                      expandAliases(pnStr);
                       if (!matchedChat) matchedChat = ChatCol?.get?.(pnStr) || null;
                     }
                     const lidWid = lidUtils?.toLid?.(widObj);
                     const lidStr = serializeId(lidWid);
                     if (lidStr) {
                       targetChatIds.add(lidStr);
+                      expandAliases(lidStr);
                       if (!matchedChat) matchedChat = ChatCol?.get?.(lidStr) || null;
                     }
                     const altWid = apiContact?.getAlternateUserWid?.(widObj);
                     const altStr = serializeId(altWid);
                     if (altStr) {
                       targetChatIds.add(altStr);
+                      expandAliases(altStr);
                       if (!matchedChat) matchedChat = ChatCol?.get?.(altStr) || null;
                     }
                   }
@@ -6325,8 +6590,13 @@ export class WhatsAppService {
                 if (brKey) {
                   for (const c of allChats) {
                     const cid = serializeId(c?.id);
-                    if (cid && getBrPhoneKey(cid) === brKey) {
+                    const cpn = serializeId(c?.contact?.phoneNumber);
+                    if (
+                      cid &&
+                      (getBrPhoneKey(cid) === brKey || (cpn && getBrPhoneKey(cpn) === brKey))
+                    ) {
                       targetChatIds.add(cid);
+                      expandAliases(cid);
                       if (!matchedChat) matchedChat = c;
                     }
                   }
@@ -6338,8 +6608,7 @@ export class WhatsAppService {
                 { id: string; name?: string; state: 'typing' | 'recording' }
               >();
 
-              for (const { cs, stateType } of activeEntries) {
-                const rawPartId = serializeId(cs.id) || rawPresId;
+              for (const { partId: rawPartId, rawPartObj, stateType } of activeEntries) {
                 const partUser = rawPartId.split('@')[0];
                 if (myIds.has(rawPartId) || (partUser && myIds.has(partUser))) {
                   continue;
@@ -6349,16 +6618,24 @@ export class WhatsAppService {
                 if (lidUtils?.toPn) {
                   try {
                     const widObj =
-                      cs.id && typeof cs.id === 'object'
-                        ? cs.id
+                      rawPartObj && typeof rawPartObj === 'object'
+                        ? rawPartObj
                         : widFactory?.createWid?.(rawPartId);
                     const pnWid = widObj ? lidUtils.toPn(widObj) : null;
                     const pnStr = serializeId(pnWid);
                     if (pnStr) canonicalPartId = pnStr;
                   } catch {}
                 }
+                if (canonicalPartId.endsWith('@lid')) {
+                  const aliases = aliasMap.get(canonicalPartId);
+                  if (aliases) {
+                    const cusAlias = Array.from(aliases).find((a) => a.endsWith('@c.us'));
+                    if (cusAlias) canonicalPartId = cusAlias;
+                  }
+                }
+
                 const dedupKey = getBrPhoneKey(canonicalPartId) || canonicalPartId;
-                const resolvedName = resolveParticipantName(cs.id || rawPartId, matchedChat);
+                const resolvedName = resolveParticipantName(rawPartObj || rawPartId, matchedChat);
 
                 const existing = dedupedParticipants.get(dedupKey);
                 if (!existing || stateType === 'recording') {
@@ -6372,7 +6649,7 @@ export class WhatsAppService {
 
               const participantsList = Array.from(dedupedParticipants.values());
               if (participantsList.length > 0) {
-                for (const tid of targetChatIds) {
+                for (const tid of Array.from(targetChatIds)) {
                   snapshot[tid] = participantsList;
                 }
               }
@@ -6392,74 +6669,242 @@ export class WhatsAppService {
                 w.onWaChatPresenceSnapshot(snapshot);
               }
             }
-          } catch (err) {
-            console.warn('[WhatsApp Web] Presence snapshot error:', err);
+          } catch (err: any) {
+            debugLog(`Erro em collectPresenceSnapshot: ${err?.message || String(err)}`);
           }
         };
 
         const scheduleEmit = () => {
           if (emitScheduled) return;
           emitScheduled = true;
-          setTimeout(collectPresenceSnapshot, 25);
+          setTimeout(collectPresenceSnapshot, 20);
         };
+
+        // 3. Hook direto nos módulos internos de ChatState / Presence do WhatsApp Web
+        if (!w.__waChatStateModulesHooked) {
+          w.__waChatStateModulesHooked = true;
+          try {
+            const recordIncomingState = (
+              rawChat: any,
+              rawParticipant: any,
+              rawState: any,
+              sourceLabel: string
+            ) => {
+              const sStr = String(rawState || '').toLowerCase();
+              if (
+                sStr !== 'composing' &&
+                sStr !== 'recording' &&
+                sStr !== 'paused' &&
+                sStr !== 'idle' &&
+                sStr !== 'typing'
+              ) {
+                return;
+              }
+              const chatId = serializeId(rawChat);
+              if (!chatId || chatId === 'status@broadcast' || chatId.endsWith('@newsletter')) {
+                return;
+              }
+              const partId = serializeId(rawParticipant) || chatId;
+              const dKey = `${chatId}::${partId}`;
+              debugLog(`Hook[${sourceLabel}]: chat=${chatId} part=${partId} state=${sStr}`);
+              if (sStr === 'composing' || sStr === 'typing' || sStr === 'recording') {
+                const normType: 'composing' | 'recording' =
+                  sStr === 'recording' ? 'recording' : 'composing';
+                directChatStates.set(dKey, {
+                  chatId,
+                  partId,
+                  rawType: normType,
+                  ts: Date.now(),
+                });
+                activeSinceMap.set(`${chatId}::${partId}::${normType}`, Date.now());
+              } else {
+                directChatStates.delete(dKey);
+              }
+              scheduleEmit();
+            };
+
+            const inspectAndHookModule = (modName: string, mod: any) => {
+              if (!mod || (typeof mod !== 'object' && typeof mod !== 'function')) return;
+              for (const key of Object.keys(mod)) {
+                if (
+                  key.startsWith('sendChatState') ||
+                  key.startsWith('sendPresence') ||
+                  key === 'markAvailable' ||
+                  key === 'markUnavailable'
+                ) {
+                  continue;
+                }
+                const orig = mod[key];
+                if (typeof orig === 'function' && !orig._waPresenceHooked) {
+                  const wrapped = function (this: any, ...args: any[]) {
+                    try {
+                      for (const arg of args) {
+                        if (!arg) continue;
+                        if (typeof arg === 'object') {
+                          const t = extractCsType(arg);
+                          const cId =
+                            serializeId(arg.chatId) ||
+                            serializeId(arg.from) ||
+                            serializeId(arg.id) ||
+                            serializeId(arg.wid);
+                          const pId =
+                            serializeId(arg.participant) ||
+                            serializeId(arg.author) ||
+                            cId;
+                          if (
+                            cId &&
+                            (t === 'composing' || t === 'recording' || t === 'paused')
+                          ) {
+                            recordIncomingState(cId, pId, t, `${modName}.${key}`);
+                          }
+                        } else if (typeof arg === 'string') {
+                          const low = arg.toLowerCase();
+                          if (
+                            low === 'composing' ||
+                            low === 'recording' ||
+                            low === 'paused'
+                          ) {
+                            const firstWid = args.find(
+                              (a) => a && typeof a === 'object' && serializeId(a)
+                            );
+                            if (firstWid) {
+                              recordIncomingState(firstWid, firstWid, low, `${modName}.${key}`);
+                            }
+                          }
+                        }
+                      }
+                    } catch {}
+                    const res = orig.apply(this, args);
+                    scheduleEmit();
+                    return res;
+                  };
+                  Object.assign(wrapped, orig);
+                  (wrapped as any)._waPresenceHooked = true;
+                  try {
+                    mod[key] = wrapped;
+                  } catch {}
+                }
+              }
+            };
+
+            const candidateModuleNames = new Set<string>([
+              'WAWebHandleChatState',
+              'WAWebChatStateBridge',
+              'WAWebChatPresence',
+              'WAWebPresenceChatAction',
+              'WAWebPresenceModel',
+              'WAWebChatStateCollection',
+            ]);
+
+            const modulesMap = w.__debug?.modulesMap;
+            if (modulesMap && typeof modulesMap === 'object') {
+              for (const k of Object.keys(modulesMap)) {
+                if (/ChatState|ChatPresence|HandlePresence/i.test(k)) {
+                  candidateModuleNames.add(k);
+                }
+              }
+            }
+
+            const foundMods: string[] = [];
+            for (const mName of Array.from(candidateModuleNames)) {
+              const m = safeReq(mName);
+              if (m) {
+                foundMods.push(`${mName}[${Object.keys(m).join(',')}]`);
+                inspectAndHookModule(mName, m);
+              }
+            }
+            debugLog(`Módulos de presença inspecionados: ${foundMods.join(' | ')}`);
+          } catch (hookErr: any) {
+            debugLog(`Erro ao fazer hook nos módulos: ${hookErr?.message || String(hookErr)}`);
+          }
+        }
 
         const boundObjects = new WeakSet<object>();
 
-        const bindPresenceModel = (pres: any) => {
-          if (!pres || typeof pres !== 'object') return;
-          if (!boundObjects.has(pres)) {
-            boundObjects.add(pres);
-            if (typeof pres.on === 'function') {
-              try {
-                pres.on('change change:chatstate', () => {
-                  scheduleEmit();
-                });
-              } catch {}
-            }
+        const bindPresenceModel = (rawPres: any) => {
+          if (!rawPres || typeof rawPres !== 'object') return;
+          const targets = [rawPres];
+          const uPres = unproxy(rawPres);
+          if (uPres && typeof uPres === 'object' && uPres !== rawPres) {
+            targets.push(uPres);
           }
-          const csCol = pres.chatstates;
-          if (csCol && typeof csCol === 'object' && !boundObjects.has(csCol)) {
-            boundObjects.add(csCol);
-            if (typeof csCol.on === 'function') {
-              try {
-                csCol.on('add remove change change:type reset', (csModel: any) => {
+
+          for (const pres of targets) {
+            if (!boundObjects.has(pres)) {
+              boundObjects.add(pres);
+              if (typeof pres.on === 'function') {
+                try {
+                  pres.on('all change change:chatstate change:type', (_evName: any) => {
+                    scheduleEmit();
+                  });
+                } catch {}
+              }
+            }
+
+            const csCols = [pres.chatstates, unproxy(pres.chatstates)].filter(
+              (x) => x && typeof x === 'object'
+            );
+            for (const csCol of csCols) {
+              if (!boundObjects.has(csCol)) {
+                boundObjects.add(csCol);
+                if (typeof csCol.on === 'function') {
                   try {
-                    const rawPresId = serializeId(pres.id);
-                    const csPartId = serializeId(csModel?.id) || rawPresId;
-                    const rawType = String(
-                      csModel?.type || csModel?.__x_type || csModel?.attributes?.type || ''
-                    ).toLowerCase();
-                    if (rawPresId && (rawType === 'composing' || rawType === 'recording')) {
-                      activeSinceMap.set(`${rawPresId}::${csPartId}::${rawType}`, Date.now());
-                    }
+                    csCol.on('all add remove change change:type reset', (csModel: any) => {
+                      try {
+                        const rawPresId = serializeId(pres.id);
+                        const csPartId = serializeId(csModel?.id) || rawPresId;
+                        const rawType = extractCsType(csModel);
+                        if (rawPresId && (rawType === 'composing' || rawType === 'recording')) {
+                          activeSinceMap.set(`${rawPresId}::${csPartId}::${rawType}`, Date.now());
+                          directChatStates.set(`${rawPresId}::${csPartId}`, {
+                            chatId: rawPresId,
+                            partId: csPartId,
+                            rawType,
+                            ts: Date.now(),
+                          });
+                          debugLog(
+                            `Evento csCol (${rawPresId}): part=${csPartId} type=${rawType}`
+                          );
+                        } else if (rawPresId && rawType === 'paused') {
+                          directChatStates.delete(`${rawPresId}::${csPartId}`);
+                          debugLog(`Evento csCol paused (${rawPresId}): part=${csPartId}`);
+                        }
+                      } catch {}
+                      scheduleEmit();
+                    });
                   } catch {}
-                  scheduleEmit();
-                });
-              } catch {}
+                }
+              }
             }
           }
         };
 
         if (PresenceCol) {
-          if (typeof PresenceCol.getModelsArray === 'function') {
-            for (const p of PresenceCol.getModelsArray()) {
-              bindPresenceModel(p);
-            }
-          }
-          if (typeof PresenceCol.on === 'function' && !w.__waPresenceColBound) {
-            w.__waPresenceColBound = true;
-            try {
-              PresenceCol.on('add change remove', (p: any) => {
+          const uPresCol = unproxy(PresenceCol);
+          for (const col of [PresenceCol, uPresCol]) {
+            if (!col) continue;
+            if (typeof col.getModelsArray === 'function') {
+              for (const p of col.getModelsArray()) {
                 bindPresenceModel(p);
-                scheduleEmit();
-              });
-            } catch {}
+              }
+            }
+            if (typeof col.on === 'function' && !boundObjects.has(col)) {
+              boundObjects.add(col);
+              try {
+                col.on('all add change remove', (p: any) => {
+                  bindPresenceModel(p);
+                  scheduleEmit();
+                });
+              } catch {}
+            }
           }
         }
 
         if (ChatCol?.getModelsArray) {
           for (const c of ChatCol.getModelsArray()) {
             if (c?.presence) bindPresenceModel(c.presence);
+            const uc = unproxy(c);
+            if (uc?.presence) bindPresenceModel(uc.presence);
           }
         }
 
@@ -6468,6 +6913,14 @@ export class WhatsAppService {
           try {
             MsgCol.on('add', (msg: any) => {
               if (!msg || msg.id?.fromMe) return;
+              try {
+                const fromChat = serializeId(msg.from) || serializeId(msg.id?.remote);
+                const authorId = serializeId(msg.author) || fromChat;
+                if (fromChat) {
+                  directChatStates.delete(`${fromChat}::${authorId}`);
+                  directChatStates.delete(`${fromChat}::${fromChat}`);
+                }
+              } catch {}
               scheduleEmit();
             });
           } catch {}
@@ -6477,11 +6930,51 @@ export class WhatsAppService {
           w.__waTrackedPresenceChatIds = new Set<string>();
         }
 
-        w.__waSubscribeChatPresence = async (chatIds?: string[]) => {
+        const subscribeWidPresence = (widOrStr: any) => {
+          if (!widOrStr) return;
+          const sid = serializeId(widOrStr);
+          if (!sid || sid === 'status@broadcast' || sid.endsWith('@newsletter')) return;
+          const wid =
+            typeof widOrStr === 'object' && widOrStr._serialized
+              ? widOrStr
+              : widFactory?.createWid?.(sid);
+          if (!wid) return;
+
           try {
-            const Stream = w.require('WAWebStreamModel')?.Stream;
-            Stream?.markAvailable?.();
+            presenceChatAction?.subscribePresence?.(wid)?.catch?.(() => {});
           } catch {}
+
+          if (PresenceCol) {
+            try {
+              const p = PresenceCol.get?.(wid) || PresenceCol.get?.(sid);
+              if (p) {
+                bindPresenceModel(p);
+                p.subscribe?.().catch?.(() => {});
+                unproxy(p)?.subscribe?.().catch?.(() => {});
+              } else if (typeof PresenceCol.subscribe === 'function') {
+                Promise.resolve(PresenceCol.subscribe(wid))
+                  .then((res: any) => {
+                    const found = res || PresenceCol.get?.(wid) || PresenceCol.get?.(sid);
+                    if (found) bindPresenceModel(found);
+                  })
+                  .catch(() => {});
+              } else if (typeof PresenceCol.find === 'function') {
+                Promise.resolve(PresenceCol.find(wid))
+                  .then((found: any) => {
+                    if (found) {
+                      bindPresenceModel(found);
+                      found.subscribe?.().catch?.(() => {});
+                      unproxy(found)?.subscribe?.().catch?.(() => {});
+                    }
+                  })
+                  .catch(() => {});
+              }
+            } catch {}
+          }
+        };
+
+        w.__waSubscribeChatPresence = async (chatIds?: string[]) => {
+          ensureClientAvailable();
 
           const tracked: Set<string> = w.__waTrackedPresenceChatIds;
           if (Array.isArray(chatIds)) {
@@ -6494,81 +6987,67 @@ export class WhatsAppService {
           if (ChatCol?.getModelsArray) {
             const recent = ChatCol.getModelsArray()
               .filter((c: any) => !c.archive && serializeId(c?.id))
-              .slice(0, 25);
+              .slice(0, 35);
             for (const c of recent) {
               targets.add(serializeId(c.id));
             }
           }
 
-          for (const cid of targets) {
+          let subscribedCount = 0;
+          for (const cid of Array.from(targets)) {
             if (!cid || cid === 'status@broadcast' || cid.endsWith('@newsletter')) continue;
             try {
               const chat = ChatCol?.get?.(cid);
-              if (chat?.presence) {
-                bindPresenceModel(chat.presence);
-                if (typeof chat.presence.subscribe === 'function') {
-                  chat.presence.subscribe().catch?.(() => {});
+              const uChat = unproxy(chat);
+              for (const ch of [chat, uChat]) {
+                if (ch?.presence) {
+                  bindPresenceModel(ch.presence);
+                  ch.presence.subscribe?.().catch?.(() => {});
+                  unproxy(ch.presence)?.subscribe?.().catch?.(() => {});
                 }
               }
-              const wid = chat?.id || widFactory?.createWid?.(cid);
-              if (wid && PresenceCol) {
-                const p = PresenceCol.get?.(wid) || PresenceCol.get?.(cid);
-                if (p) {
-                  bindPresenceModel(p);
-                  if (typeof p.subscribe === 'function') {
-                    p.subscribe().catch?.(() => {});
-                  }
-                } else if (typeof PresenceCol.subscribe === 'function') {
-                  PresenceCol.subscribe(wid).catch?.(() => {});
-                } else if (typeof PresenceCol.find === 'function') {
-                  Promise.resolve(PresenceCol.find(wid))
-                    .then((found: any) => {
-                      if (found) {
-                        bindPresenceModel(found);
-                        found.subscribe?.().catch?.(() => {});
-                      }
-                    })
-                    .catch(() => {});
-                }
 
-                // Se for contato 1-para-1, também inscreve o WID alternativo (@lid <-> @c.us)
+              const wid = chat?.id || uChat?.id || widFactory?.createWid?.(cid);
+              if (wid) {
+                subscribeWidPresence(wid);
+                subscribedCount++;
+
+                // Para conversas 1-para-1, inscreve também todos os WIDs alternativos (@lid e @c.us)
                 if (!cid.endsWith('@g.us')) {
-                  const altWid =
-                    apiContact?.getAlternateUserWid?.(wid) ||
-                    (cid.endsWith('@c.us')
-                      ? lidUtils?.toLid?.(wid)
-                      : lidUtils?.toPn?.(wid));
-                  if (altWid) {
-                    const altP = PresenceCol.get?.(altWid);
-                    if (altP) {
-                      bindPresenceModel(altP);
-                      altP.subscribe?.().catch?.(() => {});
-                    } else if (typeof PresenceCol.find === 'function') {
-                      Promise.resolve(PresenceCol.find(altWid))
-                        .then((foundAlt: any) => {
-                          if (foundAlt) {
-                            bindPresenceModel(foundAlt);
-                            foundAlt.subscribe?.().catch?.(() => {});
-                          }
-                        })
-                        .catch(() => {});
+                  const altCandidates = [
+                    chat?.contact?.id,
+                    chat?.contact?.lid,
+                    chat?.contact?.phoneNumber,
+                    uChat?.contact?.id,
+                    uChat?.contact?.lid,
+                    uChat?.contact?.phoneNumber,
+                    ContactCol?.get?.(cid)?.lid,
+                    ContactCol?.get?.(cid)?.phoneNumber,
+                    apiContact?.getAlternateUserWid?.(wid),
+                    cid.endsWith('@c.us') ? lidUtils?.toLid?.(wid) : lidUtils?.toPn?.(wid),
+                  ];
+                  for (const alt of altCandidates) {
+                    if (alt && serializeId(alt) && serializeId(alt) !== cid) {
+                      subscribeWidPresence(alt);
                     }
                   }
                 }
               }
             } catch {}
           }
+          debugLog(`__waSubscribeChatPresence executado: ${subscribedCount} conversas inscritas`);
         };
 
         w.__waSubscribeChatPresence();
         collectPresenceSnapshot();
 
-        w.__waPresenceInterval = setInterval(collectPresenceSnapshot, 900);
+        w.__waPresenceInterval = setInterval(collectPresenceSnapshot, 650);
         w.__waPresenceResubInterval = setInterval(() => {
           w.__waSubscribeChatPresence?.();
-        }, 20000);
+        }, 18000);
       });
-    } catch (err) {
+    } catch (err: any) {
+      logPresenceDebug(`Exceção em setupPresenceObserver: ${err?.message || String(err)}`);
       console.warn('[WhatsAppService] Error setting up presence observer:', err);
     }
   }
@@ -6578,6 +7057,12 @@ export class WhatsAppService {
     if (!Array.isArray(chatIds) || chatIds.length === 0) return;
 
     try {
+      const hasFn = await this.client.pupPage.evaluate(() => {
+        return typeof (window as any).__waSubscribeChatPresence === 'function';
+      });
+      if (!hasFn) {
+        await this.setupPresenceObserver();
+      }
       await this.client.pupPage.evaluate((ids: string[]) => {
         const w = window as any;
         if (typeof w.__waSubscribeChatPresence === 'function') {
