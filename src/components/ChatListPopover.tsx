@@ -1,7 +1,11 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, Search, Plus, X, ArrowLeft, User, Pin } from 'lucide-react';
-import { useBubbleStore } from '../store/useBubbleStore';
+import {
+  useBubbleStore,
+  getTypingParticipantsForChat,
+  formatTypingStatusText,
+} from '../store/useBubbleStore';
 import { ChatSummary, SavedContact, CHAT_LIST_SIZE_CONFIG } from '../types/whatsapp';
 import { MessageCheckIcon } from './MessageCheckIcon';
 
@@ -64,6 +68,7 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
     pinnedChatIds,
     chatListSize,
     bubbleScale,
+    typingByChat,
   } = useBubbleStore();
 
   const [view, setView] = React.useState<'chats' | 'contacts'>('chats');
@@ -154,6 +159,16 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
   };
 
   const renderLastMessagePreview = (chat: ChatSummary) => {
+    const typingList = getTypingParticipantsForChat(typingByChat, chat.id);
+    if (typingList.length > 0) {
+      const typingText = formatTypingStatusText(typingList, Boolean(chat.isGroup), chat.name);
+      return (
+        <span className="flex items-center gap-1 text-[12.5px] font-medium text-[#25D366] truncate">
+          <span className="truncate">{typingText}</span>
+        </span>
+      );
+    }
+
     const { lastMessage } = chat;
 
     if (lastMessage.mediaType === 'audio') {

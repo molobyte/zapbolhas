@@ -12,9 +12,14 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 export const App: React.FC = () => {
   const {
     activePopover,
+    activeChatId,
+    activeBubbles,
+    pinnedChatIds,
+    waStatus,
     viewingImage,
     setQrDataUrl,
     setWaStatus,
+    setTypingByChat,
     applyRealWhatsAppChats,
     receiveIncomingMessage,
     applyReactionUpdate,
@@ -188,6 +193,12 @@ export const App: React.FC = () => {
         })
       : () => {};
 
+    const unsubPresence = api.onChatPresence
+      ? api.onChatPresence((presenceByChat) => {
+          setTypingByChat(presenceByChat);
+        })
+      : () => {};
+
     return () => {
       unsubQr();
       unsubReady();
@@ -202,11 +213,13 @@ export const App: React.FC = () => {
       unsubTraySet();
       unsubTrayRefresh();
       unsubTrayLogout();
+      unsubPresence();
     };
   }, [
     isSettingsWindow,
     setQrDataUrl,
     setWaStatus,
+    setTypingByChat,
     applyRealWhatsAppChats,
     receiveIncomingMessage,
     applyReactionUpdate,
@@ -217,6 +230,24 @@ export const App: React.FC = () => {
     refreshApp,
     logoutWhatsApp,
   ]);
+
+  // Inscreve presença em tempo real para todas as bolhas ativas, conversa aberta e fixadas
+  useEffect(() => {
+    if (isSettingsWindow || waStatus !== 'ready') return;
+    const ids = new Set<string>();
+    for (const b of activeBubbles) {
+      if (b.chatId) ids.add(b.chatId);
+    }
+    for (const pid of pinnedChatIds) {
+      if (pid) ids.add(pid);
+    }
+    if (activeChatId) {
+      ids.add(activeChatId);
+    }
+    if (ids.size > 0) {
+      window.electronAPI?.subscribePresence?.(Array.from(ids));
+    }
+  }, [activeBubbles, activeChatId, pinnedChatIds, waStatus, isSettingsWindow]);
 
   if (isMediaViewerWindow) {
     return (

@@ -19,7 +19,12 @@ import {
   CheckSquare,
   CornerUpRight,
 } from 'lucide-react';
-import { useBubbleStore, isMatchingMessageId } from '../store/useBubbleStore';
+import {
+  useBubbleStore,
+  isMatchingMessageId,
+  getTypingParticipantsForChat,
+  formatTypingStatusText,
+} from '../store/useBubbleStore';
 import { useAudioPlaybackStore } from '../store/useAudioPlaybackStore';
 import { GroupParticipant, CHAT_SIZE_CONFIG, ChatBubbleSize, ChatSummary, DEFAULT_AVATAR } from '../types/whatsapp';
 import { MessageBubble } from './MessageBubble';
@@ -54,6 +59,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     chats,
     messagesByChat,
     unreadBannerByChat,
+    typingByChat,
     replyingTo,
     viewingImage,
     activeReactionDetailsMessage,
@@ -222,6 +228,53 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   }, [showMentionPopover, isGroupChat, groupParticipants, mentionQuery]);
   const messages = currentChatId ? messagesByChat[currentChatId] || [] : [];
   const unreadBanner = currentChatId ? unreadBannerByChat[currentChatId] : undefined;
+
+  const typingParticipants = useMemo(() => {
+    const raw = getTypingParticipantsForChat(typingByChat, currentChatId);
+    if (!isGroupChat || !groupParticipants.length) return raw;
+    return raw.map((tp) => {
+      if (tp.name && !tp.name.startsWith('+')) return tp;
+      const tpUser = (tp.id || '').split('@')[0];
+      const match = groupParticipants.find(
+        (gp) =>
+          gp.id === tp.id ||
+          gp.rawId === tp.id ||
+          (tpUser && (gp.user === tpUser || gp.id.split('@')[0] === tpUser))
+      );
+      if (match?.name) {
+        return { ...tp, name: match.name.replace(/^~/, '').trim() };
+      }
+      return tp;
+    });
+  }, [typingByChat, currentChatId, isGroupChat, groupParticipants]);
+
+  const typingStatusText = useMemo(
+    () => formatTypingStatusText(typingParticipants, isGroupChat, currentChat?.name),
+    [typingParticipants, isGroupChat, currentChat?.name]
+  );
+
+  const isAllTypingRecording = useMemo(
+    () =>
+      typingParticipants.length > 0 &&
+      typingParticipants.every((p) => p.state === 'recording'),
+    [typingParticipants]
+  );
+
+  const lastSentTypingTsRef = useRef<number>(0);
+  const stopTypingTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (stopTypingTimerRef.current) {
+        clearTimeout(stopTypingTimerRef.current);
+        stopTypingTimerRef.current = null;
+      }
+      if (lastSentTypingTsRef.current > 0 && currentChatId) {
+        window.electronAPI?.sendChatState?.(currentChatId, 'stop');
+        lastSentTypingTsRef.current = 0;
+      }
+    };
+  }, [currentChatId]);
 
   const isPinned = Boolean(activeBubble?.isPinned || (currentChatId && pinnedChatIds.includes(currentChatId)));
 
@@ -858,6 +911,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   }, []);
 
   const handleCancelRecording = useCallback(() => {
+    if (currentChatId) {
+      window.electronAPI?.sendChatState?.(currentChatId, 'stop');
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       try {
         mediaRecorderRef.current.stop();
@@ -867,7 +923,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     requestAnimationFrame(() => {
       inputRef.current?.focus();
     });
-  }, [cleanupRecording]);
+  }, [cleanupRecording, currentChatId]);
 
   const handleStartRecording = useCallback(async () => {
     if (isRecording) return;
@@ -935,6 +991,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       setIsRecording(true);
       setIsRecordingPaused(false);
       setRecordDuration(0);
+      if (currentChatId) {
+        window.electronAPI?.sendChatState?.(currentChatId, 'recording');
+      }
 
       recordTimerRef.current = setInterval(() => {
         setRecordDuration((prev) => prev + 1);
@@ -980,6 +1039,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.pause();
       setIsRecordingPaused(true);
+      if (currentChatId) {
+        window.electronAPI?.sendChatState?.(currentChatId, 'stop');
+      }
       if (recordTimerRef.current) {
         clearInterval(recordTimerRef.current);
         recordTimerRef.current = null;
@@ -989,12 +1051,15 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         animFrameRef.current = null;
       }
     }
-  }, []);
+  }, [currentChatId]);
 
   const handleResumeRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
       mediaRecorderRef.current.resume();
       setIsRecordingPaused(false);
+      if (currentChatId) {
+        window.electronAPI?.sendChatState?.(currentChatId, 'recording');
+      }
       recordTimerRef.current = setInterval(() => {
         setRecordDuration((prev) => prev + 1);
       }, 1000);
@@ -1038,6 +1103,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
     const finalChunks = [...audioChunksRef.current];
     cleanupRecording();
+    if (currentChatId) {
+      window.electronAPI?.sendChatState?.(currentChatId, 'stop');
+    }
 
     if (finalChunks.length === 0) return;
 
@@ -1309,6 +1377,30 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     const cursorPos = e.target.selectionStart ?? value.length;
     setInputText(value);
 
+    if (currentChatId && window.electronAPI?.sendChatState) {
+      if (value.trim().length > 0) {
+        const now = Date.now();
+        if (now - lastSentTypingTsRef.current > 4000) {
+          lastSentTypingTsRef.current = now;
+          window.electronAPI.sendChatState(currentChatId, 'typing');
+        }
+        if (stopTypingTimerRef.current) clearTimeout(stopTypingTimerRef.current);
+        stopTypingTimerRef.current = setTimeout(() => {
+          lastSentTypingTsRef.current = 0;
+          window.electronAPI?.sendChatState?.(currentChatId, 'stop');
+        }, 3500);
+      } else {
+        if (stopTypingTimerRef.current) {
+          clearTimeout(stopTypingTimerRef.current);
+          stopTypingTimerRef.current = null;
+        }
+        if (lastSentTypingTsRef.current > 0) {
+          lastSentTypingTsRef.current = 0;
+          window.electronAPI.sendChatState(currentChatId, 'stop');
+        }
+      }
+    }
+
     if (!isGroupChat) {
       setShowMentionPopover(false);
     setSelectionToolbar(null);
@@ -1412,6 +1504,15 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!inputText.trim() || !activeChatId) return;
+
+    if (stopTypingTimerRef.current) {
+      clearTimeout(stopTypingTimerRef.current);
+      stopTypingTimerRef.current = null;
+    }
+    if (lastSentTypingTsRef.current > 0) {
+      lastSentTypingTsRef.current = 0;
+      window.electronAPI?.sendChatState?.(activeChatId, 'stop');
+    }
 
     const textToSend = inputText;
     let textForWhatsApp = textToSend;
@@ -1943,9 +2044,16 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
               showContactSidebar ? 'border-[#00A884] ring-2 ring-[#00A884]/40' : 'border-white/15'
             }`}
           />
-          <span className="text-[12.5px] font-medium text-[#E9EDEF] truncate">
-            {currentChat.name}
-          </span>
+          <div className="min-w-0 flex flex-col">
+            <span className="text-[12.5px] font-medium text-[#E9EDEF] truncate leading-tight">
+              {currentChat.name}
+            </span>
+            {typingStatusText && (
+              <span className="text-[10.5px] font-medium text-[#25D366] truncate leading-tight">
+                {typingStatusText}
+              </span>
+            )}
+          </div>
         </button>
 
         <div className="flex items-center gap-1">
@@ -2183,6 +2291,45 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
           )}
         </AnimatePresence>
       </div>
+
+      {/* Indicador de Digitando / Gravando Áudio dentro da conversa */}
+      <AnimatePresence>
+        {typingStatusText && (
+          <motion.div
+            key="chat-typing-status-bar"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.16 }}
+            className="relative z-20 px-3.5 pt-1 pb-0.5 select-none pointer-events-none overflow-hidden"
+          >
+            <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-[#25D366] drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)]">
+              {isAllTypingRecording ? (
+                <Mic className="w-3 h-3 text-[#25D366] animate-pulse shrink-0" />
+              ) : (
+                <span className="inline-flex items-center gap-[2.5px] shrink-0">
+                  <motion.span
+                    animate={{ y: [0, -2, 0], opacity: [0.45, 1, 0.45] }}
+                    transition={{ duration: 0.9, repeat: Infinity, delay: 0 }}
+                    className="w-1 h-1 rounded-full bg-[#25D366]"
+                  />
+                  <motion.span
+                    animate={{ y: [0, -2, 0], opacity: [0.45, 1, 0.45] }}
+                    transition={{ duration: 0.9, repeat: Infinity, delay: 0.18 }}
+                    className="w-1 h-1 rounded-full bg-[#25D366]"
+                  />
+                  <motion.span
+                    animate={{ y: [0, -2, 0], opacity: [0.45, 1, 0.45] }}
+                    transition={{ duration: 0.9, repeat: Infinity, delay: 0.36 }}
+                    className="w-1 h-1 rounded-full bg-[#25D366]"
+                  />
+                </span>
+              )}
+              <span className="truncate">{typingStatusText}</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Preview de Resposta (Quote) acima do Input */}
       <AnimatePresence>

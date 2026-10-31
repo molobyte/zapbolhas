@@ -18,6 +18,7 @@ import {
   BubbleBorderMode,
   SoundPreset,
   StartupChatFilter,
+  TypingParticipantInfo,
   ViewingImageState,
   WaConnectionState,
 } from '../types/whatsapp';
@@ -346,6 +347,7 @@ interface BubbleStoreState {
   initialGroupParticipantsByChat: Record<string, GroupParticipant[]>;
   groupMetadataByChat: Record<string, GroupMetadataInfo>;
   unreadBannerByChat: Record<string, UnreadBannerInfo | undefined>;
+  typingByChat: Record<string, TypingParticipantInfo[]>;
   replyingTo: QuotedMessage | null;
   viewingImage: ViewingImageState | null;
   savedContacts: SavedContact[];
@@ -358,6 +360,7 @@ interface BubbleStoreState {
   setWaStatus: (status: WaConnectionState, error?: string | null) => void;
   setQrDataUrl: (qr: string | null) => void;
   setChats: (chats: ChatSummary[]) => void;
+  setTypingByChat: (presenceByChat: Record<string, TypingParticipantInfo[]>) => void;
   applyRealWhatsAppChats: (chats: ChatSummary[]) => void;
   setMessagesForChat: (chatId: string, messages: FormattedMessage[]) => void;
   fetchGroupParticipants: (
@@ -462,6 +465,57 @@ export function isMatchingMessageId(msgId: string, targetId: string): boolean {
   return Boolean(partA && partB && partA === partB);
 }
 
+export function getTypingParticipantsForChat(
+  typingByChat: Record<string, TypingParticipantInfo[]> | undefined,
+  chatId: string | null | undefined
+): TypingParticipantInfo[] {
+  if (!typingByChat || !chatId) return [];
+  if (typingByChat[chatId] && typingByChat[chatId].length > 0) {
+    return typingByChat[chatId];
+  }
+  if (!chatId.endsWith('@g.us')) {
+    const d = chatId.split('@')[0].replace(/\D/g, '');
+    if (d.startsWith('55') && (d.length === 12 || d.length === 13)) {
+      const brKey = `${d.slice(0, 4)}${d.slice(-8)}`;
+      for (const [k, list] of Object.entries(typingByChat)) {
+        if (!k.endsWith('@g.us') && list && list.length > 0) {
+          const kd = k.split('@')[0].replace(/\D/g, '');
+          if (
+            kd.startsWith('55') &&
+            (kd.length === 12 || kd.length === 13) &&
+            `${kd.slice(0, 4)}${kd.slice(-8)}` === brKey
+          ) {
+            return list;
+          }
+        }
+      }
+    }
+  }
+  return [];
+}
+
+export function formatTypingStatusText(
+  participants: TypingParticipantInfo[],
+  isGroup: boolean,
+  fallbackContactName?: string
+): string {
+  if (!participants || participants.length === 0) return '';
+  if (participants.length === 1) {
+    const p = participants[0];
+    const rawName = (isGroup ? p.name || 'Alguém' : fallbackContactName || p.name || 'Contato')
+      .replace(/^~/, '')
+      .trim();
+    const displayName = rawName || (isGroup ? 'Alguém' : 'Contato');
+    return p.state === 'recording'
+      ? `${displayName} está gravando áudio...`
+      : `${displayName} está digitando...`;
+  }
+  const allRecording = participants.every((p) => p.state === 'recording');
+  return allRecording
+    ? `${participants.length} pessoas estão gravando áudio...`
+    : `${participants.length} pessoas estão digitando...`;
+}
+
 function isPhoneOnlyLabel(val?: string): boolean {
   if (!val || typeof val !== 'string') return true;
   const trimmed = val.replace(/^~/, '').trim();
@@ -518,6 +572,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   initialGroupParticipantsByChat: {},
   groupMetadataByChat: {},
   unreadBannerByChat: {},
+  typingByChat: {},
   replyingTo: null,
   viewingImage: null,
   activeReactionDetailsMessage: null,
@@ -567,6 +622,8 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   setQrDataUrl: (qrDataUrl) => set({ qrDataUrl }),
 
   setChats: (chats) => set({ chats }),
+
+  setTypingByChat: (typingByChat) => set({ typingByChat: typingByChat || {} }),
 
   applyRealWhatsAppChats: (realChats) => {
     const {

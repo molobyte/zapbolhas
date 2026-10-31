@@ -576,6 +576,19 @@ function registerIpcHandlers() {
     }
   });
 
+  ipcMain.handle('wa:subscribe-presence', async (_event, chatIds: string[]) => {
+    if (!waService) return;
+    await waService.subscribePresence(chatIds);
+  });
+
+  ipcMain.handle(
+    'wa:send-chat-state',
+    async (_event, payload: { chatId: string; state: 'typing' | 'recording' | 'stop' }) => {
+      if (!waService || !payload?.chatId || !payload?.state) return false;
+      return await waService.sendChatState(payload.chatId, payload.state);
+    }
+  );
+
   ipcMain.on('window:close-settings', () => {
     if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.close();

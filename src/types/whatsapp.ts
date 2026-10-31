@@ -280,8 +280,19 @@ export interface LinkPreviewData {
   mediaType?: 'photo' | 'video';
 }
 
+export interface TypingParticipantInfo {
+  id: string;
+  name?: string;
+  state: 'typing' | 'recording';
+}
+
 export interface ElectronAPI {
   fetchLinkPreview?: (url: string) => Promise<LinkPreviewData | null>;
+  subscribePresence?: (chatIds: string[]) => Promise<void>;
+  sendChatState?: (chatId: string, state: 'typing' | 'recording' | 'stop') => Promise<boolean>;
+  onChatPresence?: (
+    callback: (presenceByChat: Record<string, TypingParticipantInfo[]>) => void
+  ) => () => void;
   setIgnoreMouseEvents: (ignore: boolean) => void;
   setOverlayExpanded?: (expanded: boolean) => void;
   getMessages: (chatId: string, limit?: number) => Promise<FormattedMessage[]>;

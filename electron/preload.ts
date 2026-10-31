@@ -126,6 +126,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:fetch-link-preview', url);
   },
 
+  subscribePresence: (chatIds: string[]) => {
+    return ipcRenderer.invoke('wa:subscribe-presence', chatIds);
+  },
+
+  sendChatState: (chatId: string, state: 'typing' | 'recording' | 'stop') => {
+    return ipcRenderer.invoke('wa:send-chat-state', { chatId, state });
+  },
+
+  onChatPresence: (callback: (presenceByChat: Record<string, unknown[]>) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, presenceByChat: Record<string, unknown[]>) =>
+      callback(presenceByChat);
+    ipcRenderer.on('wa:chat-presence', handler);
+    return () => ipcRenderer.removeListener('wa:chat-presence', handler);
+  },
+
   getSfxDataUrl: (type: 'user' | 'group', preset?: string) => {
     return ipcRenderer.invoke('wa:get-sfx', type, preset);
   },

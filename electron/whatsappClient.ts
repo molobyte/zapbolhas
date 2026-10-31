@@ -643,6 +643,7 @@ export class WhatsAppService {
     this.client.on('ready', async () => {
       this.qrDataUrl = null;
       await this.patchWWebJSGetChatModel();
+      await this.setupPresenceObserver();
       this.updateStatus('ready');
       this.emitToRenderer('wa:ready');
 
@@ -5939,6 +5940,695 @@ export class WhatsAppService {
     } catch (err) {
       console.error('[WhatsAppService] Error during refresh:', err);
       return [];
+    }
+  }
+
+  public async setupPresenceObserver(): Promise<void> {
+    if (!this.client?.pupPage) return;
+
+    try {
+      await this.client.pupPage.exposeFunction(
+        'onWaChatPresenceSnapshot',
+        (
+          presenceByChat: Record<
+            string,
+            Array<{ id: string; name?: string; state: 'typing' | 'recording' }>
+          >
+        ) => {
+          this.emitToRenderer('wa:chat-presence', presenceByChat);
+        }
+      );
+    } catch {
+      // Function already exposed on page
+    }
+
+    try {
+      await this.client.pupPage.evaluate(() => {
+        const w = window as any;
+        if (typeof w.require !== 'function') return;
+
+        if (w.__waPresenceInterval) {
+          clearInterval(w.__waPresenceInterval);
+          w.__waPresenceInterval = null;
+        }
+        if (w.__waPresenceResubInterval) {
+          clearInterval(w.__waPresenceResubInterval);
+          w.__waPresenceResubInterval = null;
+        }
+
+        const collections = w.require('WAWebCollections');
+        if (!collections) return;
+
+        const PresenceCol = collections.Presence;
+        const ChatCol = collections.Chat;
+        const ContactCol = collections.Contact;
+        const MsgCol = collections.Msg;
+        const widFactory = (() => {
+          try {
+            return w.require('WAWebWidFactory');
+          } catch {
+            return null;
+          }
+        })();
+        const ContactGetters = (() => {
+          try {
+            return w.require('WAWebContactGetters');
+          } catch {
+            return null;
+          }
+        })();
+        const lidUtils = (() => {
+          try {
+            return w.require('WAWebLidMigrationUtils');
+          } catch {
+            return null;
+          }
+        })();
+        const apiContact = (() => {
+          try {
+            return w.require('WAWebApiContact');
+          } catch {
+            return null;
+          }
+        })();
+
+        const serializeId = (val: any): string => {
+          if (!val) return '';
+          if (typeof val === 'string') return val;
+          if (typeof val._serialized === 'string' && val._serialized) return val._serialized;
+          if (typeof val.toString === 'function') {
+            const s = val.toString();
+            if (s && s !== '[object Object]') return s;
+          }
+          return '';
+        };
+
+        const getBrPhoneKey = (val: string): string => {
+          const d = (val || '').split('@')[0].replace(/\D/g, '');
+          if (d.startsWith('55') && (d.length === 12 || d.length === 13)) {
+            return `br:${d.slice(0, 4)}${d.slice(-8)}`;
+          }
+          return '';
+        };
+
+        const isPhoneLikeStr = (val: any): boolean => {
+          if (!val || typeof val !== 'string') return true;
+          const trimmed = val.replace(/^~/, '').trim();
+          if (!trimmed) return true;
+          if (trimmed.startsWith('+')) return true;
+          if (
+            trimmed.endsWith('@c.us') ||
+            trimmed.endsWith('@lid') ||
+            trimmed.endsWith('@g.us')
+          ) {
+            return true;
+          }
+          const digits = trimmed.replace(/\D/g, '');
+          const letters = trimmed.replace(/[^a-zA-Z\u00C0-\u00FF]/g, '');
+          return digits.length >= 8 && letters.length === 0;
+        };
+
+        const formatPhone = (num: string): string => {
+          if (!num) return '';
+          const digits = num.replace(/\D/g, '');
+          if (digits.length === 13 && digits.startsWith('55')) {
+            return `+55 ${digits.slice(2, 4)} ${digits.slice(4, 9)}-${digits.slice(9)}`;
+          }
+          if (digits.length === 12 && digits.startsWith('55')) {
+            return `+55 ${digits.slice(2, 4)} ${digits.slice(4, 8)}-${digits.slice(8)}`;
+          }
+          return digits ? `+${digits}` : num;
+        };
+
+        const myIds = new Set<string>();
+        const refreshMyIds = () => {
+          try {
+            const mePrefs = w.require('WAWebUserPrefsMeUser') || {};
+            const connMod = w.require('WAWebConnModel') || {};
+            const addMe = (val: any) => {
+              const sid = serializeId(val);
+              if (sid) {
+                myIds.add(sid);
+                const u = sid.split('@')[0];
+                if (u) myIds.add(u);
+              }
+            };
+            addMe(mePrefs.getMaybeMePnUser?.());
+            addMe(mePrefs.getMaybeMeLidUser?.());
+            addMe(mePrefs.getMeUser?.());
+            addMe(connMod.Conn?.wid);
+          } catch {}
+        };
+        refreshMyIds();
+
+        const resolveParticipantName = (rawParticipant: any, fallbackChat?: any): string => {
+          const partId = serializeId(rawParticipant);
+          const candidates: any[] = [];
+          const addContact = (c: any) => {
+            if (c && !candidates.includes(c)) candidates.push(c);
+          };
+
+          if (rawParticipant && typeof rawParticipant === 'object') {
+            try {
+              addContact(ContactCol?.get?.(rawParticipant));
+            } catch {}
+          }
+          if (partId) {
+            try {
+              addContact(ContactCol?.get?.(partId));
+            } catch {}
+          }
+
+          let pnWidStr = '';
+          if (lidUtils?.toPn) {
+            try {
+              const widObj =
+                rawParticipant && typeof rawParticipant === 'object'
+                  ? rawParticipant
+                  : partId && widFactory?.createWid
+                  ? widFactory.createWid(partId)
+                  : null;
+              if (widObj) {
+                const pnWid = lidUtils.toPn(widObj);
+                if (pnWid) {
+                  pnWidStr = serializeId(pnWid);
+                  try {
+                    addContact(ContactCol?.get?.(pnWid));
+                  } catch {}
+                  if (pnWidStr) {
+                    try {
+                      addContact(ContactCol?.get?.(pnWidStr));
+                    } catch {}
+                  }
+                }
+              }
+            } catch {}
+          }
+
+          for (const cc of [...candidates]) {
+            const cPn = serializeId(cc?.phoneNumber);
+            if (cPn) {
+              if (!pnWidStr) pnWidStr = cPn;
+              try {
+                addContact(ContactCol?.get?.(cPn));
+              } catch {}
+            }
+          }
+
+          const brKey = getBrPhoneKey(pnWidStr || partId);
+          if (brKey && ContactCol?.getModelsArray) {
+            for (const c of ContactCol.getModelsArray()) {
+              const cid = serializeId(c?.id);
+              const cpn = serializeId(c?.phoneNumber);
+              if (getBrPhoneKey(cid) === brKey || (cpn && getBrPhoneKey(cpn) === brKey)) {
+                addContact(c);
+              }
+            }
+          }
+
+          for (const c of candidates) {
+            const nameProps = [
+              ContactGetters?.getName ? (() => { try { return ContactGetters.getName(c); } catch { return ''; } })() : '',
+              c?.name,
+              c?.shortName,
+              c?.displayName,
+              c?.attributes?.name,
+              c?.attributes?.shortName,
+              c?.__x_name,
+              c?._data?.name,
+              c?.verifiedName,
+            ];
+            for (const np of nameProps) {
+              if (typeof np === 'string') {
+                const clean = np.replace(/^~/, '').trim();
+                if (clean && !isPhoneLikeStr(clean)) {
+                  return clean;
+                }
+              }
+            }
+          }
+
+          for (const c of candidates) {
+            const pushProps = [
+              ContactGetters?.getPushname ? (() => { try { return ContactGetters.getPushname(c); } catch { return ''; } })() : '',
+              c?.pushname,
+              c?.notifyName,
+              c?.attributes?.pushname,
+              c?.__x_pushname,
+              c?._data?.pushname,
+            ];
+            for (const pp of pushProps) {
+              if (typeof pp === 'string') {
+                const clean = pp.replace(/^~/, '').trim();
+                if (clean && !isPhoneLikeStr(clean)) {
+                  return clean;
+                }
+              }
+            }
+          }
+
+          if (fallbackChat && !fallbackChat.isGroup) {
+            const chatTitle = String(
+              fallbackChat.formattedTitle || fallbackChat.name || ''
+            )
+              .replace(/^~/, '')
+              .trim();
+            if (chatTitle && !isPhoneLikeStr(chatTitle)) {
+              return chatTitle;
+            }
+          }
+
+          const rawPhone = (pnWidStr || partId).split('@')[0];
+          return formatPhone(rawPhone) || rawPhone || 'Contato';
+        };
+
+        if (!w.__waPresenceActiveSince) {
+          w.__waPresenceActiveSince = new Map<string, number>();
+        }
+        const activeSinceMap: Map<string, number> = w.__waPresenceActiveSince;
+
+        let lastSnapshotJson = '';
+        let emitScheduled = false;
+
+        const collectPresenceSnapshot = () => {
+          emitScheduled = false;
+          try {
+            refreshMyIds();
+            const now = Date.now();
+            const snapshot: Record<
+              string,
+              Array<{ id: string; name?: string; state: 'typing' | 'recording' }>
+            > = {};
+
+            const presenceModels = new Set<any>();
+            if (PresenceCol?.getModelsArray) {
+              for (const p of PresenceCol.getModelsArray()) {
+                if (p) presenceModels.add(p);
+              }
+            }
+            const allChats: any[] = ChatCol?.getModelsArray ? ChatCol.getModelsArray() : [];
+            for (const c of allChats) {
+              if (c?.presence) presenceModels.add(c.presence);
+            }
+
+            const activeKeysThisPass = new Set<string>();
+
+            for (const pres of presenceModels) {
+              const rawPresId = serializeId(pres?.id);
+              if (
+                !rawPresId ||
+                rawPresId === 'status@broadcast' ||
+                rawPresId.endsWith('@newsletter')
+              ) {
+                continue;
+              }
+
+              const csCollection = pres.chatstates;
+              let statesList: any[] = [];
+              if (csCollection) {
+                if (typeof csCollection.getModelsArray === 'function') {
+                  statesList = csCollection.getModelsArray();
+                } else if (Array.isArray(csCollection._models)) {
+                  statesList = csCollection._models;
+                } else if (Array.isArray(csCollection)) {
+                  statesList = csCollection;
+                }
+              }
+              if (statesList.length === 0 && pres.chatstate) {
+                statesList = [pres.chatstate];
+              }
+
+              const activeEntries: Array<{
+                cs: any;
+                stateType: 'typing' | 'recording';
+              }> = [];
+
+              for (const cs of statesList) {
+                if (!cs) continue;
+                const rawType = String(
+                  cs.type || cs.__x_type || cs.attributes?.type || ''
+                ).toLowerCase();
+                if (rawType === 'composing' || rawType === 'recording') {
+                  const csPartId = serializeId(cs.id) || rawPresId;
+                  const stateKey = `${rawPresId}::${csPartId}::${rawType}`;
+                  activeKeysThisPass.add(stateKey);
+                  if (!activeSinceMap.has(stateKey)) {
+                    activeSinceMap.set(stateKey, now);
+                  }
+                  const startedAt = activeSinceMap.get(stateKey) || now;
+                  // Expiração de segurança de 26s caso o pacote de 'paused' tenha sido perdido
+                  if (now - startedAt <= 26000) {
+                    activeEntries.push({
+                      cs,
+                      stateType: rawType === 'recording' ? 'recording' : 'typing',
+                    });
+                  }
+                }
+              }
+
+              if (activeEntries.length === 0) continue;
+
+              const targetChatIds = new Set<string>([rawPresId]);
+              let matchedChat = ChatCol?.get?.(rawPresId) || null;
+
+              if (!rawPresId.endsWith('@g.us')) {
+                try {
+                  const widObj =
+                    pres.id && typeof pres.id === 'object'
+                      ? pres.id
+                      : widFactory?.createWid?.(rawPresId);
+                  if (widObj) {
+                    const pnWid = lidUtils?.toPn?.(widObj);
+                    const pnStr = serializeId(pnWid);
+                    if (pnStr) {
+                      targetChatIds.add(pnStr);
+                      if (!matchedChat) matchedChat = ChatCol?.get?.(pnStr) || null;
+                    }
+                    const lidWid = lidUtils?.toLid?.(widObj);
+                    const lidStr = serializeId(lidWid);
+                    if (lidStr) {
+                      targetChatIds.add(lidStr);
+                      if (!matchedChat) matchedChat = ChatCol?.get?.(lidStr) || null;
+                    }
+                    const altWid = apiContact?.getAlternateUserWid?.(widObj);
+                    const altStr = serializeId(altWid);
+                    if (altStr) {
+                      targetChatIds.add(altStr);
+                      if (!matchedChat) matchedChat = ChatCol?.get?.(altStr) || null;
+                    }
+                  }
+                } catch {}
+
+                const brKey = getBrPhoneKey(
+                  Array.from(targetChatIds).find((id) => id.endsWith('@c.us')) || rawPresId
+                );
+                if (brKey) {
+                  for (const c of allChats) {
+                    const cid = serializeId(c?.id);
+                    if (cid && getBrPhoneKey(cid) === brKey) {
+                      targetChatIds.add(cid);
+                      if (!matchedChat) matchedChat = c;
+                    }
+                  }
+                }
+              }
+
+              const dedupedParticipants = new Map<
+                string,
+                { id: string; name?: string; state: 'typing' | 'recording' }
+              >();
+
+              for (const { cs, stateType } of activeEntries) {
+                const rawPartId = serializeId(cs.id) || rawPresId;
+                const partUser = rawPartId.split('@')[0];
+                if (myIds.has(rawPartId) || (partUser && myIds.has(partUser))) {
+                  continue;
+                }
+
+                let canonicalPartId = rawPartId;
+                if (lidUtils?.toPn) {
+                  try {
+                    const widObj =
+                      cs.id && typeof cs.id === 'object'
+                        ? cs.id
+                        : widFactory?.createWid?.(rawPartId);
+                    const pnWid = widObj ? lidUtils.toPn(widObj) : null;
+                    const pnStr = serializeId(pnWid);
+                    if (pnStr) canonicalPartId = pnStr;
+                  } catch {}
+                }
+                const dedupKey = getBrPhoneKey(canonicalPartId) || canonicalPartId;
+                const resolvedName = resolveParticipantName(cs.id || rawPartId, matchedChat);
+
+                const existing = dedupedParticipants.get(dedupKey);
+                if (!existing || stateType === 'recording') {
+                  dedupedParticipants.set(dedupKey, {
+                    id: canonicalPartId,
+                    name: resolvedName || existing?.name || undefined,
+                    state: stateType,
+                  });
+                }
+              }
+
+              const participantsList = Array.from(dedupedParticipants.values());
+              if (participantsList.length > 0) {
+                for (const tid of targetChatIds) {
+                  snapshot[tid] = participantsList;
+                }
+              }
+            }
+
+            // Limpa chaves que não estão mais ativas
+            for (const k of Array.from(activeSinceMap.keys())) {
+              if (!activeKeysThisPass.has(k)) {
+                activeSinceMap.delete(k);
+              }
+            }
+
+            const nextJson = JSON.stringify(snapshot);
+            if (nextJson !== lastSnapshotJson) {
+              lastSnapshotJson = nextJson;
+              if (typeof w.onWaChatPresenceSnapshot === 'function') {
+                w.onWaChatPresenceSnapshot(snapshot);
+              }
+            }
+          } catch (err) {
+            console.warn('[WhatsApp Web] Presence snapshot error:', err);
+          }
+        };
+
+        const scheduleEmit = () => {
+          if (emitScheduled) return;
+          emitScheduled = true;
+          setTimeout(collectPresenceSnapshot, 25);
+        };
+
+        const boundObjects = new WeakSet<object>();
+
+        const bindPresenceModel = (pres: any) => {
+          if (!pres || typeof pres !== 'object') return;
+          if (!boundObjects.has(pres)) {
+            boundObjects.add(pres);
+            if (typeof pres.on === 'function') {
+              try {
+                pres.on('change change:chatstate', () => {
+                  scheduleEmit();
+                });
+              } catch {}
+            }
+          }
+          const csCol = pres.chatstates;
+          if (csCol && typeof csCol === 'object' && !boundObjects.has(csCol)) {
+            boundObjects.add(csCol);
+            if (typeof csCol.on === 'function') {
+              try {
+                csCol.on('add remove change change:type reset', (csModel: any) => {
+                  try {
+                    const rawPresId = serializeId(pres.id);
+                    const csPartId = serializeId(csModel?.id) || rawPresId;
+                    const rawType = String(
+                      csModel?.type || csModel?.__x_type || csModel?.attributes?.type || ''
+                    ).toLowerCase();
+                    if (rawPresId && (rawType === 'composing' || rawType === 'recording')) {
+                      activeSinceMap.set(`${rawPresId}::${csPartId}::${rawType}`, Date.now());
+                    }
+                  } catch {}
+                  scheduleEmit();
+                });
+              } catch {}
+            }
+          }
+        };
+
+        if (PresenceCol) {
+          if (typeof PresenceCol.getModelsArray === 'function') {
+            for (const p of PresenceCol.getModelsArray()) {
+              bindPresenceModel(p);
+            }
+          }
+          if (typeof PresenceCol.on === 'function' && !w.__waPresenceColBound) {
+            w.__waPresenceColBound = true;
+            try {
+              PresenceCol.on('add change remove', (p: any) => {
+                bindPresenceModel(p);
+                scheduleEmit();
+              });
+            } catch {}
+          }
+        }
+
+        if (ChatCol?.getModelsArray) {
+          for (const c of ChatCol.getModelsArray()) {
+            if (c?.presence) bindPresenceModel(c.presence);
+          }
+        }
+
+        if (MsgCol && typeof MsgCol.on === 'function' && !w.__waPresenceMsgBound) {
+          w.__waPresenceMsgBound = true;
+          try {
+            MsgCol.on('add', (msg: any) => {
+              if (!msg || msg.id?.fromMe) return;
+              scheduleEmit();
+            });
+          } catch {}
+        }
+
+        if (!w.__waTrackedPresenceChatIds) {
+          w.__waTrackedPresenceChatIds = new Set<string>();
+        }
+
+        w.__waSubscribeChatPresence = async (chatIds?: string[]) => {
+          try {
+            const Stream = w.require('WAWebStreamModel')?.Stream;
+            Stream?.markAvailable?.();
+          } catch {}
+
+          const tracked: Set<string> = w.__waTrackedPresenceChatIds;
+          if (Array.isArray(chatIds)) {
+            for (const id of chatIds) {
+              if (id && typeof id === 'string') tracked.add(id);
+            }
+          }
+
+          const targets = new Set<string>(tracked);
+          if (ChatCol?.getModelsArray) {
+            const recent = ChatCol.getModelsArray()
+              .filter((c: any) => !c.archive && serializeId(c?.id))
+              .slice(0, 25);
+            for (const c of recent) {
+              targets.add(serializeId(c.id));
+            }
+          }
+
+          for (const cid of targets) {
+            if (!cid || cid === 'status@broadcast' || cid.endsWith('@newsletter')) continue;
+            try {
+              const chat = ChatCol?.get?.(cid);
+              if (chat?.presence) {
+                bindPresenceModel(chat.presence);
+                if (typeof chat.presence.subscribe === 'function') {
+                  chat.presence.subscribe().catch?.(() => {});
+                }
+              }
+              const wid = chat?.id || widFactory?.createWid?.(cid);
+              if (wid && PresenceCol) {
+                const p = PresenceCol.get?.(wid) || PresenceCol.get?.(cid);
+                if (p) {
+                  bindPresenceModel(p);
+                  if (typeof p.subscribe === 'function') {
+                    p.subscribe().catch?.(() => {});
+                  }
+                } else if (typeof PresenceCol.subscribe === 'function') {
+                  PresenceCol.subscribe(wid).catch?.(() => {});
+                } else if (typeof PresenceCol.find === 'function') {
+                  Promise.resolve(PresenceCol.find(wid))
+                    .then((found: any) => {
+                      if (found) {
+                        bindPresenceModel(found);
+                        found.subscribe?.().catch?.(() => {});
+                      }
+                    })
+                    .catch(() => {});
+                }
+
+                // Se for contato 1-para-1, também inscreve o WID alternativo (@lid <-> @c.us)
+                if (!cid.endsWith('@g.us')) {
+                  const altWid =
+                    apiContact?.getAlternateUserWid?.(wid) ||
+                    (cid.endsWith('@c.us')
+                      ? lidUtils?.toLid?.(wid)
+                      : lidUtils?.toPn?.(wid));
+                  if (altWid) {
+                    const altP = PresenceCol.get?.(altWid);
+                    if (altP) {
+                      bindPresenceModel(altP);
+                      altP.subscribe?.().catch?.(() => {});
+                    } else if (typeof PresenceCol.find === 'function') {
+                      Promise.resolve(PresenceCol.find(altWid))
+                        .then((foundAlt: any) => {
+                          if (foundAlt) {
+                            bindPresenceModel(foundAlt);
+                            foundAlt.subscribe?.().catch?.(() => {});
+                          }
+                        })
+                        .catch(() => {});
+                    }
+                  }
+                }
+              }
+            } catch {}
+          }
+        };
+
+        w.__waSubscribeChatPresence();
+        collectPresenceSnapshot();
+
+        w.__waPresenceInterval = setInterval(collectPresenceSnapshot, 900);
+        w.__waPresenceResubInterval = setInterval(() => {
+          w.__waSubscribeChatPresence?.();
+        }, 20000);
+      });
+    } catch (err) {
+      console.warn('[WhatsAppService] Error setting up presence observer:', err);
+    }
+  }
+
+  public async subscribePresence(chatIds: string[]): Promise<void> {
+    if (!this.client?.pupPage || this.status !== 'ready') return;
+    if (!Array.isArray(chatIds) || chatIds.length === 0) return;
+
+    try {
+      await this.client.pupPage.evaluate((ids: string[]) => {
+        const w = window as any;
+        if (typeof w.__waSubscribeChatPresence === 'function') {
+          w.__waSubscribeChatPresence(ids);
+        }
+      }, chatIds);
+    } catch {
+      // Ignore evaluate error
+    }
+  }
+
+  public async sendChatState(
+    chatId: string,
+    state: 'typing' | 'recording' | 'stop'
+  ): Promise<boolean> {
+    if (!this.client?.pupPage || this.status !== 'ready' || !chatId) return false;
+
+    try {
+      return await this.client.pupPage.evaluate(
+        async ({
+          targetChatId,
+          targetState,
+        }: {
+          targetChatId: string;
+          targetState: 'typing' | 'recording' | 'stop';
+        }) => {
+          const w = window as any;
+          try {
+            if (typeof w.WWebJS?.sendChatstate === 'function') {
+              await w.WWebJS.sendChatstate(targetState, targetChatId);
+              return true;
+            }
+            const wid = w.require?.('WAWebWidFactory')?.createWid?.(targetChatId);
+            const ChatState = w.require?.('WAWebChatStateBridge');
+            if (wid && ChatState) {
+              if (targetState === 'typing') {
+                await ChatState.sendChatStateComposing(wid);
+              } else if (targetState === 'recording') {
+                await ChatState.sendChatStateRecording(wid);
+              } else {
+                await ChatState.sendChatStatePaused(wid);
+              }
+              return true;
+            }
+          } catch {}
+          return false;
+        },
+        { targetChatId: chatId, targetState: state }
+      );
+    } catch {
+      return false;
     }
   }
 

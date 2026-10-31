@@ -1,8 +1,12 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Pin, Play, Pause } from 'lucide-react';
+import { X, Pin, Play, Pause, Mic } from 'lucide-react';
 import { BubbleItem } from '../types/whatsapp';
-import { useBubbleStore } from '../store/useBubbleStore';
+import {
+  useBubbleStore,
+  getTypingParticipantsForChat,
+  formatTypingStatusText,
+} from '../store/useBubbleStore';
 import { useAudioPlaybackStore } from '../store/useAudioPlaybackStore';
 import { hexToRgba } from '../utils/colorUtils';
 
@@ -30,7 +34,16 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
     bubbleBorderColor,
     bubbleBorderOpacity,
     bubbleBorderWidth,
+    typingByChat,
   } = useBubbleStore();
+
+  const typingParticipants = getTypingParticipantsForChat(typingByChat, bubble.chatId);
+  const isTypingOrRecording = typingParticipants.length > 0;
+  const isAllRecording =
+    isTypingOrRecording && typingParticipants.every((p) => p.state === 'recording');
+  const typingTooltip = isTypingOrRecording
+    ? formatTypingStatusText(typingParticipants, Boolean(bubble.isGroup), bubble.name)
+    : '';
 
   const activeAudio = useAudioPlaybackStore((state) => state.activeAudio);
   const isAudioActiveForThisChat = Boolean(
@@ -156,7 +169,11 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
         }}
         onContextMenu={handleContextMenu}
         onAuxClick={handleAuxClick}
-        title={`${bubble.name}${bubble.isPinned ? ' (Fixada)' : ''} (Clique direito para opções)`}
+        title={
+          typingTooltip
+            ? `${bubble.name} — ${typingTooltip}`
+            : `${bubble.name}${bubble.isPinned ? ' (Fixada)' : ''} (Clique direito para opções)`
+        }
         style={isMercuryActive ? { borderColor: '#25D366', borderWidth: '2px', borderStyle: 'solid' } : borderStyle}
         className="relative w-[48px] h-[48px] rounded-full overflow-hidden shrink-0 block shadow-[0_4px_14px_rgba(0,0,0,0.65)] transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none"
       >
@@ -180,6 +197,45 @@ export const ContactBubble: React.FC<ContactBubbleProps> = ({
           )}
         </AnimatePresence>
       </button>
+
+      {/* Balão Indicador de Digitando / Gravando Áudio no Canto Superior Esquerdo */}
+      <AnimatePresence>
+        {!isMercuryActive && isTypingOrRecording && (
+          <motion.div
+            key="typing-bubble-indicator"
+            initial={{ scale: 0.4, opacity: 0, y: 2 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.3, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 520, damping: 22 }}
+            title={typingTooltip}
+            className={`pointer-events-none absolute ${
+              showBubbleAudioControl ? '-top-[5px] left-[16px]' : '-top-[4px] -left-[5px]'
+            } min-w-[23px] h-[18px] px-[5px] rounded-[10px] rounded-br-[2px] bg-[#182229] border border-[#25D366]/85 shadow-[0_2px_8px_rgba(0,0,0,0.75)] flex items-center justify-center gap-[2.5px] z-30 select-none`}
+          >
+            {isAllRecording ? (
+              <Mic className="w-2.5 h-2.5 text-[#25D366] animate-pulse" />
+            ) : (
+              <>
+                <motion.span
+                  animate={{ y: [0, -2.5, 0], opacity: [0.45, 1, 0.45] }}
+                  transition={{ duration: 0.9, repeat: Infinity, delay: 0 }}
+                  className="w-[3.5px] h-[3.5px] rounded-full bg-[#25D366]"
+                />
+                <motion.span
+                  animate={{ y: [0, -2.5, 0], opacity: [0.45, 1, 0.45] }}
+                  transition={{ duration: 0.9, repeat: Infinity, delay: 0.18 }}
+                  className="w-[3.5px] h-[3.5px] rounded-full bg-[#25D366]"
+                />
+                <motion.span
+                  animate={{ y: [0, -2.5, 0], opacity: [0.45, 1, 0.45] }}
+                  transition={{ duration: 0.9, repeat: Infinity, delay: 0.36 }}
+                  className="w-[3.5px] h-[3.5px] rounded-full bg-[#25D366]"
+                />
+              </>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Botão de Controle de Áudio Tocando no Canto Superior Esquerdo (Apenas quando minimizada) */}
       <AnimatePresence>
