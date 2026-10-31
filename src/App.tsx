@@ -234,18 +234,18 @@ export const App: React.FC = () => {
   // Inscreve presença em tempo real para todas as bolhas ativas, conversa aberta e fixadas
   useEffect(() => {
     if (isSettingsWindow || waStatus !== 'ready') return;
-    const ids = new Set<string>();
+    const ids: string[] = [];
+    if (activeChatId) {
+      ids.push(activeChatId);
+    }
     for (const b of activeBubbles) {
-      if (b.chatId) ids.add(b.chatId);
+      if (b.chatId && !ids.includes(b.chatId)) ids.push(b.chatId);
     }
     for (const pid of pinnedChatIds) {
-      if (pid) ids.add(pid);
+      if (pid && !ids.includes(pid)) ids.push(pid);
     }
-    if (activeChatId) {
-      ids.add(activeChatId);
-    }
-    if (ids.size > 0) {
-      window.electronAPI?.subscribePresence?.(Array.from(ids));
+    if (ids.length > 0) {
+      window.electronAPI?.subscribePresence?.(ids);
     }
   }, [activeBubbles, activeChatId, pinnedChatIds, waStatus, isSettingsWindow]);
 

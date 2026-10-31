@@ -6738,6 +6738,14 @@ export class WhatsAppService {
                 if (typeof orig === 'function' && !orig._waPresenceHooked) {
                   const wrapped = function (this: any, ...args: any[]) {
                     try {
+                      debugLog(`CALL[${modName}.${key}]: args=${args.map((a: any) => serializeId(a) || (typeof a === 'object' ? JSON.stringify(a).slice(0, 80) : String(a))).join(', ')}`);
+                      if (key === 'markComposing' || key === 'markRecording' || key === 'markPaused') {
+                        const targetChat = serializeId(args[0]);
+                        const targetPart = serializeId(args[1]) || targetChat;
+                        const sType = key === 'markRecording' ? 'recording' : (key === 'markPaused' ? 'paused' : 'composing');
+                        recordIncomingState(targetChat, targetPart, sType, `${modName}.${key}`);
+                      }
+
                       for (const arg of args) {
                         if (!arg) continue;
                         if (typeof arg === 'object') {
@@ -6773,7 +6781,9 @@ export class WhatsAppService {
                           }
                         }
                       }
-                    } catch {}
+                    } catch (callErr: any) {
+                      debugLog(`Erro no hook de ${modName}.${key}: ${callErr?.message || String(callErr)}`);
+                    }
                     const res = orig.apply(this, args);
                     scheduleEmit();
                     return res;
@@ -6782,7 +6792,9 @@ export class WhatsAppService {
                   (wrapped as any)._waPresenceHooked = true;
                   try {
                     mod[key] = wrapped;
-                  } catch {}
+                  } catch (assignErr: any) {
+                    debugLog(`Falha ao atribuir hook ${modName}.${key}: ${assignErr?.message || String(assignErr)}`);
+                  }
                 }
               }
             };
@@ -6794,12 +6806,14 @@ export class WhatsAppService {
               'WAWebPresenceChatAction',
               'WAWebPresenceModel',
               'WAWebChatStateCollection',
+              'WAWebContactPresenceBridge',
+              'WAWebPresenceBridge',
             ]);
 
             const modulesMap = w.__debug?.modulesMap;
             if (modulesMap && typeof modulesMap === 'object') {
               for (const k of Object.keys(modulesMap)) {
-                if (/ChatState|ChatPresence|HandlePresence/i.test(k)) {
+                if (/ChatState|ChatPresence|HandlePresence|ContactPresence/i.test(k)) {
                   candidateModuleNames.add(k);
                 }
               }
@@ -6811,9 +6825,45 @@ export class WhatsAppService {
               if (m) {
                 foundMods.push(`${mName}[${Object.keys(m).join(',')}]`);
                 inspectAndHookModule(mName, m);
+
+                // Inspeciona o código-fonte das funções chave para diagnóstico preciso
+                for (const fnKey of ['markComposing', 'markRecording', 'markPaused', 'handleIndividualChatState', 'handleGroupChatState']) {
+                  if (typeof m[fnKey] === 'function') {
+                    debugLog(`SRC[${mName}.${fnKey}]: ${String(m[fnKey]).slice(0, 300).replace(/\s+/g, ' ')}`);
+                  }
+                }
               }
             }
             debugLog(`Módulos de presença inspecionados: ${foundMods.join(' | ')}`);
+
+            if (w.WWebJS?.injectToFunction) {
+              const injectAction = (fn: string, state: 'composing' | 'recording' | 'paused') => {
+                try {
+                  w.WWebJS.injectToFunction(
+                    { module: 'WAWebPresenceChatAction', function: fn },
+                    (m: any, orig: any, ...args: any[]) => {
+                      try {
+                        const cId = serializeId(args[0]);
+                        const pId = serializeId(args[1]) || cId;
+                        debugLog(`INJECT[WAWebPresenceChatAction.${fn}]: chat=${cId} part=${pId} state=${state}`);
+                        recordIncomingState(cId, pId, state, `WAWebPresenceChatAction.${fn}`);
+                      } catch {}
+                      return orig.apply(m, args);
+                    }
+                  );
+                } catch {}
+              };
+              injectAction('markComposing', 'composing');
+              injectAction('markRecording', 'recording');
+              injectAction('markPaused', 'paused');
+            }
+
+            // Procura todos os módulos de presença/subscrição disponíveis no Webpack
+            try {
+              const allKeys = modulesMap && typeof modulesMap === 'object' ? Object.keys(modulesMap) : [];
+              const presMods = allKeys.filter((k: string) => /Presence|ChatState|Subscribe/i.test(k));
+              debugLog(`Módulos relacionados encontrados no modulesMap (${presMods.length}): ${presMods.slice(0, 25).join(', ')}`);
+            } catch {}
           } catch (hookErr: any) {
             debugLog(`Erro ao fazer hook nos módulos: ${hookErr?.message || String(hookErr)}`);
           }
@@ -6940,6 +6990,24 @@ export class WhatsAppService {
               : widFactory?.createWid?.(sid);
           if (!wid) return;
 
+          const contactPresBridge = safeReq('WAWebContactPresenceBridge');
+          if (typeof contactPresBridge?.subscribePresence === 'function') {
+            try {
+              contactPresBridge.subscribePresence(wid)?.catch?.(() => {});
+            } catch (err: any) {
+              debugLog(`contactPresBridge.subscribePresence erro: ${err?.message}`);
+            }
+          }
+
+          const presBridge = safeReq('WAWebPresenceBridge');
+          if (typeof presBridge?.subscribePresence === 'function') {
+            try {
+              presBridge.subscribePresence(wid)?.catch?.(() => {});
+            } catch (err: any) {
+              debugLog(`presBridge.subscribePresence erro: ${err?.message}`);
+            }
+          }
+
           try {
             presenceChatAction?.subscribePresence?.(wid)?.catch?.(() => {});
           } catch {}
@@ -6980,6 +7048,18 @@ export class WhatsAppService {
           if (Array.isArray(chatIds)) {
             for (const id of chatIds) {
               if (id && typeof id === 'string') tracked.add(id);
+            }
+          }
+
+          // Se houver um chat primário focado (ex: activeChatId passado como primeiro elemento), abre no DOM do WhatsApp Web
+          if (Array.isArray(chatIds) && chatIds.length > 0) {
+            const primaryId = chatIds[0];
+            const primaryChat = ChatCol?.get?.(primaryId);
+            const Cmd = safeReq('WAWebCmd')?.Cmd;
+            if (primaryChat && Cmd?.openChatBottom) {
+              try {
+                Cmd.openChatBottom({ chat: primaryChat });
+              } catch {}
             }
           }
 
