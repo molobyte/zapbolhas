@@ -6076,6 +6076,12 @@ export class WhatsAppService {
             }
           } catch {}
           try {
+            const contactPresBridge = safeReq('WAWebContactPresenceBridge');
+            if (typeof contactPresBridge?.setPresenceAvailable === 'function') {
+              contactPresBridge.setPresenceAvailable()?.catch?.(() => {});
+            }
+          } catch {}
+          try {
             const Stream = streamMod?.Stream;
             if (Stream) {
               if (typeof Stream.markUnavailable === 'function' && !Stream.markUnavailable._noopPatched) {
@@ -6681,8 +6687,8 @@ export class WhatsAppService {
         };
 
         // 3. Hook direto nos módulos internos de ChatState / Presence do WhatsApp Web
-        if (!w.__waChatStateModulesHooked) {
-          w.__waChatStateModulesHooked = true;
+        if (!w.__waChatStateModulesHookedV3) {
+          w.__waChatStateModulesHookedV3 = true;
           try {
             const recordIncomingState = (
               rawChat: any,
@@ -6735,15 +6741,87 @@ export class WhatsAppService {
                   continue;
                 }
                 const orig = mod[key];
-                if (typeof orig === 'function' && !orig._waPresenceHooked) {
+                if (typeof orig === 'function' && !orig._waPresenceHookedV3) {
+                  debugLog(
+                    `ORIG_FN[${modName}.${key}] (len=${orig.length}): ${String(orig)
+                      .slice(0, 300)
+                      .replace(/\s+/g, ' ')}`
+                  );
                   const wrapped = function (this: any, ...args: any[]) {
                     try {
-                      debugLog(`CALL[${modName}.${key}]: args=${args.map((a: any) => serializeId(a) || (typeof a === 'object' ? JSON.stringify(a).slice(0, 80) : String(a))).join(', ')}`);
-                      if (key === 'markComposing' || key === 'markRecording' || key === 'markPaused') {
+                      debugLog(
+                        `CALL[${modName}.${key}]: args=${args
+                          .map(
+                            (a: any) =>
+                              serializeId(a) ||
+                              (typeof a === 'object' ? JSON.stringify(a).slice(0, 100) : String(a))
+                          )
+                          .join(', ')}`
+                      );
+
+                      if (
+                        key === 'markComposing' ||
+                        key === 'markRecording' ||
+                        key === 'markPaused'
+                      ) {
                         const targetChat = serializeId(args[0]);
                         const targetPart = serializeId(args[1]) || targetChat;
-                        const sType = key === 'markRecording' ? 'recording' : (key === 'markPaused' ? 'paused' : 'composing');
+                        const sType =
+                          key === 'markRecording'
+                            ? 'recording'
+                            : key === 'markPaused'
+                            ? 'paused'
+                            : 'composing';
                         recordIncomingState(targetChat, targetPart, sType, `${modName}.${key}`);
+                      } else if (
+                        key === 'handleIndividualChatState' ||
+                        key === 'handleGroupChatState'
+                      ) {
+                        let foundChatId = '';
+                        let foundPartId = '';
+                        let foundState: 'composing' | 'recording' | 'paused' | '' = '';
+
+                        for (const a of args) {
+                          if (!a) continue;
+                          if (typeof a === 'string') {
+                            const low = a.toLowerCase();
+                            if (low === 'composing' || low === 'recording' || low === 'paused') {
+                              foundState = low;
+                            } else {
+                              const s = serializeId(a);
+                              if (s) {
+                                if (!foundChatId) foundChatId = s;
+                                else if (!foundPartId) foundPartId = s;
+                              }
+                            }
+                          } else if (typeof a === 'object') {
+                            const cs = extractCsType(a);
+                            if (cs === 'composing' || cs === 'recording' || cs === 'paused') {
+                              foundState = cs;
+                            }
+                            const cid =
+                              serializeId(a.chatId) ||
+                              serializeId(a.from) ||
+                              serializeId(a.id) ||
+                              serializeId(a.wid);
+                            if (cid) {
+                              if (!foundChatId) foundChatId = cid;
+                            }
+                            const pid =
+                              serializeId(a.participant) ||
+                              serializeId(a.author);
+                            if (pid) foundPartId = pid;
+                          }
+                        }
+
+                        if (foundChatId && foundState) {
+                          recordIncomingState(
+                            foundChatId,
+                            foundPartId || foundChatId,
+                            foundState,
+                            `${modName}.${key}`
+                          );
+                        }
                       }
 
                       for (const arg of args) {
@@ -6782,18 +6860,24 @@ export class WhatsAppService {
                         }
                       }
                     } catch (callErr: any) {
-                      debugLog(`Erro no hook de ${modName}.${key}: ${callErr?.message || String(callErr)}`);
+                      debugLog(
+                        `Erro no hook de ${modName}.${key}: ${callErr?.message || String(callErr)}`
+                      );
                     }
                     const res = orig.apply(this, args);
                     scheduleEmit();
                     return res;
                   };
                   Object.assign(wrapped, orig);
-                  (wrapped as any)._waPresenceHooked = true;
+                  (wrapped as any)._waPresenceHookedV3 = true;
                   try {
                     mod[key] = wrapped;
                   } catch (assignErr: any) {
-                    debugLog(`Falha ao atribuir hook ${modName}.${key}: ${assignErr?.message || String(assignErr)}`);
+                    debugLog(
+                      `Falha ao atribuir hook ${modName}.${key}: ${
+                        assignErr?.message || String(assignErr)
+                      }`
+                    );
                   }
                 }
               }
@@ -6810,6 +6894,18 @@ export class WhatsAppService {
               'WAWebPresenceBridge',
             ]);
 
+            try {
+              const r = w.require;
+              if (r) {
+                const mList = r.m ? Object.keys(r.m) : (r.modulesMap ? Object.keys(r.modulesMap) : []);
+                for (const k of mList) {
+                  if (/Presence|ChatState|HandlePresence|ContactPresence/i.test(k)) {
+                    candidateModuleNames.add(k);
+                  }
+                }
+              }
+            } catch {}
+
             const modulesMap = w.__debug?.modulesMap;
             if (modulesMap && typeof modulesMap === 'object') {
               for (const k of Object.keys(modulesMap)) {
@@ -6825,13 +6921,6 @@ export class WhatsAppService {
               if (m) {
                 foundMods.push(`${mName}[${Object.keys(m).join(',')}]`);
                 inspectAndHookModule(mName, m);
-
-                // Inspeciona o código-fonte das funções chave para diagnóstico preciso
-                for (const fnKey of ['markComposing', 'markRecording', 'markPaused', 'handleIndividualChatState', 'handleGroupChatState']) {
-                  if (typeof m[fnKey] === 'function') {
-                    debugLog(`SRC[${mName}.${fnKey}]: ${String(m[fnKey]).slice(0, 300).replace(/\s+/g, ' ')}`);
-                  }
-                }
               }
             }
             debugLog(`Módulos de presença inspecionados: ${foundMods.join(' | ')}`);
@@ -6857,13 +6946,6 @@ export class WhatsAppService {
               injectAction('markRecording', 'recording');
               injectAction('markPaused', 'paused');
             }
-
-            // Procura todos os módulos de presença/subscrição disponíveis no Webpack
-            try {
-              const allKeys = modulesMap && typeof modulesMap === 'object' ? Object.keys(modulesMap) : [];
-              const presMods = allKeys.filter((k: string) => /Presence|ChatState|Subscribe/i.test(k));
-              debugLog(`Módulos relacionados encontrados no modulesMap (${presMods.length}): ${presMods.slice(0, 25).join(', ')}`);
-            } catch {}
           } catch (hookErr: any) {
             debugLog(`Erro ao fazer hook nos módulos: ${hookErr?.message || String(hookErr)}`);
           }
@@ -6987,29 +7069,54 @@ export class WhatsAppService {
           const wid =
             typeof widOrStr === 'object' && widOrStr._serialized
               ? widOrStr
-              : widFactory?.createWid?.(sid);
+              : widFactory?.createWid?.(sid) || widOrStr;
           if (!wid) return;
 
+          const isGroup = sid.endsWith('@g.us');
           const contactPresBridge = safeReq('WAWebContactPresenceBridge');
-          if (typeof contactPresBridge?.subscribePresence === 'function') {
-            try {
-              contactPresBridge.subscribePresence(wid)?.catch?.(() => {});
-            } catch (err: any) {
-              debugLog(`contactPresBridge.subscribePresence erro: ${err?.message}`);
+          if (contactPresBridge) {
+            if (isGroup && typeof contactPresBridge.subscribeGroupPresence === 'function') {
+              try {
+                const res = contactPresBridge.subscribeGroupPresence(wid);
+                res?.catch?.((err: any) => {
+                  debugLog(`subscribeGroupPresence erro (${sid}): ${err?.message || String(err)}`);
+                });
+              } catch (err: any) {
+                debugLog(`subscribeGroupPresence throw (${sid}): ${err?.message || String(err)}`);
+              }
+            } else if (!isGroup && typeof contactPresBridge.subscribeUserPresence === 'function') {
+              try {
+                const res = contactPresBridge.subscribeUserPresence(wid);
+                res?.catch?.((err: any) => {
+                  debugLog(`subscribeUserPresence erro (${sid}): ${err?.message || String(err)}`);
+                });
+              } catch (err: any) {
+                debugLog(`subscribeUserPresence throw (${sid}): ${err?.message || String(err)}`);
+              }
+            }
+            if (typeof contactPresBridge.subscribePresence === 'function') {
+              try {
+                contactPresBridge.subscribePresence(wid)?.catch?.(() => {});
+              } catch {}
             }
           }
 
           const presBridge = safeReq('WAWebPresenceBridge');
-          if (typeof presBridge?.subscribePresence === 'function') {
-            try {
-              presBridge.subscribePresence(wid)?.catch?.(() => {});
-            } catch (err: any) {
-              debugLog(`presBridge.subscribePresence erro: ${err?.message}`);
+          if (presBridge) {
+            if (isGroup && typeof presBridge.subscribeGroupPresence === 'function') {
+              try { presBridge.subscribeGroupPresence(wid)?.catch?.(() => {}); } catch {}
+            } else if (!isGroup && typeof presBridge.subscribeUserPresence === 'function') {
+              try { presBridge.subscribeUserPresence(wid)?.catch?.(() => {}); } catch {}
+            }
+            if (typeof presBridge.subscribePresence === 'function') {
+              try { presBridge.subscribePresence(wid)?.catch?.(() => {}); } catch {}
             }
           }
 
           try {
-            presenceChatAction?.subscribePresence?.(wid)?.catch?.(() => {});
+            if (typeof presenceChatAction?.subscribePresence === 'function') {
+              presenceChatAction.subscribePresence(wid)?.catch?.(() => {});
+            }
           } catch {}
 
           if (PresenceCol) {
@@ -7056,10 +7163,18 @@ export class WhatsAppService {
             const primaryId = chatIds[0];
             const primaryChat = ChatCol?.get?.(primaryId);
             const Cmd = safeReq('WAWebCmd')?.Cmd;
-            if (primaryChat && Cmd?.openChatBottom) {
+            if (primaryChat && Cmd) {
               try {
-                Cmd.openChatBottom({ chat: primaryChat });
-              } catch {}
+                if (typeof Cmd.openChatBottom === 'function') {
+                  Cmd.openChatBottom({ chat: primaryChat });
+                } else if (typeof Cmd.openChatAt === 'function') {
+                  Cmd.openChatAt({ chat: primaryChat });
+                } else if (typeof Cmd.openChat === 'function') {
+                  Cmd.openChat(primaryChat);
+                }
+              } catch (openErr: any) {
+                debugLog(`Erro ao abrir chat com Cmd: ${openErr?.message || String(openErr)}`);
+              }
             }
           }
 
