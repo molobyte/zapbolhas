@@ -6687,8 +6687,8 @@ export class WhatsAppService {
         };
 
         // 3. Hook direto nos módulos internos de ChatState / Presence do WhatsApp Web
-        if (!w.__waChatStateModulesHookedV3) {
-          w.__waChatStateModulesHookedV3 = true;
+        if (!w.__waChatStateModulesHookedV4) {
+          w.__waChatStateModulesHookedV4 = true;
           try {
             const recordIncomingState = (
               rawChat: any,
@@ -6741,10 +6741,10 @@ export class WhatsAppService {
                   continue;
                 }
                 const orig = mod[key];
-                if (typeof orig === 'function' && !orig._waPresenceHookedV3) {
+                if (typeof orig === 'function' && !orig._waPresenceHookedV4) {
                   debugLog(
                     `ORIG_FN[${modName}.${key}] (len=${orig.length}): ${String(orig)
-                      .slice(0, 300)
+                      .slice(0, 1000)
                       .replace(/\s+/g, ' ')}`
                   );
                   const wrapped = function (this: any, ...args: any[]) {
@@ -6869,7 +6869,7 @@ export class WhatsAppService {
                     return res;
                   };
                   Object.assign(wrapped, orig);
-                  (wrapped as any)._waPresenceHookedV3 = true;
+                  (wrapped as any)._waPresenceHookedV4 = true;
                   try {
                     mod[key] = wrapped;
                   } catch (assignErr: any) {
@@ -6892,6 +6892,8 @@ export class WhatsAppService {
               'WAWebChatStateCollection',
               'WAWebContactPresenceBridge',
               'WAWebPresenceBridge',
+              'WAWebSendPresenceSubscriptionJob',
+              'WAWebPresenceUtils',
             ]);
 
             try {
@@ -6924,6 +6926,26 @@ export class WhatsAppService {
               }
             }
             debugLog(`Módulos de presença inspecionados: ${foundMods.join(' | ')}`);
+
+            try {
+              const sendPresJob = safeReq('WAWebSendPresenceSubscriptionJob');
+              debugLog(`WAWebSendPresenceSubscriptionJob keys: ${Object.keys(sendPresJob || {}).join(',')}`);
+              for (const k of Object.keys(sendPresJob || {})) {
+                if (typeof sendPresJob[k] === 'function') {
+                  debugLog(`FN[WAWebSendPresenceSubscriptionJob.${k}]: ${String(sendPresJob[k]).slice(0, 1000).replace(/\s+/g, ' ')}`);
+                }
+              }
+            } catch (e: any) { debugLog(`err sendPresJob: ${e?.message}`); }
+
+            try {
+              const lidMod = safeReq('WAWebLidMigrationUtils');
+              debugLog(`WAWebLidMigrationUtils keys: ${Object.keys(lidMod || {}).join(',')}`);
+            } catch (e: any) { debugLog(`err lidMod: ${e?.message}`); }
+
+            try {
+              const cmdMod = safeReq('WAWebCmd')?.Cmd;
+              debugLog(`WAWebCmd.Cmd keys: ${Object.keys(cmdMod || {}).join(',')}`);
+            } catch (e: any) { debugLog(`err cmd: ${e?.message}`); }
 
             if (w.WWebJS?.injectToFunction) {
               const injectAction = (fn: string, state: 'composing' | 'recording' | 'paused') => {
@@ -7073,7 +7095,10 @@ export class WhatsAppService {
           if (!wid) return;
 
           const isGroup = sid.endsWith('@g.us');
+          const isLid = sid.endsWith('@lid');
+          const isPn = sid.endsWith('@c.us');
           const contactPresBridge = safeReq('WAWebContactPresenceBridge');
+
           if (contactPresBridge) {
             if (isGroup && typeof contactPresBridge.subscribeGroupPresence === 'function') {
               try {
@@ -7084,7 +7109,7 @@ export class WhatsAppService {
               } catch (err: any) {
                 debugLog(`subscribeGroupPresence throw (${sid}): ${err?.message || String(err)}`);
               }
-            } else if (!isGroup && typeof contactPresBridge.subscribeUserPresence === 'function') {
+            } else if (isLid && typeof contactPresBridge.subscribeUserPresence === 'function') {
               try {
                 const res = contactPresBridge.subscribeUserPresence(wid);
                 res?.catch?.((err: any) => {
@@ -7093,7 +7118,82 @@ export class WhatsAppService {
               } catch (err: any) {
                 debugLog(`subscribeUserPresence throw (${sid}): ${err?.message || String(err)}`);
               }
+            } else if (isPn) {
+              // Para contatos com número de telefone (@c.us), o WhatsApp Web exige o LID do contato
+              let foundLidStr = '';
+              const directContact = ContactCol?.get?.(wid) || ContactCol?.get?.(sid);
+              const uDirect = unproxy(directContact);
+              const directLid = serializeId(directContact?.lid) || serializeId(uDirect?.lid);
+              if (directLid && directLid.endsWith('@lid')) {
+                foundLidStr = directLid;
+              }
+
+              if (!foundLidStr && ContactCol?.getModelsArray) {
+                const num = sid.split('@')[0].replace(/\D/g, '');
+                for (const cm of ContactCol.getModelsArray()) {
+                  const ucm = unproxy(cm);
+                  const cid = serializeId(cm?.id) || serializeId(ucm?.id);
+                  const clid = serializeId(cm?.lid) || serializeId(ucm?.lid);
+                  const cpn = serializeId(cm?.phoneNumber) || serializeId(ucm?.phoneNumber);
+                  if (clid && clid.endsWith('@lid')) {
+                    if (cid === sid || cpn === sid || (num && (cid.includes(num) || cpn.includes(num)))) {
+                      foundLidStr = clid;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (!foundLidStr && lidUtils?.toLid) {
+                try {
+                  const lRes = lidUtils.toLid(wid);
+                  if (lRes && typeof lRes.then === 'function') {
+                    lRes
+                      .then((lw: any) => {
+                        const lStr = serializeId(lw);
+                        if (lStr && lStr.endsWith('@lid')) {
+                          subscribeWidPresence(lw);
+                        }
+                      })
+                      .catch(() => {});
+                  } else if (lRes) {
+                    const lStr = serializeId(lRes);
+                    if (lStr && lStr.endsWith('@lid')) foundLidStr = lStr;
+                  }
+                } catch {}
+              }
+
+              if (!foundLidStr && apiContact?.getAlternateUserWid) {
+                try {
+                  const aRes = apiContact.getAlternateUserWid(wid);
+                  const aStr = serializeId(aRes);
+                  if (aStr && aStr.endsWith('@lid')) foundLidStr = aStr;
+                } catch {}
+              }
+
+              if (foundLidStr) {
+                const lidWid = widFactory?.createWid?.(foundLidStr) || foundLidStr;
+                try {
+                  const res = contactPresBridge.subscribeUserPresence(lidWid);
+                  res?.catch?.((err: any) => {
+                    debugLog(
+                      `subscribeUserPresence via LID erro (${sid} -> ${foundLidStr}): ${
+                        err?.message || String(err)
+                      }`
+                    );
+                  });
+                } catch (err: any) {
+                  debugLog(
+                    `subscribeUserPresence via LID throw (${sid} -> ${foundLidStr}): ${
+                      err?.message || String(err)
+                    }`
+                  );
+                }
+              } else {
+                debugLog(`LID não encontrado para contato PN ${sid}`);
+              }
             }
+
             if (typeof contactPresBridge.subscribePresence === 'function') {
               try {
                 contactPresBridge.subscribePresence(wid)?.catch?.(() => {});
@@ -7165,12 +7265,16 @@ export class WhatsAppService {
             const Cmd = safeReq('WAWebCmd')?.Cmd;
             if (primaryChat && Cmd) {
               try {
+                debugLog(`Cmd methods: ${Object.keys(Cmd).join(',')}`);
                 if (typeof Cmd.openChatBottom === 'function') {
                   Cmd.openChatBottom({ chat: primaryChat });
+                  debugLog(`Cmd.openChatBottom chamado para ${primaryId}`);
                 } else if (typeof Cmd.openChatAt === 'function') {
                   Cmd.openChatAt({ chat: primaryChat });
+                  debugLog(`Cmd.openChatAt chamado para ${primaryId}`);
                 } else if (typeof Cmd.openChat === 'function') {
                   Cmd.openChat(primaryChat);
+                  debugLog(`Cmd.openChat chamado para ${primaryId}`);
                 }
               } catch (openErr: any) {
                 debugLog(`Erro ao abrir chat com Cmd: ${openErr?.message || String(openErr)}`);
