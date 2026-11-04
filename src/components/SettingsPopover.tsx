@@ -17,6 +17,9 @@ import {
   Info,
   AppWindow,
   Sparkles,
+  Type,
+  Minus,
+  Plus,
 } from 'lucide-react';
 import { useBubbleStore } from '../store/useBubbleStore';
 import {
@@ -26,6 +29,10 @@ import {
   StartupChatFilter,
   ChatListSize,
   CHAT_LIST_SIZE_CONFIG,
+  CHAT_FONT_SIZE_OPTIONS,
+  DEFAULT_CHAT_FONT_SIZE,
+  MIN_CHAT_FONT_SIZE,
+  MAX_CHAT_FONT_SIZE,
 } from '../types/whatsapp';
 import { previewNotificationSound } from '../utils/notificationSound';
 import { hexToRgba } from '../utils/colorUtils';
@@ -54,7 +61,7 @@ const TABS: TabItem[] = [
   {
     id: 'geral',
     label: 'Geral e Janelas',
-    subtitle: 'Tamanho da lista de conversas, limites e inicialização',
+    subtitle: 'Texto das conversas, tamanho da lista, limites e inicialização',
     icon: AppWindow,
   },
   {
@@ -102,6 +109,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     bubbleBorderWidth,
     startupChatFilter,
     chatListSize,
+    chatFontSize,
     setBubbleScale,
     setMaxBubbles,
     setSoundMuted,
@@ -113,6 +121,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
     setBubbleBorderWidth,
     setStartupChatFilter,
     setChatListSize,
+    setChatFontSize,
     applyExternalSettingsUpdate,
     minimizeActiveChat,
   } = useBubbleStore();
@@ -273,7 +282,174 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
             {/* ============================================================== */}
             {activeTab === 'geral' && (
               <>
-                {/* 1. Tamanho da Janela de Lista de Conversas */}
+                {/* 1. Tamanho do Texto das Conversas */}
+                <section className="bg-[#111B21]/90 rounded-[8px] p-3.5 border border-white/[0.06] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Type className="w-4 h-4 text-[#25D366]" />
+                      <span className="text-[13px] font-semibold text-[#E9EDEF]">
+                        Tamanho do Texto das Conversas
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-[#202C33] text-[#25D366] font-semibold border border-[#25D366]/30">
+                        {chatFontSize} px
+                      </span>
+                      {chatFontSize !== DEFAULT_CHAT_FONT_SIZE && (
+                        <button
+                          type="button"
+                          onClick={() => setChatFontSize(DEFAULT_CHAT_FONT_SIZE)}
+                          className="text-[10.5px] px-2 py-0.5 rounded bg-[#202C33] hover:bg-[#2A3942] text-[#8696A0] hover:text-[#E9EDEF] cursor-pointer transition-colors"
+                        >
+                          Restaurar padrão
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-[11.5px] text-[#8696A0] leading-snug">
+                    Ajuste o tamanho da fonte das mensagens nas conversas para aumentar ou diminuir a visualização do texto.
+                  </p>
+
+                  {/* Controles de Ajuste com Botões A- / A+ e Barra de Deslizamento */}
+                  <div className="flex items-center gap-2.5 bg-[#202C33]/60 p-2.5 rounded-[8px] border border-white/5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setChatFontSize(Math.max(MIN_CHAT_FONT_SIZE, Number((chatFontSize - 0.5).toFixed(1))))
+                      }
+                      disabled={chatFontSize <= MIN_CHAT_FONT_SIZE}
+                      title="Diminuir texto (A-)"
+                      className="flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-[6px] bg-[#202C33] hover:bg-[#2A3942] active:scale-95 text-[#E9EDEF] disabled:opacity-35 disabled:cursor-not-allowed border border-white/10 transition-all cursor-pointer text-[12px] font-semibold shrink-0"
+                    >
+                      <Minus className="w-3.5 h-3.5 text-[#25D366]" />
+                      <span>A-</span>
+                    </button>
+
+                    <div className="flex-1 flex flex-col justify-center px-1">
+                      <input
+                        type="range"
+                        min={MIN_CHAT_FONT_SIZE}
+                        max={MAX_CHAT_FONT_SIZE}
+                        step={0.5}
+                        value={chatFontSize}
+                        onChange={(e) => setChatFontSize(parseFloat(e.target.value))}
+                        className="w-full accent-[#25D366] cursor-pointer h-1.5 bg-[#111B21] rounded-lg"
+                      />
+                      <div className="flex justify-between text-[10px] text-[#8696A0] mt-1 select-none">
+                        <span>Menor ({MIN_CHAT_FONT_SIZE}px)</span>
+                        <span>Padrão ({DEFAULT_CHAT_FONT_SIZE}px)</span>
+                        <span>Maior ({MAX_CHAT_FONT_SIZE}px)</span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setChatFontSize(Math.min(MAX_CHAT_FONT_SIZE, Number((chatFontSize + 0.5).toFixed(1))))
+                      }
+                      disabled={chatFontSize >= MAX_CHAT_FONT_SIZE}
+                      title="Aumentar texto (A+)"
+                      className="flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-[6px] bg-[#202C33] hover:bg-[#2A3942] active:scale-95 text-[#E9EDEF] disabled:opacity-35 disabled:cursor-not-allowed border border-white/10 transition-all cursor-pointer text-[12px] font-semibold shrink-0"
+                    >
+                      <span>A+</span>
+                      <Plus className="w-3.5 h-3.5 text-[#25D366]" />
+                    </button>
+                  </div>
+
+                  {/* Predefinições Rápidas: Pequeno, Padrão, Grande, Muito Grande */}
+                  <div className="grid grid-cols-4 gap-2 bg-[#202C33] p-1.5 rounded-[8px] border border-white/10">
+                    {CHAT_FONT_SIZE_OPTIONS.map((opt) => {
+                      const isSelected = Math.abs(chatFontSize - opt.size) < 0.25;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setChatFontSize(opt.size)}
+                          className={`py-2 px-1 rounded-[6px] text-center transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-[#005C4B] text-[#E9EDEF] font-bold shadow-xs border border-[#25D366]/50'
+                              : 'text-[#8696A0] hover:text-[#E9EDEF] hover:bg-[#2A3942]'
+                          }`}
+                        >
+                          <div className="text-[12px] leading-tight">{opt.label}</div>
+                          <div
+                            className={`text-[10px] mt-0.5 ${
+                              isSelected ? 'text-[#25D366]' : 'text-[#8696A0]'
+                            }`}
+                          >
+                            {opt.size} px
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Prévia Interativa em Tempo Real */}
+                  <div className="space-y-1.5 pt-0.5">
+                    <div className="flex items-center justify-between text-[11px] text-[#8696A0] px-0.5">
+                      <span>Prévia visual da conversa:</span>
+                      <span className="text-[10.5px] text-[#25D366]">
+                        {chatFontSize} px — {CHAT_FONT_SIZE_OPTIONS.find((o) => Math.abs(o.size - chatFontSize) < 0.25)?.label || 'Personalizado'}
+                      </span>
+                    </div>
+
+                    <div className="bg-[#0B141A] rounded-[8px] p-3 border border-white/10 space-y-2 select-none">
+                      {/* Balão Recebido */}
+                      <div className="flex justify-start">
+                        <div
+                          className="bg-[#202C33] text-[#E9EDEF] rounded-[7.5px] rounded-tl-none px-2.5 py-1.5 max-w-[85%] shadow-sm"
+                          style={{
+                            fontSize: `${chatFontSize}px`,
+                            lineHeight: `${Math.round(chatFontSize * 1.38)}px`,
+                          }}
+                        >
+                          <div
+                            className="font-semibold text-[#00A884] mb-0.5 truncate"
+                            style={{
+                              fontSize: `${Math.max(10.5, Math.round(chatFontSize * 0.88))}px`,
+                            }}
+                          >
+                            Contato
+                          </div>
+                          <div>Como você prefere o tamanho do texto das conversas?</div>
+                          <span
+                            className="inline-flex items-center float-right ml-2 mt-1 text-[#8696A0] select-none leading-none"
+                            style={{
+                              fontSize: `${Math.max(10, Math.min(13, Math.round(chatFontSize * 0.78)))}px`,
+                            }}
+                          >
+                            10:42
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Balão Enviado */}
+                      <div className="flex justify-end">
+                        <div
+                          className="bg-[#005C4B] text-[#E9EDEF] rounded-[7.5px] rounded-tr-none px-2.5 py-1.5 max-w-[85%] shadow-sm"
+                          style={{
+                            fontSize: `${chatFontSize}px`,
+                            lineHeight: `${Math.round(chatFontSize * 1.38)}px`,
+                          }}
+                        >
+                          <div>Assim ficou excelente! Muito mais fácil e confortável de ler.</div>
+                          <span
+                            className="inline-flex items-center float-right ml-2 mt-1 text-[#8696A0] select-none leading-none gap-0.5"
+                            style={{
+                              fontSize: `${Math.max(10, Math.min(13, Math.round(chatFontSize * 0.78)))}px`,
+                            }}
+                          >
+                            <span>10:43</span>
+                            <span className="text-[#53BDEB]">✓✓</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                {/* 2. Tamanho da Janela de Lista de Conversas */}
                 <section className="bg-[#111B21]/90 rounded-[8px] p-3.5 border border-white/[0.06] space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -338,7 +514,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                   </div>
                 </section>
 
-                {/* 2. Limite de Quantidade de Bubbles */}
+                {/* 3. Limite de Quantidade de Bubbles */}
                 <section className="bg-[#111B21]/90 rounded-[8px] p-3.5 border border-white/[0.06] space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -370,7 +546,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                   </div>
                 </section>
 
-                {/* 3. Conversas ao Abrir o Zapbolhas */}
+                {/* 4. Conversas ao Abrir o Zapbolhas */}
                 <section className="bg-[#111B21]/90 rounded-[8px] p-3.5 border border-white/[0.06] space-y-2.5">
                   <div className="flex items-center gap-2">
                     <Pin className="w-4 h-4 text-[#25D366]" />

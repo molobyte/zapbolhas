@@ -78,6 +78,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     setViewingImage,
     sendReaction,
     setActiveReactionDetailsMessage,
+    chatFontSize = 13.5,
   } = useBubbleStore();
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [autoPlayVideo, setAutoPlayVideo] = useState(false);
@@ -537,8 +538,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {/* Nome do Remetente em Grupos */}
           {!fromMe && isGroupChat && senderName && isFirstInGroup && (
             <div
-              style={{ color: senderColor || '#53BDEB' }}
-              className="text-[11.5px] font-semibold leading-tight truncate mb-0.5"
+              style={{
+                color: senderColor || '#53BDEB',
+                fontSize: `${Math.max(10.5, Math.round(chatFontSize * 0.88))}px`,
+              }}
+              className="font-semibold leading-tight truncate mb-0.5"
             >
               {senderName}
             </div>
@@ -575,12 +579,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               }`}
             >
               <div
-                style={{ color: quotedMessage.authorColor || '#E59866' }}
-                className="text-[12px] font-semibold leading-tight truncate"
+                style={{
+                  color: quotedMessage.authorColor || '#E59866',
+                  fontSize: `${Math.max(10.5, Math.round(chatFontSize * 0.9))}px`,
+                }}
+                className="font-semibold leading-tight truncate"
               >
                 {quotedMessage.author}
               </div>
-              <div className="text-[12px] text-[#B8C7C4] leading-snug line-clamp-2 mt-0.5">
+              <div
+                style={{
+                  fontSize: `${Math.max(10.5, Math.round(chatFontSize * 0.9))}px`,
+                  lineHeight: `${Math.round(chatFontSize * 1.25)}px`,
+                }}
+                className="text-[#B8C7C4] line-clamp-2 mt-0.5"
+              >
                 <FormattedText text={quotedMessage.text} />
               </div>
             </div>
@@ -597,7 +610,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               messageId={message.id}
             />
           ) : (
-            <div className="text-[13.2px] leading-[18px] break-words text-[#E9EDEF]">
+            <div
+              style={{
+                fontSize: `${chatFontSize}px`,
+                lineHeight: `${Math.round(chatFontSize * 1.38)}px`,
+              }}
+              className="break-words text-[#E9EDEF]"
+            >
               {isViewOnceMsg ? (
                 <div className="w-[260px] p-2.5 rounded-[8px] bg-[#182229]/80 border border-white/10 flex items-center gap-3 text-left select-none mb-1">
                   <div className="w-10 h-10 rounded-full bg-[#005C4B]/60 border border-[#25D366]/40 flex items-center justify-center shrink-0 text-[#25D366]">
@@ -801,7 +820,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
               {displayCaption && <FormattedText text={displayCaption} mentions={message.mentions} />}
 
-              <span className="inline-flex items-center float-right ml-2.5 mt-1.5 -mb-0.5 text-[10.5px] text-[#8696A0] select-none leading-none">
+              <span
+                style={{
+                  fontSize: `${Math.max(10, Math.min(13, Math.round(chatFontSize * 0.78)))}px`,
+                }}
+                className="inline-flex items-center float-right ml-2.5 mt-1.5 -mb-0.5 text-[#8696A0] select-none leading-none"
+              >
                 <span>{timestamp}</span>
                 {fromMe && <MessageCheckIcon ack={ack} />}
               </span>

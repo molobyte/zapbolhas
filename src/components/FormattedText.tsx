@@ -65,7 +65,7 @@ function parseInlineMarkdown(text: string, keyPrefix: string): React.ReactNode[]
       nodes.push(
         <code
           key={itemKey}
-          className="font-mono bg-black/30 px-1 py-0.5 rounded text-[12px] text-[#25D366] border border-white/10"
+          className="font-mono bg-black/30 px-1 py-0.5 rounded text-[0.9em] text-[#25D366] border border-white/10"
         >
           {fullMatch.slice(3, -3)}
         </code>
@@ -74,7 +74,7 @@ function parseInlineMarkdown(text: string, keyPrefix: string): React.ReactNode[]
       nodes.push(
         <code
           key={itemKey}
-          className="font-mono bg-black/30 px-1 py-0.5 rounded text-[12px] text-[#25D366] border border-white/10"
+          className="font-mono bg-black/30 px-1 py-0.5 rounded text-[0.9em] text-[#25D366] border border-white/10"
         >
           {fullMatch.slice(1, -1)}
         </code>

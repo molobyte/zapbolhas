@@ -83,6 +83,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     sendMedia,
     sendVoiceNote,
     sendReaction,
+    chatFontSize = 13.5,
   } = useBubbleStore();
 
   const [inputText, setInputText] = useState('');
@@ -2623,7 +2624,11 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                   ? 'Digite uma mensagem ou @ para marcar...'
                   : 'Digite uma mensagem'
               }
-              className="flex-1 bg-transparent text-[13.5px] text-[#D1D7DB] placeholder-[#8696A0] focus:outline-none resize-none overflow-y-auto max-h-[96px] py-1 leading-[20px] wa-scrollbar"
+              style={{
+                fontSize: `${chatFontSize}px`,
+                lineHeight: `${Math.round(chatFontSize * 1.38)}px`,
+              }}
+              className="flex-1 bg-transparent text-[#D1D7DB] placeholder-[#8696A0] focus:outline-none resize-none overflow-y-auto max-h-[96px] py-1 wa-scrollbar"
             />
 
             {/* Botão Microfone ou Enviar */}
@@ -2851,7 +2856,10 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
                 }}
                 placeholder="Adicionar legenda... (Opcional)"
                 autoFocus
-                className="flex-1 bg-[#202C33] text-[13px] text-[#D1D7DB] placeholder-[#8696A0] px-3.5 py-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#00A884]/60 transition-all border border-transparent"
+                style={{
+                  fontSize: `${chatFontSize}px`,
+                }}
+                className="flex-1 bg-[#202C33] text-[#D1D7DB] placeholder-[#8696A0] px-3.5 py-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#00A884]/60 transition-all border border-transparent"
               />
 
               <button

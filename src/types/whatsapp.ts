@@ -123,6 +123,26 @@ export const CHAT_SIZE_CONFIG: Record<
 
 export type ChatListSize = 'pequeno' | 'padrao' | 'medio' | 'grande';
 
+export type ChatFontSizePreset = 'pequeno' | 'padrao' | 'grande' | 'muito-grande';
+
+export interface ChatFontSizeOption {
+  id: ChatFontSizePreset;
+  label: string;
+  size: number;
+  description: string;
+}
+
+export const DEFAULT_CHAT_FONT_SIZE = 13.5;
+export const MIN_CHAT_FONT_SIZE = 11;
+export const MAX_CHAT_FONT_SIZE = 20;
+
+export const CHAT_FONT_SIZE_OPTIONS: ChatFontSizeOption[] = [
+  { id: 'pequeno', label: 'Pequeno', size: 12, description: '12 px — Compacto' },
+  { id: 'padrao', label: 'Padrão', size: 13.5, description: '13.5 px — Recomendado' },
+  { id: 'grande', label: 'Grande', size: 15.5, description: '15.5 px — Leitura fácil' },
+  { id: 'muito-grande', label: 'Muito Grande', size: 17.5, description: '17.5 px — Acessível' },
+];
+
 export const CHAT_LIST_SIZE_CONFIG: Record<
   ChatListSize,
   {
