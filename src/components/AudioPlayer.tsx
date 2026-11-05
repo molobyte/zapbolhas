@@ -1,4 +1,5 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Download, Loader2, Check } from 'lucide-react';
 import { AudioData, DEFAULT_AVATAR } from '../types/whatsapp';
 import { MessageCheckIcon } from './MessageCheckIcon';
 import {
@@ -184,6 +185,56 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     </button>
   );
 
+  const [isSavingAudio, setIsSavingAudio] = useState(false);
+  const [savedAudioSuccess, setSavedAudioSuccess] = useState(false);
+
+  const handleSaveAudioAs = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isSavingAudio || !window.electronAPI?.saveMediaAs) return;
+    setIsSavingAudio(true);
+    try {
+      const res = await window.electronAPI.saveMediaAs({
+        msgId: messageId,
+        dataUrl: audioData.audioUrl,
+        defaultFilename: audioData.filename,
+      });
+      if (res?.saved) {
+        setSavedAudioSuccess(true);
+        setTimeout(() => setSavedAudioSuccess(false), 2500);
+      }
+    } finally {
+      setIsSavingAudio(false);
+    }
+  };
+
+  const DownloadAudioBtn = (
+    <button
+      type="button"
+      onClick={handleSaveAudioAs}
+      disabled={isSavingAudio}
+      title={
+        savedAudioSuccess
+          ? 'Áudio salvo!'
+          : 'Baixar áudio (escolher onde salvar)'
+      }
+      className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all cursor-pointer active:scale-90 ${
+        savedAudioSuccess
+          ? 'bg-[#25D366]/20 text-[#25D366]'
+          : fromMe
+          ? 'bg-black/20 hover:bg-black/35 text-[#B8C7C4] hover:text-white'
+          : 'bg-white/[0.06] hover:bg-white/[0.14] text-[#8696A0] hover:text-[#E9EDEF]'
+      }`}
+    >
+      {isSavingAudio ? (
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+      ) : savedAudioSuccess ? (
+        <Check className="w-3.5 h-3.5" />
+      ) : (
+        <Download className="w-3.5 h-3.5" />
+      )}
+    </button>
+  );
+
   const WaveformBlock = (
     <div className="flex-1 min-w-[148px] flex flex-col justify-center pt-2">
       {/* Barras de Onda Sonora + Bolinha Azul */}
@@ -232,17 +283,19 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   );
 
   return (
-    <div className="flex items-center gap-2.5 px-1.5 py-0.5 min-w-[248px]">
+    <div className="flex items-center gap-2 px-1.5 py-0.5 min-w-[254px]">
       {fromMe ? (
         <>
           {AvatarOrSpeedSlot}
           {PlayPauseBtn}
           {WaveformBlock}
+          {DownloadAudioBtn}
         </>
       ) : (
         <>
           {PlayPauseBtn}
           {WaveformBlock}
+          {DownloadAudioBtn}
           {AvatarOrSpeedSlot}
         </>
       )}

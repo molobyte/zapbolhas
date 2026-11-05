@@ -805,6 +805,179 @@ function registerIpcHandlers() {
     return await waService.downloadMedia(msgId);
   });
 
+  ipcMain.handle(
+    'wa:save-media-as',
+    async (
+      _event,
+      payload: {
+        msgId?: string;
+        dataUrl?: string;
+        defaultFilename?: string;
+      }
+    ) => {
+      try {
+        let resolvedDataUrl = payload?.dataUrl || '';
+        if (!resolvedDataUrl && payload?.msgId && waService) {
+          resolvedDataUrl = (await waService.downloadMedia(payload.msgId)) || '';
+        }
+        if (!resolvedDataUrl || !resolvedDataUrl.startsWith('data:')) {
+          return { saved: false, error: 'Mídia indisponível para download' };
+        }
+
+        const commaIdx = resolvedDataUrl.indexOf(',');
+        if (commaIdx === -1) {
+          return { saved: false, error: 'Formato de mídia inválido' };
+        }
+        const header = resolvedDataUrl.slice(0, commaIdx);
+        const base64Data = resolvedDataUrl.slice(commaIdx + 1);
+        const mimeMatch = /^data:([^;]+)/i.exec(header);
+        const mime = (mimeMatch ? mimeMatch[1] : 'application/octet-stream').toLowerCase();
+
+        const mimeToExt = (m: string): string => {
+          if (m.includes('pdf')) return '.pdf';
+          if (m.includes('ogg') || m.includes('opus')) return '.ogg';
+          if (m.includes('mpeg') || m.includes('mp3')) return '.mp3';
+          if (m.includes('wav')) return '.wav';
+          if (m.includes('mp4') && m.startsWith('audio/')) return '.m4a';
+          if (m.includes('aac')) return '.aac';
+          if (m.includes('webm') && m.startsWith('audio/')) return '.webm';
+          if (m.includes('wordprocessingml') || m.includes('msword')) return '.docx';
+          if (m.includes('spreadsheetml') || m.includes('excel')) return '.xlsx';
+          if (m.includes('presentationml') || m.includes('powerpoint')) return '.pptx';
+          if (m.includes('zip')) return '.zip';
+          if (m.includes('rar')) return '.rar';
+          if (m.includes('csv')) return '.csv';
+          if (m.includes('plain')) return '.txt';
+          if (m.includes('png')) return '.png';
+          if (m.includes('webp')) return '.webp';
+          if (m.includes('gif')) return '.gif';
+          if (m.includes('jpeg') || m.includes('jpg')) return '.jpg';
+          if (m.includes('mp4')) return '.mp4';
+          return '';
+        };
+
+        const suggestedExt = mimeToExt(mime);
+        const sanitizeFilename = (name: string) =>
+          name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim();
+
+        let baseName = payload?.defaultFilename
+          ? sanitizeFilename(payload.defaultFilename)
+          : '';
+        if (!baseName) {
+          const stamp = new Date()
+            .toISOString()
+            .replace(/[:.]/g, '-')
+            .slice(0, 19);
+          if (mime.startsWith('audio/')) {
+            baseName = `audio-whatsapp-${stamp}${suggestedExt || '.ogg'}`;
+          } else if (mime.includes('pdf')) {
+            baseName = `documento-whatsapp-${stamp}.pdf`;
+          } else {
+            baseName = `arquivo-whatsapp-${stamp}${suggestedExt || ''}`;
+          }
+        } else if (suggestedExt && !path.extname(baseName)) {
+          baseName = `${baseName}${suggestedExt}`;
+        }
+
+        const extWithoutDot = (path.extname(baseName) || suggestedExt || '')
+          .replace(/^\./, '')
+          .toLowerCase();
+        const filters: Electron.FileFilter[] = [];
+        if (extWithoutDot === 'pdf') {
+          filters.push({ name: 'Documento PDF (*.pdf)', extensions: ['pdf'] });
+        } else if (
+          mime.startsWith('audio/') ||
+          ['ogg', 'mp3', 'wav', 'm4a', 'aac'].includes(extWithoutDot)
+        ) {
+          if (extWithoutDot && extWithoutDot !== 'ogg' && extWithoutDot !== 'mp3') {
+            filters.push({
+              name: `Áudio (*.${extWithoutDot})`,
+              extensions: [extWithoutDot],
+            });
+          }
+          filters.push({ name: 'Áudio do WhatsApp (*.ogg)', extensions: ['ogg'] });
+          filters.push({ name: 'Áudio MP3 (*.mp3)', extensions: ['mp3'] });
+          filters.push({ name: 'Áudio WAV (*.wav)', extensions: ['wav'] });
+        } else if (extWithoutDot) {
+          filters.push({
+            name: `Arquivo (*.${extWithoutDot})`,
+            extensions: [extWithoutDot],
+          });
+        }
+        filters.push({ name: 'Todos os Arquivos (*.*)', extensions: ['*'] });
+
+        const downloadsDir = app.getPath('downloads');
+        const defaultPath = path.join(downloadsDir, baseName);
+
+        const saveRes = await dialog.showSaveDialog({
+          title: 'Salvar arquivo como...',
+          defaultPath,
+          filters,
+        });
+
+        if (saveRes.canceled || !saveRes.filePath) {
+          return { saved: false };
+        }
+
+        const targetPath = saveRes.filePath;
+        const targetExt = path.extname(targetPath).toLowerCase();
+        const rawBuf = Buffer.from(base64Data, 'base64');
+
+        // Se for um áudio OGG/Opus do WhatsApp e o usuário escolheu salvar como .mp3 ou .wav, converte via ffmpeg-static se disponível
+        if (
+          mime.startsWith('audio/') &&
+          (targetExt === '.mp3' || targetExt === '.wav') &&
+          suggestedExt !== targetExt
+        ) {
+          let converted = false;
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            let ffmpegPath: string | null = require('ffmpeg-static');
+            if (ffmpegPath && ffmpegPath.includes('app.asar')) {
+              const unpacked = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+              if (fs.existsSync(unpacked)) ffmpegPath = unpacked;
+            }
+            if (ffmpegPath && fs.existsSync(ffmpegPath)) {
+              // eslint-disable-next-line @typescript-eslint/no-var-requires
+              const { execFile } = require('child_process');
+              const tempIn = path.join(
+                app.getPath('temp'),
+                `wa_save_in_${Date.now()}_${Math.random().toString(36).slice(2)}${suggestedExt || '.ogg'}`
+              );
+              fs.writeFileSync(tempIn, rawBuf);
+              const args =
+                targetExt === '.mp3'
+                  ? ['-y', '-i', tempIn, '-vn', '-c:a', 'libmp3lame', '-q:a', '2', targetPath]
+                  : ['-y', '-i', tempIn, '-vn', targetPath];
+              converted = await new Promise<boolean>((resolve) => {
+                execFile(ffmpegPath!, args, { timeout: 20000 }, (err: Error | null) => {
+                  try {
+                    if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
+                  } catch {}
+                  resolve(!err && fs.existsSync(targetPath));
+                });
+              });
+            }
+          } catch {}
+
+          if (!converted) {
+            fs.writeFileSync(targetPath, rawBuf);
+          }
+        } else {
+          fs.writeFileSync(targetPath, rawBuf);
+        }
+
+        return { saved: true, filePath: targetPath };
+      } catch (err) {
+        console.error('[main] Error saving media as:', err);
+        return {
+          saved: false,
+          error: err instanceof Error ? err.message : 'Erro ao salvar arquivo',
+        };
+      }
+    }
+  );
+
   ipcMain.handle('wa:open-external-image', async (_event, dataUrl: string) => {
     try {
       const match = /^data:(image|video)\/([a-zA-Z0-9+.-]+);base64,(.+)$/.exec(dataUrl);

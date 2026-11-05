@@ -12,6 +12,9 @@ import {
   Plus,
   X,
   Search,
+  Download,
+  FileText,
+  Check,
 } from 'lucide-react';
 import { FormattedMessage, QuotedMessage, DEFAULT_AVATAR } from '../types/whatsapp';
 import { useBubbleStore } from '../store/useBubbleStore';
@@ -63,6 +66,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     quotedMessage,
     reaction,
     audioData,
+    documentData,
     ack,
     senderName,
     senderColor,
@@ -83,6 +87,41 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [autoPlayVideo, setAutoPlayVideo] = useState(false);
   const [savedSticker, setSavedSticker] = useState(false);
+  const [isSavingFile, setIsSavingFile] = useState(false);
+  const [savedFileSuccess, setSavedFileSuccess] = useState(false);
+
+  const handleSaveMediaAs = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isSavingFile || !window.electronAPI?.saveMediaAs) return;
+    setIsSavingFile(true);
+    try {
+      const res = await window.electronAPI.saveMediaAs({
+        msgId: message.id,
+        dataUrl:
+          type === 'audio'
+            ? audioData?.audioUrl
+            : type === 'video'
+            ? videoUrl
+            : type === 'image' || type === 'sticker'
+            ? isHdLoaded
+              ? imageUrl
+              : undefined
+            : undefined,
+        defaultFilename:
+          type === 'document'
+            ? documentData?.filename
+            : type === 'audio'
+            ? audioData?.filename
+            : undefined,
+      });
+      if (res?.saved) {
+        setSavedFileSuccess(true);
+        setTimeout(() => setSavedFileSuccess(false), 2500);
+      }
+    } finally {
+      setIsSavingFile(false);
+    }
+  };
 
   // Reaction State
   const [showQuickReactions, setShowQuickReactions] = useState(false);
@@ -383,6 +422,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       text:
         type === 'audio'
           ? `🎤 Mensagem de voz (${audioData?.duration || '0:46'})`
+          : type === 'document'
+          ? `📄 ${documentData?.filename || text || 'Documento'}`
           : isViewOnceMsg
           ? '📷 Mensagem de visualização única'
           : type === 'video'
@@ -394,6 +435,32 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           : text,
     });
   };
+
+  const docExtLabel = useMemo(() => {
+    if (type !== 'document') return '';
+    const fname = documentData?.filename || '';
+    const dotIdx = fname.lastIndexOf('.');
+    if (dotIdx !== -1 && dotIdx < fname.length - 1) {
+      return fname.slice(dotIdx + 1).toUpperCase().slice(0, 5);
+    }
+    const mime = (documentData?.mimetype || '').toLowerCase();
+    if (mime.includes('pdf')) return 'PDF';
+    if (mime.includes('word') || mime.includes('msword')) return 'DOCX';
+    if (mime.includes('sheet') || mime.includes('excel')) return 'XLSX';
+    if (mime.includes('presentation') || mime.includes('powerpoint')) return 'PPTX';
+    if (mime.includes('zip')) return 'ZIP';
+    if (mime.includes('rar')) return 'RAR';
+    if (mime.includes('audio')) return 'AUDIO';
+    return 'ARQ';
+  }, [type, documentData]);
+
+  const docSizeLabel = useMemo(() => {
+    const bytes = documentData?.filesize;
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} MB`;
+  }, [documentData?.filesize]);
 
   return (
     <>
@@ -718,7 +785,100 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     </div>
                   )}
 
-                  {type !== 'video' && (type === 'image' || type === 'sticker' || imageUrl) && (
+                  {type === 'document' && (
+                    <div
+                      onClick={handleSaveMediaAs}
+                      title="Clique para baixar o arquivo e escolher onde salvar"
+                      className={`group/doc mb-1.5 rounded-[7px] overflow-hidden border transition-all cursor-pointer select-none min-w-[235px] max-w-[300px] ${
+                        fromMe
+                          ? 'bg-[#025144]/90 hover:bg-[#02493d] border-white/10'
+                          : 'bg-[#182229]/90 hover:bg-[#1d2a33] border-white/[0.08]'
+                      }`}
+                    >
+                      {imageUrl && (
+                        <div className="relative w-full h-[115px] overflow-hidden bg-black/30 border-b border-white/[0.06]">
+                          <img
+                            src={imageUrl}
+                            alt={documentData?.filename || 'Documento'}
+                            className="w-full h-full object-cover object-top opacity-90 group-hover/doc:scale-[1.02] transition-transform duration-200"
+                          />
+                        </div>
+                      )}
+                      <div className="p-2.5 flex items-center gap-2.5">
+                        <div
+                          className={`w-10 h-11 rounded-[6px] flex flex-col items-center justify-center shrink-0 text-white shadow-sm ${
+                            docExtLabel === 'PDF'
+                              ? 'bg-[#E53935]'
+                              : docExtLabel === 'DOC' || docExtLabel === 'DOCX'
+                              ? 'bg-[#1E88E5]'
+                              : docExtLabel === 'XLS' ||
+                                docExtLabel === 'XLSX' ||
+                                docExtLabel === 'CSV'
+                              ? 'bg-[#00897B]'
+                              : 'bg-[#00A884]'
+                          }`}
+                        >
+                          <FileText className="w-4 h-4 opacity-95" />
+                          <span className="text-[8.5px] font-bold tracking-wider mt-0.5 leading-none">
+                            {docExtLabel || 'DOC'}
+                          </span>
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div
+                            style={{
+                              fontSize: `${Math.max(12, Math.round(chatFontSize * 0.96))}px`,
+                            }}
+                            className="font-medium text-[#E9EDEF] leading-snug line-clamp-2 break-all"
+                          >
+                            {documentData?.filename || 'Documento'}
+                          </div>
+                          <div className="text-[10.5px] text-[#8696A0] mt-0.5 flex items-center gap-1.5 flex-wrap">
+                            {documentData?.pageCount && documentData.pageCount > 0 ? (
+                              <span>
+                                {documentData.pageCount}{' '}
+                                {documentData.pageCount === 1 ? 'página' : 'páginas'}
+                              </span>
+                            ) : null}
+                            {documentData?.pageCount && documentData.pageCount > 0 && (docExtLabel || docSizeLabel) ? (
+                              <span>•</span>
+                            ) : null}
+                            {docExtLabel && <span>{docExtLabel}</span>}
+                            {docExtLabel && docSizeLabel && <span>•</span>}
+                            {docSizeLabel && <span>{docSizeLabel}</span>}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleSaveMediaAs}
+                          disabled={isSavingFile}
+                          title={
+                            savedFileSuccess
+                              ? 'Arquivo salvo!'
+                              : 'Baixar arquivo (escolher onde salvar)'
+                          }
+                          className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all shadow-sm cursor-pointer ${
+                            savedFileSuccess
+                              ? 'bg-[#25D366]/25 text-[#25D366]'
+                              : 'bg-black/25 group-hover/doc:bg-[#00A884] text-[#E9EDEF] group-hover/doc:text-white'
+                          }`}
+                        >
+                          {isSavingFile ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : savedFileSuccess ? (
+                            <Check className="w-4 h-4" />
+                          ) : (
+                            <Download className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {type !== 'video' &&
+                    type !== 'document' &&
+                    (type === 'image' || type === 'sticker' || imageUrl) && (
                     <div className="relative group/img mb-1.5 overflow-hidden rounded-[6px]">
                       {imageUrl ? (
                         <div

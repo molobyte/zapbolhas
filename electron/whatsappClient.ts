@@ -141,7 +141,7 @@ export interface FormattedChatMessage {
   timestamp: string;
   dateLabel?: string;
   fromMe: boolean;
-  type: 'text' | 'audio' | 'image' | 'video' | 'sticker';
+  type: 'text' | 'audio' | 'image' | 'video' | 'sticker' | 'document';
   isViewOnce?: boolean;
   senderName?: string;
   senderColor?: string;
@@ -177,6 +177,13 @@ export interface FormattedChatMessage {
     audioUrl?: string;
     senderAvatar: string;
     waveform: number[];
+    filename?: string;
+  };
+  documentData?: {
+    filename: string;
+    mimetype: string;
+    filesize?: number;
+    pageCount?: number;
   };
   mentions?: string[];
 }
@@ -1143,6 +1150,7 @@ export class WhatsAppService {
             rawType !== 'ptt' &&
             rawType !== 'audio' &&
             rawType !== 'sticker' &&
+            rawType !== 'document' &&
             rawType !== 'revoked' &&
             rawType !== 'reaction'
           ) {
@@ -1917,6 +1925,13 @@ export class WhatsAppService {
             ? String(getProp(lastMsg, 'caption') || '')
             : isChat
             ? String(getProp(lastMsg, 'body') || '')
+            : rawType === 'document'
+            ? String(
+                getProp(lastMsg, 'filename') ||
+                  getProp(lastMsg?.mediaData, 'filename') ||
+                  getProp(lastMsg, 'caption') ||
+                  ''
+              )
             : String(getProp(lastMsg, 'caption') || '');
           const formattedLastMsg = formatMentionsInText(rawBody, lastMsg);
           const cleanLastMsgText = isRawMediaBase64OrKey(formattedLastMsg.text) ? '' : formattedLastMsg.text;
@@ -1992,7 +2007,11 @@ export class WhatsAppService {
         } else if (raw.lastMsgType === 'call_log') {
           text = '📞 Chamada de voz';
         } else if (raw.lastMsgType === 'document') {
-          text = raw.lastMsgBody || '📄 Documento';
+          text = raw.lastMsgBody
+            ? raw.lastMsgBody.startsWith('📄')
+              ? raw.lastMsgBody
+              : `📄 ${raw.lastMsgBody}`
+            : '📄 Documento';
         }
 
         const rawTimestampSec = Number(raw.timestamp || 0);
@@ -2174,6 +2193,7 @@ export class WhatsAppService {
               rawType !== 'ptt' &&
               rawType !== 'audio' &&
               rawType !== 'sticker' &&
+              rawType !== 'document' &&
               rawType !== 'revoked' &&
               rawType !== 'reaction'
             ) {
@@ -2981,6 +3001,8 @@ export class WhatsAppService {
                   ? '🎤 Mensagem de voz'
                   : qType === 'sticker'
                   ? '💟 Figurinha'
+                  : qType === 'document'
+                  ? `📄 ${String(m.quotedMsg.filename || m.quotedMsg.caption || 'Documento')}`
                   : String(m.quotedMsg.caption || '📷 Foto');
               const qFormatted = formatMentionsInText(qText, m.quotedMsg);
 
@@ -3008,7 +3030,8 @@ export class WhatsAppService {
                 rawType === 'video' ||
                 rawType === 'ptv' ||
                 rawType === 'gif' ||
-                rawType === 'sticker')
+                rawType === 'sticker' ||
+                rawType === 'document')
             ) {
               const mData = getProp(m, 'mediaData') || m.mediaData || m.__x_mediaData;
               const previewObj = getProp(mData, 'preview');
@@ -3082,8 +3105,36 @@ export class WhatsAppService {
               rawBodyText = isRawMediaBase64OrKey(c) ? '' : c;
             }
 
+            const mDataObj = getProp(m, 'mediaData') || m.mediaData || m.__x_mediaData;
+            const filename = String(
+              getProp(m, 'filename') ||
+                getProp(mDataObj, 'filename') ||
+                getProp(m, 'title') ||
+                ''
+            ).trim();
+            const mimetype = String(
+              getProp(m, 'mimetype') ||
+                getProp(mDataObj, 'mimetype') ||
+                ''
+            ).trim();
+            const filesize = Number(
+              getProp(m, 'size') ||
+                getProp(m, 'filesize') ||
+                getProp(mDataObj, 'size') ||
+                getProp(mDataObj, 'filesize') ||
+                0
+            );
+            const pageCount = Number(
+              getProp(m, 'pageCount') ||
+                getProp(mDataObj, 'pageCount') ||
+                0
+            );
+
             const { text, mentions } = formatMentionsInText(rawBodyText, m);
-            const finalText = isRawMediaBase64OrKey(text) ? '' : text;
+            let finalText = isRawMediaBase64OrKey(text) ? '' : text;
+            if (rawType === 'document' && finalText && filename && finalText.trim() === filename) {
+              finalText = '';
+            }
 
             return {
               id,
@@ -3103,6 +3154,10 @@ export class WhatsAppService {
               thumbBase64,
               reaction,
               reactions,
+              filename,
+              mimetype,
+              filesize,
+              pageCount,
             };
           });
         },
@@ -3131,9 +3186,11 @@ export class WhatsAppService {
       let lastDateLabel = '';
 
       return rawMsgs.map((m) => {
-        let type: 'text' | 'audio' | 'image' | 'video' | 'sticker' = 'text';
+        let type: 'text' | 'audio' | 'image' | 'video' | 'sticker' | 'document' = 'text';
         if (m.rawType === 'ptt' || m.rawType === 'audio') {
           type = 'audio';
+        } else if (m.rawType === 'document') {
+          type = 'document';
         } else if (m.rawType === 'image') {
           type = 'image';
         } else if (
@@ -3175,6 +3232,19 @@ export class WhatsAppService {
               ? this.myAvatarUrl
               : resolvedSenderAvatar || chatAvatar,
             waveform: generateDeterministicWaveform(m.id),
+            filename: (m as any).filename || undefined,
+          };
+        }
+
+        let documentData: FormattedChatMessage['documentData'];
+        if (type === 'document') {
+          const mime = (m as any).mimetype || 'application/octet-stream';
+          const fallbackName = mime.toLowerCase().includes('pdf') ? 'Documento.pdf' : 'Documento';
+          documentData = {
+            filename: (m as any).filename || fallbackName,
+            mimetype: mime,
+            filesize: (m as any).filesize > 0 ? (m as any).filesize : undefined,
+            pageCount: (m as any).pageCount > 0 ? (m as any).pageCount : undefined,
           };
         }
 
@@ -3192,7 +3262,7 @@ export class WhatsAppService {
           senderColor: m.senderName ? pickSenderColor(m.senderName) : undefined,
           senderAvatar: resolvedSenderAvatar,
           imageUrl:
-            type === 'video'
+            type === 'video' || type === 'document'
               ? m.thumbBase64 || undefined
               : cachedMedia || m.thumbBase64 || undefined,
           videoUrl: type === 'video' ? cachedMedia || undefined : undefined,
@@ -3211,6 +3281,7 @@ export class WhatsAppService {
               }
             : undefined,
           audioData,
+          documentData,
           reaction: (m as any).reaction || undefined,
           reactions: (m as any).reactions || undefined,
         };
@@ -3405,6 +3476,7 @@ export class WhatsAppService {
             rawType !== 'ptt' &&
             rawType !== 'audio' &&
             rawType !== 'sticker' &&
+            rawType !== 'document' &&
             rawType !== 'revoked' &&
             rawType !== 'reaction'
           ) {
@@ -3438,38 +3510,68 @@ export class WhatsAppService {
             ? 'audio/ogg; codecs=opus'
             : rawType === 'video' || rawType === 'ptv' || rawType === 'gif'
             ? 'video/mp4'
+            : rawType === 'document'
+            ? 'application/pdf'
             : 'image/jpeg');
 
-        const directPath = getProp(msg, 'directPath') || getProp(msg.mediaData, 'directPath');
-        const encFilehash = getProp(msg, 'encFilehash') || getProp(msg.mediaData, 'encFilehash');
-        const filehash = getProp(msg, 'filehash') || getProp(msg.mediaData, 'filehash');
-        const mediaKey = getProp(msg, 'mediaKey') || getProp(msg.mediaData, 'mediaKey');
-        const mediaKeyTimestamp = getProp(msg, 'mediaKeyTimestamp') || getProp(msg.mediaData, 'mediaKeyTimestamp');
+        let directPath = getProp(msg, 'directPath') || getProp(msg.mediaData, 'directPath');
+        let encFilehash = getProp(msg, 'encFilehash') || getProp(msg.mediaData, 'encFilehash');
+        let filehash = getProp(msg, 'filehash') || getProp(msg.mediaData, 'filehash');
+        let mediaKey = getProp(msg, 'mediaKey') || getProp(msg.mediaData, 'mediaKey');
+        let mediaKeyTimestamp = getProp(msg, 'mediaKeyTimestamp') || getProp(msg.mediaData, 'mediaKeyTimestamp');
         const targetType =
           rawType === 'view_once'
             ? (declaredMime.startsWith('video') ? 'video' : 'image')
             : (rawType || (declaredMime.startsWith('video') ? 'video' : 'image'));
 
-        const renderableUrl = getProp(msg.mediaData, 'renderableUrl');
-        if (typeof renderableUrl === 'string' && renderableUrl) {
-          if (renderableUrl.startsWith('data:')) {
-            return renderableUrl;
+        const readRenderableOrBlob = async (): Promise<string | null> => {
+          const rUrl = getProp(msg.mediaData, 'renderableUrl');
+          if (typeof rUrl === 'string' && rUrl) {
+            if (rUrl.startsWith('data:')) {
+              return rUrl;
+            }
+            if (rUrl.startsWith('blob:')) {
+              try {
+                const res = await fetch(rUrl);
+                const blob = await res.blob();
+                const b64 = await new Promise<string>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => resolve(reader.result as string);
+                  reader.onerror = () => resolve('');
+                  reader.readAsDataURL(blob);
+                });
+                if (b64 && b64.startsWith('data:')) {
+                  return b64;
+                }
+              } catch (_) {}
+            }
           }
-          if (renderableUrl.startsWith('blob:')) {
+          const mBlob = getProp(msg.mediaData, 'mediaBlob') || msg.mediaData?.mediaBlob;
+          const actualBlob: Blob | null =
+            mBlob instanceof Blob
+              ? mBlob
+              : mBlob?.blob instanceof Blob
+              ? mBlob.blob
+              : null;
+          if (actualBlob) {
             try {
-              const res = await fetch(renderableUrl);
-              const blob = await res.blob();
               const b64 = await new Promise<string>((resolve) => {
                 const reader = new FileReader();
                 reader.onloadend = () => resolve(reader.result as string);
                 reader.onerror = () => resolve('');
-                reader.readAsDataURL(blob);
+                reader.readAsDataURL(actualBlob);
               });
               if (b64 && b64.startsWith('data:')) {
                 return b64;
               }
             } catch (_) {}
           }
+          return null;
+        };
+
+        const immediateDataUrl = await readRenderableOrBlob();
+        if (immediateDataUrl) {
+          return immediateDataUrl;
         }
 
         const mockQpl = {
@@ -3482,22 +3584,62 @@ export class WhatsAppService {
         };
 
         let decryptedMedia: ArrayBuffer | null = null;
-        try {
-          decryptedMedia = await w
-            .require('WAWebDownloadManager')
-            .downloadManager.downloadAndMaybeDecrypt({
-              directPath,
-              encFilehash,
-              filehash,
-              mediaKey,
-              mediaKeyTimestamp,
-              type: targetType,
-              mimetype: declaredMime,
-              signal: new AbortController().signal,
-              downloadQpl: mockQpl,
+        if (directPath && mediaKey) {
+          try {
+            decryptedMedia = await w
+              .require('WAWebDownloadManager')
+              .downloadManager.downloadAndMaybeDecrypt({
+                directPath,
+                encFilehash,
+                filehash,
+                mediaKey,
+                mediaKeyTimestamp,
+                type: targetType,
+                mimetype: declaredMime,
+                signal: new AbortController().signal,
+                downloadQpl: mockQpl,
+              });
+          } catch (downloadErr) {
+            console.warn('[WhatsApp Web] downloadAndMaybeDecrypt failed:', downloadErr);
+          }
+        }
+
+        if ((!decryptedMedia || decryptedMedia.byteLength === 0) && typeof msg.downloadMedia === 'function') {
+          try {
+            await msg.downloadMedia({
+              downloadEvenIfExpensive: true,
+              rmrReason: 1,
             });
-        } catch (downloadErr) {
-          console.warn('[WhatsApp Web] downloadAndMaybeDecrypt failed:', downloadErr);
+          } catch (_) {}
+
+          const afterResolveUrl = await readRenderableOrBlob();
+          if (afterResolveUrl) {
+            return afterResolveUrl;
+          }
+
+          directPath = getProp(msg, 'directPath') || getProp(msg.mediaData, 'directPath');
+          encFilehash = getProp(msg, 'encFilehash') || getProp(msg.mediaData, 'encFilehash');
+          filehash = getProp(msg, 'filehash') || getProp(msg.mediaData, 'filehash');
+          mediaKey = getProp(msg, 'mediaKey') || getProp(msg.mediaData, 'mediaKey');
+          mediaKeyTimestamp = getProp(msg, 'mediaKeyTimestamp') || getProp(msg.mediaData, 'mediaKeyTimestamp');
+
+          if (directPath && mediaKey) {
+            try {
+              decryptedMedia = await w
+                .require('WAWebDownloadManager')
+                .downloadManager.downloadAndMaybeDecrypt({
+                  directPath,
+                  encFilehash,
+                  filehash,
+                  mediaKey,
+                  mediaKeyTimestamp,
+                  type: targetType,
+                  mimetype: declaredMime,
+                  signal: new AbortController().signal,
+                  downloadQpl: mockQpl,
+                });
+            } catch (_) {}
+          }
         }
 
         if (decryptedMedia && decryptedMedia.byteLength > 0) {
@@ -3518,14 +3660,16 @@ export class WhatsAppService {
           }
         }
 
-        // Se o download direto falhar, tenta recuperar preview/thumbnail base64 caso esteja disponível
-        const fallbackPreview =
-          (typeof getProp(msg, 'body') === 'string' && (getProp(msg, 'body') as string).length > 20 ? (getProp(msg, 'body') as string) : '') ||
-          (typeof getProp(msg?.mediaData, 'preview')?._b64 === 'string' ? getProp(msg?.mediaData, 'preview')._b64 : '') ||
-          (typeof getProp(msg?.mediaData, 'preview') === 'string' ? getProp(msg?.mediaData, 'preview') : '');
-        if (fallbackPreview) {
-          if (fallbackPreview.startsWith('data:')) return fallbackPreview;
-          return `data:${declaredMime.split(';')[0].trim()};base64,${fallbackPreview}`;
+        // Se o download direto falhar, tenta recuperar preview/thumbnail base64 caso esteja disponível (apenas para imagem/figurinha)
+        if (rawType === 'image' || rawType === 'sticker') {
+          const fallbackPreview =
+            (typeof getProp(msg, 'body') === 'string' && (getProp(msg, 'body') as string).length > 20 ? (getProp(msg, 'body') as string) : '') ||
+            (typeof getProp(msg?.mediaData, 'preview')?._b64 === 'string' ? getProp(msg?.mediaData, 'preview')._b64 : '') ||
+            (typeof getProp(msg?.mediaData, 'preview') === 'string' ? getProp(msg?.mediaData, 'preview') : '');
+          if (fallbackPreview) {
+            if (fallbackPreview.startsWith('data:')) return fallbackPreview;
+            return `data:${declaredMime.split(';')[0].trim()};base64,${fallbackPreview}`;
+          }
         }
 
         return null;

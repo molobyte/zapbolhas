@@ -114,6 +114,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:download-media', msgId);
   },
 
+  saveMediaAs: (payload: {
+    msgId?: string;
+    dataUrl?: string;
+    defaultFilename?: string;
+  }) => {
+    return ipcRenderer.invoke('wa:save-media-as', payload);
+  },
+
   openExternalImage: (dataUrl: string) => {
     return ipcRenderer.invoke('wa:open-external-image', dataUrl);
   },

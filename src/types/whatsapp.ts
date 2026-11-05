@@ -51,6 +51,14 @@ export interface AudioData {
   audioUrl?: string;
   senderAvatar: string;
   waveform: number[];
+  filename?: string;
+}
+
+export interface DocumentData {
+  filename: string;
+  mimetype: string;
+  filesize?: number;
+  pageCount?: number;
 }
 
 export interface ReactionSender {
@@ -75,7 +83,7 @@ export interface FormattedMessage {
   timestamp: string;
   dateLabel?: string;
   fromMe: boolean;
-  type: 'text' | 'audio' | 'image' | 'video' | 'sticker';
+  type: 'text' | 'audio' | 'image' | 'video' | 'sticker' | 'document';
   isViewOnce?: boolean;
   senderName?: string;
   senderColor?: string;
@@ -89,6 +97,7 @@ export interface FormattedMessage {
   reaction?: string;
   reactions?: MessageReactionItem[];
   audioData?: AudioData;
+  documentData?: DocumentData;
   mentions?: string[];
 }
 
@@ -366,6 +375,11 @@ export interface ElectronAPI {
     }) => void
   ) => () => void;
   downloadMedia: (msgId: string) => Promise<string | null>;
+  saveMediaAs?: (payload: {
+    msgId?: string;
+    dataUrl?: string;
+    defaultFilename?: string;
+  }) => Promise<{ saved: boolean; filePath?: string; error?: string }>;
   openExternalImage: (dataUrl: string) => Promise<boolean>;
   openExternalUrl?: (url: string) => Promise<boolean>;
   getSfxDataUrl?: (type: 'user' | 'group', preset?: string) => Promise<string | null>;
