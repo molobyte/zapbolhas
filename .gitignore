@@ -35,7 +35,3 @@ _agent/
 # Release and installers
 release/
 dist-installer/
-
-# Rust standalone version (local only)
-RUST/
-rust/
