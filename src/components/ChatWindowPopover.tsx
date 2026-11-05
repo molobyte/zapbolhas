@@ -18,6 +18,8 @@ import {
   ChevronDown,
   CheckSquare,
   CornerUpRight,
+  FolderOpen,
+  Check,
 } from 'lucide-react';
 import {
   useBubbleStore,
@@ -60,6 +62,8 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     messagesByChat,
     unreadBannerByChat,
     typingByChat,
+    downloadedFilePromptByChat,
+    clearDownloadedFilePrompt,
     replyingTo,
     viewingImage,
     activeReactionDetailsMessage,
@@ -229,6 +233,19 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   }, [showMentionPopover, isGroupChat, groupParticipants, mentionQuery]);
   const messages = currentChatId ? messagesByChat[currentChatId] || [] : [];
   const unreadBanner = currentChatId ? unreadBannerByChat[currentChatId] : undefined;
+  const activeDownloadedPrompt = currentChatId
+    ? downloadedFilePromptByChat[currentChatId]
+    : undefined;
+
+  useEffect(() => {
+    if (!activeDownloadedPrompt || !currentChatId) return;
+    const elapsed = Date.now() - activeDownloadedPrompt.createdAt;
+    const remaining = Math.max(0, activeDownloadedPrompt.durationMs - elapsed);
+    const timer = setTimeout(() => {
+      clearDownloadedFilePrompt(currentChatId);
+    }, remaining);
+    return () => clearTimeout(timer);
+  }, [activeDownloadedPrompt, currentChatId, clearDownloadedFilePrompt]);
 
   const typingParticipants = useMemo(() => {
     const raw = getTypingParticipantsForChat(typingByChat, currentChatId);
@@ -2158,6 +2175,100 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             >
               <X className="w-4 h-4" />
             </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Container Minimalista Pós-Download no Canto Superior da Conversa (Abrir Arquivo / Abrir Pasta + Barra Decrescente) */}
+      <AnimatePresence>
+        {activeDownloadedPrompt && currentChatId && (
+          <motion.div
+            key={activeDownloadedPrompt.id}
+            initial={{ opacity: 0, y: -12, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.96 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            className="absolute top-9 left-2.5 right-2.5 z-35 bg-[#182229]/95 backdrop-blur-md border border-[#00A884]/40 rounded-[8px] shadow-[0_6px_20px_rgba(0,0,0,0.65)] overflow-hidden select-none"
+          >
+            <div className="px-2.5 py-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="w-6 h-6 rounded-full bg-[#00A884]/20 border border-[#00A884]/40 text-[#25D366] flex items-center justify-center shrink-0">
+                  <Check className="w-3.5 h-3.5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11.5px] font-medium text-[#E9EDEF] truncate leading-tight">
+                    {activeDownloadedPrompt.fileName}
+                  </div>
+                  <div className="text-[10px] text-[#8696A0] truncate leading-tight mt-0.5">
+                    Arquivo salvo — deseja abrir?
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.electronAPI?.openSavedFile?.(activeDownloadedPrompt.filePath);
+                    clearDownloadedFilePrompt(currentChatId);
+                  }}
+                  title="Abrir arquivo baixado"
+                  className="px-2 py-1 rounded-[5px] bg-[#00A884] hover:bg-[#008f6f] text-[#111B21] font-semibold text-[11px] flex items-center gap-1 transition-colors cursor-pointer active:scale-95"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Abrir</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.electronAPI?.showItemInFolder?.(activeDownloadedPrompt.filePath);
+                    clearDownloadedFilePrompt(currentChatId);
+                  }}
+                  title="Abrir pasta onde foi salvo"
+                  className="px-2 py-1 rounded-[5px] bg-[#202C33] hover:bg-[#2A3942] border border-white/10 text-[#E9EDEF] font-medium text-[11px] flex items-center gap-1 transition-colors cursor-pointer active:scale-95"
+                >
+                  <FolderOpen className="w-3 h-3 text-[#25D366]" />
+                  <span>Pasta</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => clearDownloadedFilePrompt(currentChatId)}
+                  title="Fechar aviso"
+                  className="p-1 rounded-full text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Barra decrescente de tempo */}
+            <div className="w-full h-[2.5px] bg-white/[0.06] overflow-hidden">
+              <motion.div
+                initial={{
+                  width: `${Math.max(
+                    0,
+                    Math.min(
+                      100,
+                      ((activeDownloadedPrompt.durationMs -
+                        (Date.now() - activeDownloadedPrompt.createdAt)) /
+                        activeDownloadedPrompt.durationMs) *
+                        100
+                    )
+                  )}%`,
+                }}
+                animate={{ width: '0%' }}
+                transition={{
+                  duration: Math.max(
+                    0.1,
+                    (activeDownloadedPrompt.durationMs -
+                      (Date.now() - activeDownloadedPrompt.createdAt)) /
+                      1000
+                  ),
+                  ease: 'linear',
+                }}
+                className="h-full bg-gradient-to-r from-[#00A884] to-[#25D366]"
+              />
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

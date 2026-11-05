@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Download, Loader2, Check } from 'lucide-react';
 import { AudioData, DEFAULT_AVATAR } from '../types/whatsapp';
 import { MessageCheckIcon } from './MessageCheckIcon';
+import { useBubbleStore } from '../store/useBubbleStore';
 import {
   useAudioPlaybackStore,
   getStoredPlaybackRate,
@@ -201,6 +202,9 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       if (res?.saved) {
         setSavedAudioSuccess(true);
         setTimeout(() => setSavedAudioSuccess(false), 2500);
+        if (chatId && res.filePath) {
+          useBubbleStore.getState().setDownloadedFilePrompt(chatId, res.filePath);
+        }
       }
     } finally {
       setIsSavingAudio(false);

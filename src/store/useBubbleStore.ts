@@ -7,6 +7,7 @@ import {
   ChatListSize,
   ChatSummary,
   ConnectionMode,
+  DownloadedFilePrompt,
   FormattedMessage,
   GroupParticipant,
   GroupMetadataInfo,
@@ -355,6 +356,7 @@ interface BubbleStoreState {
   groupMetadataByChat: Record<string, GroupMetadataInfo>;
   unreadBannerByChat: Record<string, UnreadBannerInfo | undefined>;
   typingByChat: Record<string, TypingParticipantInfo[]>;
+  downloadedFilePromptByChat: Record<string, DownloadedFilePrompt | undefined>;
   replyingTo: QuotedMessage | null;
   viewingImage: ViewingImageState | null;
   savedContacts: SavedContact[];
@@ -368,6 +370,8 @@ interface BubbleStoreState {
   setQrDataUrl: (qr: string | null) => void;
   setChats: (chats: ChatSummary[]) => void;
   setTypingByChat: (presenceByChat: Record<string, TypingParticipantInfo[]>) => void;
+  setDownloadedFilePrompt: (chatId: string, filePath: string, fileName?: string) => void;
+  clearDownloadedFilePrompt: (chatId: string) => void;
   applyRealWhatsAppChats: (chats: ChatSummary[]) => void;
   setMessagesForChat: (chatId: string, messages: FormattedMessage[]) => void;
   fetchGroupParticipants: (
@@ -582,6 +586,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   groupMetadataByChat: {},
   unreadBannerByChat: {},
   typingByChat: {},
+  downloadedFilePromptByChat: {},
   replyingTo: null,
   viewingImage: null,
   activeReactionDetailsMessage: null,
@@ -633,6 +638,39 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   setChats: (chats) => set({ chats }),
 
   setTypingByChat: (typingByChat) => set({ typingByChat: typingByChat || {} }),
+
+  setDownloadedFilePrompt: (chatId, filePath, fileName) => {
+    if (!chatId || !filePath) return;
+    const resolvedName =
+      fileName ||
+      filePath.split(/[\\/]/).pop() ||
+      'Arquivo baixado';
+    const promptId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const durationMs = 7000;
+    set((state) => ({
+      downloadedFilePromptByChat: {
+        ...state.downloadedFilePromptByChat,
+        [chatId]: {
+          id: promptId,
+          chatId,
+          filePath,
+          fileName: resolvedName,
+          createdAt: Date.now(),
+          durationMs,
+        },
+      },
+    }));
+  },
+
+  clearDownloadedFilePrompt: (chatId) => {
+    if (!chatId) return;
+    set((state) => {
+      if (!state.downloadedFilePromptByChat[chatId]) return state;
+      const next = { ...state.downloadedFilePromptByChat };
+      delete next[chatId];
+      return { downloadedFilePromptByChat: next };
+    });
+  },
 
   applyRealWhatsAppChats: (realChats) => {
     const {

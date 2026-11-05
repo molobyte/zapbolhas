@@ -122,6 +122,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:save-media-as', payload);
   },
 
+  openSavedFile: (filePath: string) => {
+    return ipcRenderer.invoke('wa:open-saved-file', filePath);
+  },
+
+  showItemInFolder: (filePath: string) => {
+    return ipcRenderer.invoke('wa:show-item-in-folder', filePath);
+  },
+
   openExternalImage: (dataUrl: string) => {
     return ipcRenderer.invoke('wa:open-external-image', dataUrl);
   },

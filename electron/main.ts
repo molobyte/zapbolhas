@@ -978,6 +978,32 @@ function registerIpcHandlers() {
     }
   );
 
+  ipcMain.handle('wa:open-saved-file', async (_event, filePath: string) => {
+    try {
+      if (!filePath || typeof filePath !== 'string' || !fs.existsSync(filePath)) {
+        return false;
+      }
+      const errMsg = await shell.openPath(filePath);
+      return !errMsg;
+    } catch (err) {
+      console.error('[main] Error opening saved file:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('wa:show-item-in-folder', async (_event, filePath: string) => {
+    try {
+      if (!filePath || typeof filePath !== 'string' || !fs.existsSync(filePath)) {
+        return false;
+      }
+      shell.showItemInFolder(filePath);
+      return true;
+    } catch (err) {
+      console.error('[main] Error showing item in folder:', err);
+      return false;
+    }
+  });
+
   ipcMain.handle('wa:open-external-image', async (_event, dataUrl: string) => {
     try {
       const match = /^data:(image|video)\/([a-zA-Z0-9+.-]+);base64,(.+)$/.exec(dataUrl);

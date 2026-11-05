@@ -61,6 +61,15 @@ export interface DocumentData {
   pageCount?: number;
 }
 
+export interface DownloadedFilePrompt {
+  id: string;
+  chatId: string;
+  filePath: string;
+  fileName: string;
+  createdAt: number;
+  durationMs: number;
+}
+
 export interface ReactionSender {
   id: string;
   name?: string;
@@ -380,6 +389,8 @@ export interface ElectronAPI {
     dataUrl?: string;
     defaultFilename?: string;
   }) => Promise<{ saved: boolean; filePath?: string; error?: string }>;
+  openSavedFile?: (filePath: string) => Promise<boolean>;
+  showItemInFolder?: (filePath: string) => Promise<boolean>;
   openExternalImage: (dataUrl: string) => Promise<boolean>;
   openExternalUrl?: (url: string) => Promise<boolean>;
   getSfxDataUrl?: (type: 'user' | 'group', preset?: string) => Promise<string | null>;

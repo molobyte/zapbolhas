@@ -117,6 +117,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       if (res?.saved) {
         setSavedFileSuccess(true);
         setTimeout(() => setSavedFileSuccess(false), 2500);
+        if (res.filePath) {
+          useBubbleStore.getState().setDownloadedFilePrompt(message.chatId, res.filePath);
+        }
       }
     } finally {
       setIsSavingFile(false);
