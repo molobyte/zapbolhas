@@ -2188,7 +2188,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.96 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="absolute top-9 left-2.5 right-2.5 z-35 bg-[#182229]/95 backdrop-blur-md border border-[#00A884]/40 rounded-[8px] shadow-[0_6px_20px_rgba(0,0,0,0.65)] overflow-hidden select-none"
+            className="absolute top-[40px] left-2.5 right-2.5 z-40 bg-[#182229] border border-[#00A884]/50 rounded-[8px] shadow-[0_8px_24px_rgba(0,0,0,0.85)] overflow-hidden select-none pointer-events-auto"
           >
             <div className="px-2.5 py-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0 flex-1">

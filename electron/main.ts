@@ -909,11 +909,27 @@ function registerIpcHandlers() {
         const downloadsDir = app.getPath('downloads');
         const defaultPath = path.join(downloadsDir, baseName);
 
-        const saveRes = await dialog.showSaveDialog({
-          title: 'Salvar arquivo como...',
-          defaultPath,
-          filters,
-        });
+        let saveRes: Electron.SaveDialogReturnValue;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.setAlwaysOnTop(true, 'normal');
+          try {
+            saveRes = await dialog.showSaveDialog(mainWindow, {
+              title: 'Salvar arquivo como...',
+              defaultPath,
+              filters,
+            });
+          } finally {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.setAlwaysOnTop(true, 'screen-saver');
+            }
+          }
+        } else {
+          saveRes = await dialog.showSaveDialog({
+            title: 'Salvar arquivo como...',
+            defaultPath,
+            filters,
+          });
+        }
 
         if (saveRes.canceled || !saveRes.filePath) {
           return { saved: false };
