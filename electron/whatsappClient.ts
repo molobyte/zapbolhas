@@ -362,6 +362,11 @@ function logPresenceDebug(msg: string) {
   try {
     const dir = app.isPackaged ? app.getPath('userData') : process.cwd();
     const p = path.join(dir, 'presence_debug.log');
+    try {
+      if (fs.existsSync(p) && fs.statSync(p).size > 512 * 1024) {
+        fs.writeFileSync(p, `[${new Date().toISOString()}] Log rotacionado\n`, 'utf8');
+      }
+    } catch {}
     fs.appendFileSync(p, `[${new Date().toISOString()}] ${msg}\n`, 'utf8');
   } catch {}
 }
@@ -6001,6 +6006,8 @@ export class WhatsAppService {
           return;
         }
 
+        w.__waPresenceObserverVersion = 5;
+
         // 1. Garante que a janela headless do Chromium seja sempre vista como visível e focada pelo WhatsApp Web
         try {
           document.hasFocus = () => true;
@@ -6089,25 +6096,70 @@ export class WhatsAppService {
                 (nop as any)._noopPatched = true;
                 Stream.markUnavailable = nop;
               }
+              try {
+                Stream.available = true;
+                Stream.uiActive = true;
+              } catch {}
               Stream.markAvailable?.();
             }
           } catch {}
         };
         ensureClientAvailable();
 
+        const normalizeWidStr = (raw: string): string => {
+          if (!raw) return '';
+          let s = raw.trim();
+          if (s.endsWith('@s.whatsapp.net')) {
+            s = s.slice(0, -'@s.whatsapp.net'.length) + '@c.us';
+          }
+          if (s.includes(':') && (s.endsWith('@c.us') || s.endsWith('@lid'))) {
+            const atIdx = s.lastIndexOf('@');
+            if (atIdx > 0) {
+              const userPart = s.slice(0, atIdx).split(':')[0];
+              const serverPart = s.slice(atIdx + 1);
+              if (userPart && serverPart) {
+                s = `${userPart}@${serverPart}`;
+              }
+            }
+          }
+          return s;
+        };
+
         const serializeId = (val: any): string => {
           if (!val) return '';
-          if (typeof val === 'string') return val;
-          if (typeof val._serialized === 'string' && val._serialized) return val._serialized;
+          if (typeof val === 'string') return normalizeWidStr(val);
+          if (typeof val._serialized === 'string' && val._serialized) {
+            return normalizeWidStr(val._serialized);
+          }
           if (val.id && typeof val.id === 'object' && typeof val.id._serialized === 'string') {
-            return val.id._serialized;
+            return normalizeWidStr(val.id._serialized);
           }
           if (typeof val.toString === 'function') {
             const s = val.toString();
-            if (s && s !== '[object Object]') return s;
+            if (s && s !== '[object Object]') return normalizeWidStr(s);
           }
           if (typeof val.user === 'string' && typeof val.server === 'string') {
-            return `${val.user}@${val.server}`;
+            return normalizeWidStr(`${val.user}@${val.server}`);
+          }
+          return '';
+        };
+
+        const classifyState = (val: any): 'typing' | 'recording' | 'paused' | '' => {
+          if (!val || typeof val !== 'string') return '';
+          const low = val.trim().toLowerCase();
+          if (low === 'recording' || low === 'recording_audio' || low === 'audio') {
+            return 'recording';
+          }
+          if (low === 'typing' || low === 'composing') {
+            return 'typing';
+          }
+          if (
+            low === 'paused' ||
+            low === 'idle' ||
+            low === 'available' ||
+            low === 'unavailable'
+          ) {
+            return 'paused';
           }
           return '';
         };
@@ -6384,7 +6436,7 @@ export class WhatsAppService {
               Array<{ id: string; name?: string; state: 'typing' | 'recording' }>
             > = {};
 
-            // Constrói mapa bidirecional @lid <-> @c.us a partir de ContactCol e ChatCol
+            // Constrói mapa bidirecional @lid <-> @c.us a partir de ContactCol e ChatCol (incluindo accountLid e presence.id)
             const aliasMap = new Map<string, Set<string>>();
             const linkIds = (idA: string, idB: string) => {
               if (!idA || !idB || idA === idB) return;
@@ -6411,6 +6463,12 @@ export class WhatsAppService {
               const uc = unproxy(c);
               const cid = serializeId(c?.id) || serializeId(uc?.id);
               if (cid && !cid.endsWith('@g.us')) {
+                const accLid = serializeId(c?.accountLid) || serializeId(uc?.accountLid);
+                const presId = serializeId(c?.presence?.id) || serializeId(uc?.presence?.id);
+                if (accLid) linkIds(cid, accLid);
+                if (presId) linkIds(cid, presId);
+                if (accLid && presId) linkIds(accLid, presId);
+
                 const contact = c?.contact || uc?.contact;
                 const uContact = unproxy(contact);
                 const clid = serializeId(contact?.lid) || serializeId(uContact?.lid);
@@ -6495,43 +6553,69 @@ export class WhatsAppService {
               let statesList: any[] = [];
               if (csCollection) {
                 if (typeof csCollection.getModelsArray === 'function') {
-                  statesList = csCollection.getModelsArray();
+                  statesList = [...csCollection.getModelsArray()];
                 } else if (typeof uCsCol?.getModelsArray === 'function') {
-                  statesList = uCsCol.getModelsArray();
+                  statesList = [...uCsCol.getModelsArray()];
                 } else if (Array.isArray(csCollection._models)) {
-                  statesList = csCollection._models;
+                  statesList = [...csCollection._models];
                 } else if (Array.isArray(uCsCol?._models)) {
-                  statesList = uCsCol._models;
+                  statesList = [...uCsCol._models];
                 } else if (Array.isArray(csCollection.models)) {
-                  statesList = csCollection.models;
+                  statesList = [...csCollection.models];
                 } else if (Array.isArray(csCollection)) {
-                  statesList = csCollection;
+                  statesList = [...csCollection];
                 }
               }
-              if (statesList.length === 0) {
-                const singleCs = pres.chatstate || uPres?.chatstate;
-                if (singleCs) statesList = [singleCs];
+
+              // Em conversas 1:1, o WhatsApp Web armazena o estado em pres.chatstate (singular)
+              const singleCs = pres.chatstate || uPres?.chatstate;
+              if (singleCs && !statesList.includes(singleCs)) {
+                statesList.push(singleCs);
               }
 
               for (const cs of statesList) {
                 if (!cs) continue;
                 const uCs = unproxy(cs);
                 const rawType = extractCsType(cs);
-                if (rawType === 'composing' || rawType === 'recording') {
-                  const csPartId =
-                    serializeId(cs.id) || serializeId(uCs?.id) || rawPresId;
-                  addActiveEntry(rawPresId, csPartId, cs.id || uCs?.id || rawPresId, rawType);
-                } else if (rawType === 'paused' || rawType === 'idle' || rawType === 'available') {
-                  const csPartId =
-                    serializeId(cs.id) || serializeId(uCs?.id) || rawPresId;
+                const kind = classifyState(rawType);
+                const csPartId = serializeId(cs.id) || serializeId(uCs?.id) || rawPresId;
+                if (kind === 'typing' || kind === 'recording') {
+                  addActiveEntry(
+                    rawPresId,
+                    csPartId,
+                    cs.id || uCs?.id || rawPresId,
+                    kind === 'recording' ? 'recording' : 'composing'
+                  );
+                } else if (kind === 'paused') {
                   directChatStates.delete(`${rawPresId}::${csPartId}`);
                 }
               }
 
+              // Em grupos, WAWebPresenceModel também mantém typingUserIds e recordingUserIds
+              const typingIds = pres.typingUserIds || uPres?.typingUserIds;
+              if (Array.isArray(typingIds)) {
+                for (const uid of typingIds) {
+                  const pId = serializeId(uid);
+                  if (pId) addActiveEntry(rawPresId, pId, uid, 'composing');
+                }
+              }
+              const recordingIds = pres.recordingUserIds || uPres?.recordingUserIds;
+              if (Array.isArray(recordingIds)) {
+                for (const uid of recordingIds) {
+                  const pId = serializeId(uid);
+                  if (pId) addActiveEntry(rawPresId, pId, uid, 'recording');
+                }
+              }
+
               // Também verifica se o próprio modelo Presence expõe o chatstate diretamente
-              const directPresType = extractCsType(pres);
-              if (directPresType === 'composing' || directPresType === 'recording') {
-                addActiveEntry(rawPresId, rawPresId, pres.id || rawPresId, directPresType);
+              const directKind = classifyState(extractCsType(pres));
+              if (directKind === 'typing' || directKind === 'recording') {
+                addActiveEntry(
+                  rawPresId,
+                  rawPresId,
+                  pres.id || rawPresId,
+                  directKind === 'recording' ? 'recording' : 'composing'
+                );
               }
             }
 
@@ -6551,13 +6635,17 @@ export class WhatsAppService {
               let matchedChat = ChatCol?.get?.(rawPresId) || null;
 
               if (!rawPresId.endsWith('@g.us')) {
+                const visitedAliases = new Set<string>();
                 // Expande aliases conhecidos (@lid <-> @c.us)
                 const expandAliases = (seedId: string) => {
+                  if (!seedId || visitedAliases.has(seedId)) return;
+                  visitedAliases.add(seedId);
                   const directAliases = aliasMap.get(seedId);
                   if (directAliases) {
                     for (const al of Array.from(directAliases)) {
                       targetChatIds.add(al);
                       if (!matchedChat) matchedChat = ChatCol?.get?.(al) || null;
+                      expandAliases(al);
                     }
                   }
                 };
@@ -6566,6 +6654,21 @@ export class WhatsAppService {
                 try {
                   const widObj = widFactory?.createWid?.(rawPresId);
                   if (widObj) {
+                    if (typeof ChatCol?.getChatByAccountLid === 'function') {
+                      try {
+                        const byLid = ChatCol.getChatByAccountLid(widObj);
+                        if (byLid) {
+                          if (!matchedChat) matchedChat = byLid;
+                          const byLidId =
+                            serializeId(byLid.id) || serializeId(unproxy(byLid)?.id);
+                          if (byLidId) {
+                            targetChatIds.add(byLidId);
+                            expandAliases(byLidId);
+                          }
+                        }
+                      } catch {}
+                    }
+
                     const pnWid = lidUtils?.toPn?.(widObj);
                     const pnStr = serializeId(pnWid);
                     if (pnStr) {
@@ -6686,293 +6789,6 @@ export class WhatsAppService {
           setTimeout(collectPresenceSnapshot, 20);
         };
 
-        // 3. Hook direto nos módulos internos de ChatState / Presence do WhatsApp Web
-        if (!w.__waChatStateModulesHookedV4) {
-          w.__waChatStateModulesHookedV4 = true;
-          try {
-            const recordIncomingState = (
-              rawChat: any,
-              rawParticipant: any,
-              rawState: any,
-              sourceLabel: string
-            ) => {
-              const sStr = String(rawState || '').toLowerCase();
-              if (
-                sStr !== 'composing' &&
-                sStr !== 'recording' &&
-                sStr !== 'paused' &&
-                sStr !== 'idle' &&
-                sStr !== 'typing'
-              ) {
-                return;
-              }
-              const chatId = serializeId(rawChat);
-              if (!chatId || chatId === 'status@broadcast' || chatId.endsWith('@newsletter')) {
-                return;
-              }
-              const partId = serializeId(rawParticipant) || chatId;
-              const dKey = `${chatId}::${partId}`;
-              debugLog(`Hook[${sourceLabel}]: chat=${chatId} part=${partId} state=${sStr}`);
-              if (sStr === 'composing' || sStr === 'typing' || sStr === 'recording') {
-                const normType: 'composing' | 'recording' =
-                  sStr === 'recording' ? 'recording' : 'composing';
-                directChatStates.set(dKey, {
-                  chatId,
-                  partId,
-                  rawType: normType,
-                  ts: Date.now(),
-                });
-                activeSinceMap.set(`${chatId}::${partId}::${normType}`, Date.now());
-              } else {
-                directChatStates.delete(dKey);
-              }
-              scheduleEmit();
-            };
-
-            const inspectAndHookModule = (modName: string, mod: any) => {
-              if (!mod || (typeof mod !== 'object' && typeof mod !== 'function')) return;
-              for (const key of Object.keys(mod)) {
-                if (
-                  key.startsWith('sendChatState') ||
-                  key.startsWith('sendPresence') ||
-                  key === 'markAvailable' ||
-                  key === 'markUnavailable'
-                ) {
-                  continue;
-                }
-                const orig = mod[key];
-                if (typeof orig === 'function' && !orig._waPresenceHookedV4) {
-                  debugLog(
-                    `ORIG_FN[${modName}.${key}] (len=${orig.length}): ${String(orig)
-                      .slice(0, 1000)
-                      .replace(/\s+/g, ' ')}`
-                  );
-                  const wrapped = function (this: any, ...args: any[]) {
-                    try {
-                      debugLog(
-                        `CALL[${modName}.${key}]: args=${args
-                          .map(
-                            (a: any) =>
-                              serializeId(a) ||
-                              (typeof a === 'object' ? JSON.stringify(a).slice(0, 100) : String(a))
-                          )
-                          .join(', ')}`
-                      );
-
-                      if (
-                        key === 'markComposing' ||
-                        key === 'markRecording' ||
-                        key === 'markPaused'
-                      ) {
-                        const targetChat = serializeId(args[0]);
-                        const targetPart = serializeId(args[1]) || targetChat;
-                        const sType =
-                          key === 'markRecording'
-                            ? 'recording'
-                            : key === 'markPaused'
-                            ? 'paused'
-                            : 'composing';
-                        recordIncomingState(targetChat, targetPart, sType, `${modName}.${key}`);
-                      } else if (
-                        key === 'handleIndividualChatState' ||
-                        key === 'handleGroupChatState'
-                      ) {
-                        let foundChatId = '';
-                        let foundPartId = '';
-                        let foundState: 'composing' | 'recording' | 'paused' | '' = '';
-
-                        for (const a of args) {
-                          if (!a) continue;
-                          if (typeof a === 'string') {
-                            const low = a.toLowerCase();
-                            if (low === 'composing' || low === 'recording' || low === 'paused') {
-                              foundState = low;
-                            } else {
-                              const s = serializeId(a);
-                              if (s) {
-                                if (!foundChatId) foundChatId = s;
-                                else if (!foundPartId) foundPartId = s;
-                              }
-                            }
-                          } else if (typeof a === 'object') {
-                            const cs = extractCsType(a);
-                            if (cs === 'composing' || cs === 'recording' || cs === 'paused') {
-                              foundState = cs;
-                            }
-                            const cid =
-                              serializeId(a.chatId) ||
-                              serializeId(a.from) ||
-                              serializeId(a.id) ||
-                              serializeId(a.wid);
-                            if (cid) {
-                              if (!foundChatId) foundChatId = cid;
-                            }
-                            const pid =
-                              serializeId(a.participant) ||
-                              serializeId(a.author);
-                            if (pid) foundPartId = pid;
-                          }
-                        }
-
-                        if (foundChatId && foundState) {
-                          recordIncomingState(
-                            foundChatId,
-                            foundPartId || foundChatId,
-                            foundState,
-                            `${modName}.${key}`
-                          );
-                        }
-                      }
-
-                      for (const arg of args) {
-                        if (!arg) continue;
-                        if (typeof arg === 'object') {
-                          const t = extractCsType(arg);
-                          const cId =
-                            serializeId(arg.chatId) ||
-                            serializeId(arg.from) ||
-                            serializeId(arg.id) ||
-                            serializeId(arg.wid);
-                          const pId =
-                            serializeId(arg.participant) ||
-                            serializeId(arg.author) ||
-                            cId;
-                          if (
-                            cId &&
-                            (t === 'composing' || t === 'recording' || t === 'paused')
-                          ) {
-                            recordIncomingState(cId, pId, t, `${modName}.${key}`);
-                          }
-                        } else if (typeof arg === 'string') {
-                          const low = arg.toLowerCase();
-                          if (
-                            low === 'composing' ||
-                            low === 'recording' ||
-                            low === 'paused'
-                          ) {
-                            const firstWid = args.find(
-                              (a) => a && typeof a === 'object' && serializeId(a)
-                            );
-                            if (firstWid) {
-                              recordIncomingState(firstWid, firstWid, low, `${modName}.${key}`);
-                            }
-                          }
-                        }
-                      }
-                    } catch (callErr: any) {
-                      debugLog(
-                        `Erro no hook de ${modName}.${key}: ${callErr?.message || String(callErr)}`
-                      );
-                    }
-                    const res = orig.apply(this, args);
-                    scheduleEmit();
-                    return res;
-                  };
-                  Object.assign(wrapped, orig);
-                  (wrapped as any)._waPresenceHookedV4 = true;
-                  try {
-                    mod[key] = wrapped;
-                  } catch (assignErr: any) {
-                    debugLog(
-                      `Falha ao atribuir hook ${modName}.${key}: ${
-                        assignErr?.message || String(assignErr)
-                      }`
-                    );
-                  }
-                }
-              }
-            };
-
-            const candidateModuleNames = new Set<string>([
-              'WAWebHandleChatState',
-              'WAWebChatStateBridge',
-              'WAWebChatPresence',
-              'WAWebPresenceChatAction',
-              'WAWebPresenceModel',
-              'WAWebChatStateCollection',
-              'WAWebContactPresenceBridge',
-              'WAWebPresenceBridge',
-              'WAWebSendPresenceSubscriptionJob',
-              'WAWebPresenceUtils',
-            ]);
-
-            try {
-              const r = w.require;
-              if (r) {
-                const mList = r.m ? Object.keys(r.m) : (r.modulesMap ? Object.keys(r.modulesMap) : []);
-                for (const k of mList) {
-                  if (/Presence|ChatState|HandlePresence|ContactPresence/i.test(k)) {
-                    candidateModuleNames.add(k);
-                  }
-                }
-              }
-            } catch {}
-
-            const modulesMap = w.__debug?.modulesMap;
-            if (modulesMap && typeof modulesMap === 'object') {
-              for (const k of Object.keys(modulesMap)) {
-                if (/ChatState|ChatPresence|HandlePresence|ContactPresence/i.test(k)) {
-                  candidateModuleNames.add(k);
-                }
-              }
-            }
-
-            const foundMods: string[] = [];
-            for (const mName of Array.from(candidateModuleNames)) {
-              const m = safeReq(mName);
-              if (m) {
-                foundMods.push(`${mName}[${Object.keys(m).join(',')}]`);
-                inspectAndHookModule(mName, m);
-              }
-            }
-            debugLog(`Módulos de presença inspecionados: ${foundMods.join(' | ')}`);
-
-            try {
-              const sendPresJob = safeReq('WAWebSendPresenceSubscriptionJob');
-              debugLog(`WAWebSendPresenceSubscriptionJob keys: ${Object.keys(sendPresJob || {}).join(',')}`);
-              for (const k of Object.keys(sendPresJob || {})) {
-                if (typeof sendPresJob[k] === 'function') {
-                  debugLog(`FN[WAWebSendPresenceSubscriptionJob.${k}]: ${String(sendPresJob[k]).slice(0, 1000).replace(/\s+/g, ' ')}`);
-                }
-              }
-            } catch (e: any) { debugLog(`err sendPresJob: ${e?.message}`); }
-
-            try {
-              const lidMod = safeReq('WAWebLidMigrationUtils');
-              debugLog(`WAWebLidMigrationUtils keys: ${Object.keys(lidMod || {}).join(',')}`);
-            } catch (e: any) { debugLog(`err lidMod: ${e?.message}`); }
-
-            try {
-              const cmdMod = safeReq('WAWebCmd')?.Cmd;
-              debugLog(`WAWebCmd.Cmd keys: ${Object.keys(cmdMod || {}).join(',')}`);
-            } catch (e: any) { debugLog(`err cmd: ${e?.message}`); }
-
-            if (w.WWebJS?.injectToFunction) {
-              const injectAction = (fn: string, state: 'composing' | 'recording' | 'paused') => {
-                try {
-                  w.WWebJS.injectToFunction(
-                    { module: 'WAWebPresenceChatAction', function: fn },
-                    (m: any, orig: any, ...args: any[]) => {
-                      try {
-                        const cId = serializeId(args[0]);
-                        const pId = serializeId(args[1]) || cId;
-                        debugLog(`INJECT[WAWebPresenceChatAction.${fn}]: chat=${cId} part=${pId} state=${state}`);
-                        recordIncomingState(cId, pId, state, `WAWebPresenceChatAction.${fn}`);
-                      } catch {}
-                      return orig.apply(m, args);
-                    }
-                  );
-                } catch {}
-              };
-              injectAction('markComposing', 'composing');
-              injectAction('markRecording', 'recording');
-              injectAction('markPaused', 'paused');
-            }
-          } catch (hookErr: any) {
-            debugLog(`Erro ao fazer hook nos módulos: ${hookErr?.message || String(hookErr)}`);
-          }
-        }
-
         const boundObjects = new WeakSet<object>();
 
         const bindPresenceModel = (rawPres: any) => {
@@ -6988,13 +6804,52 @@ export class WhatsAppService {
               boundObjects.add(pres);
               if (typeof pres.on === 'function') {
                 try {
-                  pres.on('all change change:chatstate change:type', (_evName: any) => {
-                    scheduleEmit();
-                  });
+                  pres.on(
+                    'all change change:chatstate change:type change:typingUserIds change:recordingUserIds',
+                    () => {
+                      scheduleEmit();
+                    }
+                  );
                 } catch {}
               }
             }
 
+            // Binda o modelo singular pres.chatstate (usado em conversas 1:1)
+            const csSingles = [pres.chatstate, unproxy(pres.chatstate)].filter(
+              (x) => x && typeof x === 'object'
+            );
+            for (const csSingle of csSingles) {
+              if (!boundObjects.has(csSingle)) {
+                boundObjects.add(csSingle);
+                if (typeof csSingle.on === 'function') {
+                  try {
+                    csSingle.on('all change change:type', () => {
+                      try {
+                        const rawPresId = serializeId(pres.id);
+                        const csPartId = serializeId(csSingle?.id) || rawPresId;
+                        const kind = classifyState(extractCsType(csSingle));
+                        if (rawPresId && (kind === 'typing' || kind === 'recording')) {
+                          const normRaw: 'composing' | 'recording' =
+                            kind === 'recording' ? 'recording' : 'composing';
+                          activeSinceMap.set(`${rawPresId}::${csPartId}::${normRaw}`, Date.now());
+                          directChatStates.set(`${rawPresId}::${csPartId}`, {
+                            chatId: rawPresId,
+                            partId: csPartId,
+                            rawType: normRaw,
+                            ts: Date.now(),
+                          });
+                        } else if (rawPresId && kind === 'paused') {
+                          directChatStates.delete(`${rawPresId}::${csPartId}`);
+                        }
+                      } catch {}
+                      scheduleEmit();
+                    });
+                  } catch {}
+                }
+              }
+            }
+
+            // Binda a coleção pres.chatstates (usada em grupos)
             const csCols = [pres.chatstates, unproxy(pres.chatstates)].filter(
               (x) => x && typeof x === 'object'
             );
@@ -7007,21 +6862,19 @@ export class WhatsAppService {
                       try {
                         const rawPresId = serializeId(pres.id);
                         const csPartId = serializeId(csModel?.id) || rawPresId;
-                        const rawType = extractCsType(csModel);
-                        if (rawPresId && (rawType === 'composing' || rawType === 'recording')) {
-                          activeSinceMap.set(`${rawPresId}::${csPartId}::${rawType}`, Date.now());
+                        const kind = classifyState(extractCsType(csModel));
+                        if (rawPresId && (kind === 'typing' || kind === 'recording')) {
+                          const normRaw: 'composing' | 'recording' =
+                            kind === 'recording' ? 'recording' : 'composing';
+                          activeSinceMap.set(`${rawPresId}::${csPartId}::${normRaw}`, Date.now());
                           directChatStates.set(`${rawPresId}::${csPartId}`, {
                             chatId: rawPresId,
                             partId: csPartId,
-                            rawType,
+                            rawType: normRaw,
                             ts: Date.now(),
                           });
-                          debugLog(
-                            `Evento csCol (${rawPresId}): part=${csPartId} type=${rawType}`
-                          );
-                        } else if (rawPresId && rawType === 'paused') {
+                        } else if (rawPresId && kind === 'paused') {
                           directChatStates.delete(`${rawPresId}::${csPartId}`);
-                          debugLog(`Evento csCol paused (${rawPresId}): part=${csPartId}`);
                         }
                       } catch {}
                       scheduleEmit();
@@ -7032,6 +6885,226 @@ export class WhatsAppService {
             }
           }
         };
+
+        const ensurePresenceModelInCollection = (widOrStr: any) => {
+          if (!widOrStr || !PresenceCol) return null;
+          const sid = serializeId(widOrStr);
+          if (!sid || sid === 'status@broadcast' || sid.endsWith('@newsletter')) return null;
+          try {
+            const widObj =
+              typeof widOrStr === 'object' && widOrStr._serialized
+                ? widOrStr
+                : widFactory?.createWid?.(sid) || widOrStr;
+            let pm = PresenceCol.get?.(widObj) || PresenceCol.get?.(sid);
+            if (!pm && typeof PresenceCol.gadd === 'function' && widObj) {
+              pm = PresenceCol.gadd(widObj);
+            }
+            if (pm) {
+              bindPresenceModel(pm);
+              try {
+                pm.chatActive = true;
+                const upm = unproxy(pm);
+                if (upm) upm.chatActive = true;
+              } catch {}
+            }
+            return pm;
+          } catch {
+            return null;
+          }
+        };
+
+        // 3. Hook direto no pipeline real de <chatstate> do WhatsApp Web:
+        //    - WAWebBackendApi.frontendFireAndForget("changePresenceHandler", { id, type, participant })
+        //    - WAWebPresenceBridgeApi.PresenceBridgeApi.changePresenceHandler({ id, type, participant })
+        //    - WAWebCommsHandleLoggedInStanza.handleLoggedInStanza (stanza.tag === "chatstate")
+        if (!w.__waChatStateModulesHookedV5) {
+          w.__waChatStateModulesHookedV5 = true;
+          try {
+            const recordIncomingState = (
+              rawChat: any,
+              rawParticipant: any,
+              rawState: any,
+              sourceLabel: string
+            ) => {
+              const kind = classifyState(rawState);
+              if (!kind) return;
+              const chatId = serializeId(rawChat);
+              if (!chatId || chatId === 'status@broadcast' || chatId.endsWith('@newsletter')) {
+                return;
+              }
+              ensurePresenceModelInCollection(chatId);
+              const partId = serializeId(rawParticipant) || chatId;
+              const dKey = `${chatId}::${partId}`;
+              debugLog(`Hook[${sourceLabel}]: chat=${chatId} part=${partId} state=${kind}`);
+              if (kind === 'typing' || kind === 'recording') {
+                const normType: 'composing' | 'recording' =
+                  kind === 'recording' ? 'recording' : 'composing';
+                directChatStates.set(dKey, {
+                  chatId,
+                  partId,
+                  rawType: normType,
+                  ts: Date.now(),
+                });
+                activeSinceMap.set(`${chatId}::${partId}::${normType}`, Date.now());
+              } else {
+                directChatStates.delete(dKey);
+              }
+              scheduleEmit();
+            };
+
+            // 3.1 Hook em WAWebBackendApi.frontendFireAndForget
+            const backendApi = safeReq('WAWebBackendApi');
+            if (
+              backendApi &&
+              typeof backendApi.frontendFireAndForget === 'function' &&
+              !backendApi.frontendFireAndForget._waPresenceHookedV5
+            ) {
+              const origFire = backendApi.frontendFireAndForget;
+              const wrappedFire = function (this: any, ...args: any[]) {
+                try {
+                  if (
+                    args[0] === 'changePresenceHandler' &&
+                    args[1] &&
+                    typeof args[1] === 'object'
+                  ) {
+                    const p = args[1];
+                    recordIncomingState(
+                      p.id,
+                      p.participant || p.id,
+                      p.type,
+                      'WAWebBackendApi.changePresenceHandler'
+                    );
+                  }
+                } catch {}
+                return origFire.apply(this, args);
+              };
+              Object.assign(wrappedFire, origFire);
+              (wrappedFire as any)._waPresenceHookedV5 = true;
+              try {
+                backendApi.frontendFireAndForget = wrappedFire;
+              } catch {}
+            }
+
+            // 3.2 Hook em WAWebPresenceBridgeApi.PresenceBridgeApi.changePresenceHandler
+            const presBridgeApiMod = safeReq('WAWebPresenceBridgeApi');
+            const bridgeTargets = [
+              presBridgeApiMod?.PresenceBridgeApi,
+              presBridgeApiMod,
+            ].filter((x) => x && typeof x === 'object');
+            for (const bt of bridgeTargets) {
+              if (
+                typeof bt.changePresenceHandler === 'function' &&
+                !bt.changePresenceHandler._waPresenceHookedV5
+              ) {
+                const origCh = bt.changePresenceHandler;
+                const wrappedCh = function (this: any, ...args: any[]) {
+                  try {
+                    const p = args[0];
+                    if (p && typeof p === 'object' && p.id) {
+                      recordIncomingState(
+                        p.id,
+                        p.participant || p.id,
+                        p.type,
+                        'PresenceBridgeApi.changePresenceHandler'
+                      );
+                    }
+                  } catch {}
+                  return origCh.apply(this, args);
+                };
+                Object.assign(wrappedCh, origCh);
+                (wrappedCh as any)._waPresenceHookedV5 = true;
+                try {
+                  bt.changePresenceHandler = wrappedCh;
+                } catch {}
+              }
+            }
+
+            // 3.3 Hook em WAWebCommsHandleLoggedInStanza.handleLoggedInStanza para capturar a stanza <chatstate> bruta
+            const stanzaMod = safeReq('WAWebCommsHandleLoggedInStanza');
+            if (
+              stanzaMod &&
+              typeof stanzaMod.handleLoggedInStanza === 'function' &&
+              !stanzaMod.handleLoggedInStanza._waPresenceHookedV5
+            ) {
+              const origStanza = stanzaMod.handleLoggedInStanza;
+              const wrappedStanza = function (this: any, ...args: any[]) {
+                try {
+                  const stanza = args[0];
+                  if (stanza && stanza.tag === 'chatstate') {
+                    const fromId = serializeId(stanza.attrs?.from);
+                    const partId = serializeId(stanza.attrs?.participant) || fromId;
+                    let stanzaState = '';
+                    const children = Array.isArray(stanza.content) ? stanza.content : [];
+                    for (const ch of children) {
+                      if (!ch || typeof ch !== 'object') continue;
+                      if (ch.tag === 'composing') {
+                        stanzaState =
+                          ch.attrs?.media === 'audio' ? 'recording_audio' : 'typing';
+                        break;
+                      } else if (ch.tag === 'paused' || ch.tag === 'idle') {
+                        stanzaState = 'paused';
+                        break;
+                      }
+                    }
+                    if (fromId && stanzaState) {
+                      recordIncomingState(
+                        fromId,
+                        partId,
+                        stanzaState,
+                        'handleLoggedInStanza.chatstate'
+                      );
+                    }
+                  }
+                } catch {}
+                return origStanza.apply(this, args);
+              };
+              Object.assign(wrappedStanza, origStanza);
+              (wrappedStanza as any)._waPresenceHookedV5 = true;
+              try {
+                stanzaMod.handleLoggedInStanza = wrappedStanza;
+              } catch {}
+            }
+
+            // 3.4 Hook em WAWebPresenceChatAction (markComposing / markRecording / markPaused)
+            if (presenceChatAction) {
+              for (const fnName of ['markComposing', 'markRecording', 'markPaused'] as const) {
+                const origFn = presenceChatAction[fnName];
+                if (typeof origFn === 'function' && !origFn._waPresenceHookedV5) {
+                  const sType =
+                    fnName === 'markRecording'
+                      ? 'recording'
+                      : fnName === 'markPaused'
+                      ? 'paused'
+                      : 'typing';
+                  const wrappedFn = function (this: any, ...args: any[]) {
+                    try {
+                      const cId = serializeId(args[0]);
+                      const pId = serializeId(args[1]) || cId;
+                      if (cId) {
+                        recordIncomingState(
+                          cId,
+                          pId,
+                          sType,
+                          `WAWebPresenceChatAction.${fnName}`
+                        );
+                      }
+                    } catch {}
+                    return origFn.apply(this, args);
+                  };
+                  Object.assign(wrappedFn, origFn);
+                  (wrappedFn as any)._waPresenceHookedV5 = true;
+                  try {
+                    presenceChatAction[fnName] = wrappedFn;
+                  } catch {}
+                }
+              }
+            }
+
+            debugLog('Hooks V5 de presença instalados com sucesso');
+          } catch (hookErr: any) {
+            debugLog(`Erro ao instalar hooks V5: ${hookErr?.message || String(hookErr)}`);
+          }
+        }
 
         if (PresenceCol) {
           const uPresCol = unproxy(PresenceCol);
@@ -7083,6 +7156,10 @@ export class WhatsAppService {
         if (!w.__waTrackedPresenceChatIds) {
           w.__waTrackedPresenceChatIds = new Set<string>();
         }
+        if (!w.__waPresenceSubTimestampByWid) {
+          w.__waPresenceSubTimestampByWid = new Map<string, number>();
+        }
+        const subTimestampByWid: Map<string, number> = w.__waPresenceSubTimestampByWid;
 
         const subscribeWidPresence = (widOrStr: any) => {
           if (!widOrStr) return;
@@ -7094,139 +7171,122 @@ export class WhatsAppService {
               : widFactory?.createWid?.(sid) || widOrStr;
           if (!wid) return;
 
+          // Garante que o modelo exista em PresenceCollection e esteja bindado
+          const pm = ensurePresenceModelInCollection(wid);
+
           const isGroup = sid.endsWith('@g.us');
           const isLid = sid.endsWith('@lid');
           const isPn = sid.endsWith('@c.us');
-          const contactPresBridge = safeReq('WAWebContactPresenceBridge');
 
-          if (contactPresBridge) {
-            if (isGroup && typeof contactPresBridge.subscribeGroupPresence === 'function') {
-              try {
-                const res = contactPresBridge.subscribeGroupPresence(wid);
-                res?.catch?.((err: any) => {
-                  debugLog(`subscribeGroupPresence erro (${sid}): ${err?.message || String(err)}`);
-                });
-              } catch (err: any) {
-                debugLog(`subscribeGroupPresence throw (${sid}): ${err?.message || String(err)}`);
-              }
-            } else if (isLid && typeof contactPresBridge.subscribeUserPresence === 'function') {
-              try {
-                const res = contactPresBridge.subscribeUserPresence(wid);
-                res?.catch?.((err: any) => {
-                  debugLog(`subscribeUserPresence erro (${sid}): ${err?.message || String(err)}`);
-                });
-              } catch (err: any) {
-                debugLog(`subscribeUserPresence throw (${sid}): ${err?.message || String(err)}`);
-              }
-            } else if (isPn) {
-              // Para contatos com número de telefone (@c.us), o WhatsApp Web exige o LID do contato
-              let foundLidStr = '';
-              const directContact = ContactCol?.get?.(wid) || ContactCol?.get?.(sid);
+          // Se for @c.us, descobre e garante o modelo para o @lid correspondente (pois o WhatsApp Web processa presença 1:1 pelo LID)
+          if (isPn) {
+            let foundLidStr = '';
+            const chatModel = ChatCol?.get?.(wid) || ChatCol?.get?.(sid);
+            const uChatModel = unproxy(chatModel);
+            const chatAccLid =
+              serializeId(chatModel?.accountLid) ||
+              serializeId(uChatModel?.accountLid) ||
+              serializeId(chatModel?.presence?.id) ||
+              serializeId(uChatModel?.presence?.id);
+            if (chatAccLid && chatAccLid.endsWith('@lid')) {
+              foundLidStr = chatAccLid;
+            }
+
+            if (!foundLidStr) {
+              const directContact =
+                chatModel?.contact ||
+                uChatModel?.contact ||
+                ContactCol?.get?.(wid) ||
+                ContactCol?.get?.(sid);
               const uDirect = unproxy(directContact);
               const directLid = serializeId(directContact?.lid) || serializeId(uDirect?.lid);
               if (directLid && directLid.endsWith('@lid')) {
                 foundLidStr = directLid;
               }
+            }
 
-              if (!foundLidStr && ContactCol?.getModelsArray) {
-                const num = sid.split('@')[0].replace(/\D/g, '');
-                for (const cm of ContactCol.getModelsArray()) {
-                  const ucm = unproxy(cm);
-                  const cid = serializeId(cm?.id) || serializeId(ucm?.id);
-                  const clid = serializeId(cm?.lid) || serializeId(ucm?.lid);
-                  const cpn = serializeId(cm?.phoneNumber) || serializeId(ucm?.phoneNumber);
-                  if (clid && clid.endsWith('@lid')) {
-                    if (cid === sid || cpn === sid || (num && (cid.includes(num) || cpn.includes(num)))) {
-                      foundLidStr = clid;
-                      break;
-                    }
+            if (!foundLidStr && lidUtils?.toLid) {
+              try {
+                const lRes = lidUtils.toLid(wid);
+                if (lRes && typeof lRes.then === 'function') {
+                  lRes
+                    .then((lw: any) => {
+                      const lStr = serializeId(lw);
+                      if (lStr && lStr.endsWith('@lid')) {
+                        subscribeWidPresence(lw);
+                      }
+                    })
+                    .catch(() => {});
+                } else if (lRes) {
+                  const lStr = serializeId(lRes);
+                  if (lStr && lStr.endsWith('@lid')) foundLidStr = lStr;
+                }
+              } catch {}
+            }
+
+            if (!foundLidStr && apiContact?.getAlternateUserWid) {
+              try {
+                const aRes = apiContact.getAlternateUserWid(wid);
+                const aStr = serializeId(aRes);
+                if (aStr && aStr.endsWith('@lid')) foundLidStr = aStr;
+              } catch {}
+            }
+
+            if (!foundLidStr && ContactCol?.getModelsArray) {
+              const num = sid.split('@')[0].replace(/\D/g, '');
+              for (const cm of ContactCol.getModelsArray()) {
+                const ucm = unproxy(cm);
+                const cid = serializeId(cm?.id) || serializeId(ucm?.id);
+                const clid = serializeId(cm?.lid) || serializeId(ucm?.lid);
+                const cpn = serializeId(cm?.phoneNumber) || serializeId(ucm?.phoneNumber);
+                if (clid && clid.endsWith('@lid')) {
+                  if (
+                    cid === sid ||
+                    cpn === sid ||
+                    (num && (cid.includes(num) || cpn.includes(num)))
+                  ) {
+                    foundLidStr = clid;
+                    break;
                   }
                 }
-              }
-
-              if (!foundLidStr && lidUtils?.toLid) {
-                try {
-                  const lRes = lidUtils.toLid(wid);
-                  if (lRes && typeof lRes.then === 'function') {
-                    lRes
-                      .then((lw: any) => {
-                        const lStr = serializeId(lw);
-                        if (lStr && lStr.endsWith('@lid')) {
-                          subscribeWidPresence(lw);
-                        }
-                      })
-                      .catch(() => {});
-                  } else if (lRes) {
-                    const lStr = serializeId(lRes);
-                    if (lStr && lStr.endsWith('@lid')) foundLidStr = lStr;
-                  }
-                } catch {}
-              }
-
-              if (!foundLidStr && apiContact?.getAlternateUserWid) {
-                try {
-                  const aRes = apiContact.getAlternateUserWid(wid);
-                  const aStr = serializeId(aRes);
-                  if (aStr && aStr.endsWith('@lid')) foundLidStr = aStr;
-                } catch {}
-              }
-
-              if (foundLidStr) {
-                const lidWid = widFactory?.createWid?.(foundLidStr) || foundLidStr;
-                try {
-                  const res = contactPresBridge.subscribeUserPresence(lidWid);
-                  res?.catch?.((err: any) => {
-                    debugLog(
-                      `subscribeUserPresence via LID erro (${sid} -> ${foundLidStr}): ${
-                        err?.message || String(err)
-                      }`
-                    );
-                  });
-                } catch (err: any) {
-                  debugLog(
-                    `subscribeUserPresence via LID throw (${sid} -> ${foundLidStr}): ${
-                      err?.message || String(err)
-                    }`
-                  );
-                }
-              } else {
-                debugLog(`LID não encontrado para contato PN ${sid}`);
               }
             }
 
-            if (typeof contactPresBridge.subscribePresence === 'function') {
+            if (foundLidStr) {
+              subscribeWidPresence(foundLidStr);
+            }
+            return;
+          }
+
+          // Throttling por WID para evitar envios repetidos na rede a cada poucos segundos
+          const now = Date.now();
+          const lastSub = subTimestampByWid.get(sid) || 0;
+          if (now - lastSub < 25000) {
+            return;
+          }
+          subTimestampByWid.set(sid, now);
+
+          const contactPresBridge = safeReq('WAWebContactPresenceBridge');
+          if (contactPresBridge) {
+            if (isGroup && typeof contactPresBridge.subscribeGroupPresence === 'function') {
               try {
-                contactPresBridge.subscribePresence(wid)?.catch?.(() => {});
+                contactPresBridge.subscribeGroupPresence(wid)?.catch?.(() => {});
+              } catch {}
+            } else if (isLid && typeof contactPresBridge.subscribeUserPresence === 'function') {
+              try {
+                contactPresBridge.subscribeUserPresence(wid)?.catch?.(() => {});
               } catch {}
             }
           }
 
-          const presBridge = safeReq('WAWebPresenceBridge');
-          if (presBridge) {
-            if (isGroup && typeof presBridge.subscribeGroupPresence === 'function') {
-              try { presBridge.subscribeGroupPresence(wid)?.catch?.(() => {}); } catch {}
-            } else if (!isGroup && typeof presBridge.subscribeUserPresence === 'function') {
-              try { presBridge.subscribeUserPresence(wid)?.catch?.(() => {}); } catch {}
-            }
-            if (typeof presBridge.subscribePresence === 'function') {
-              try { presBridge.subscribePresence(wid)?.catch?.(() => {}); } catch {}
-            }
-          }
-
-          try {
-            if (typeof presenceChatAction?.subscribePresence === 'function') {
-              presenceChatAction.subscribePresence(wid)?.catch?.(() => {});
-            }
-          } catch {}
-
-          if (PresenceCol) {
+          if (pm) {
             try {
-              const p = PresenceCol.get?.(wid) || PresenceCol.get?.(sid);
-              if (p) {
-                bindPresenceModel(p);
-                p.subscribe?.().catch?.(() => {});
-                unproxy(p)?.subscribe?.().catch?.(() => {});
-              } else if (typeof PresenceCol.subscribe === 'function') {
+              pm.subscribe?.()?.catch?.(() => {});
+              unproxy(pm)?.subscribe?.()?.catch?.(() => {});
+            } catch {}
+          } else if (PresenceCol) {
+            try {
+              if (typeof PresenceCol.subscribe === 'function') {
                 Promise.resolve(PresenceCol.subscribe(wid))
                   .then((res: any) => {
                     const found = res || PresenceCol.get?.(wid) || PresenceCol.get?.(sid);
@@ -7236,11 +7296,7 @@ export class WhatsAppService {
               } else if (typeof PresenceCol.find === 'function') {
                 Promise.resolve(PresenceCol.find(wid))
                   .then((found: any) => {
-                    if (found) {
-                      bindPresenceModel(found);
-                      found.subscribe?.().catch?.(() => {});
-                      unproxy(found)?.subscribe?.().catch?.(() => {});
-                    }
+                    if (found) bindPresenceModel(found);
                   })
                   .catch(() => {});
               }
@@ -7258,30 +7314,6 @@ export class WhatsAppService {
             }
           }
 
-          // Se houver um chat primário focado (ex: activeChatId passado como primeiro elemento), abre no DOM do WhatsApp Web
-          if (Array.isArray(chatIds) && chatIds.length > 0) {
-            const primaryId = chatIds[0];
-            const primaryChat = ChatCol?.get?.(primaryId);
-            const Cmd = safeReq('WAWebCmd')?.Cmd;
-            if (primaryChat && Cmd) {
-              try {
-                debugLog(`Cmd methods: ${Object.keys(Cmd).join(',')}`);
-                if (typeof Cmd.openChatBottom === 'function') {
-                  Cmd.openChatBottom({ chat: primaryChat });
-                  debugLog(`Cmd.openChatBottom chamado para ${primaryId}`);
-                } else if (typeof Cmd.openChatAt === 'function') {
-                  Cmd.openChatAt({ chat: primaryChat });
-                  debugLog(`Cmd.openChatAt chamado para ${primaryId}`);
-                } else if (typeof Cmd.openChat === 'function') {
-                  Cmd.openChat(primaryChat);
-                  debugLog(`Cmd.openChat chamado para ${primaryId}`);
-                }
-              } catch (openErr: any) {
-                debugLog(`Erro ao abrir chat com Cmd: ${openErr?.message || String(openErr)}`);
-              }
-            }
-          }
-
           const targets = new Set<string>(tracked);
           if (ChatCol?.getModelsArray) {
             const recent = ChatCol.getModelsArray()
@@ -7292,7 +7324,6 @@ export class WhatsAppService {
             }
           }
 
-          let subscribedCount = 0;
           for (const cid of Array.from(targets)) {
             if (!cid || cid === 'status@broadcast' || cid.endsWith('@newsletter')) continue;
             try {
@@ -7301,40 +7332,24 @@ export class WhatsAppService {
               for (const ch of [chat, uChat]) {
                 if (ch?.presence) {
                   bindPresenceModel(ch.presence);
-                  ch.presence.subscribe?.().catch?.(() => {});
-                  unproxy(ch.presence)?.subscribe?.().catch?.(() => {});
+                  try {
+                    ch.presence.chatActive = true;
+                    const up = unproxy(ch.presence);
+                    if (up) up.chatActive = true;
+                  } catch {}
                 }
               }
 
               const wid = chat?.id || uChat?.id || widFactory?.createWid?.(cid);
               if (wid) {
                 subscribeWidPresence(wid);
-                subscribedCount++;
-
-                // Para conversas 1-para-1, inscreve também todos os WIDs alternativos (@lid e @c.us)
-                if (!cid.endsWith('@g.us')) {
-                  const altCandidates = [
-                    chat?.contact?.id,
-                    chat?.contact?.lid,
-                    chat?.contact?.phoneNumber,
-                    uChat?.contact?.id,
-                    uChat?.contact?.lid,
-                    uChat?.contact?.phoneNumber,
-                    ContactCol?.get?.(cid)?.lid,
-                    ContactCol?.get?.(cid)?.phoneNumber,
-                    apiContact?.getAlternateUserWid?.(wid),
-                    cid.endsWith('@c.us') ? lidUtils?.toLid?.(wid) : lidUtils?.toPn?.(wid),
-                  ];
-                  for (const alt of altCandidates) {
-                    if (alt && serializeId(alt) && serializeId(alt) !== cid) {
-                      subscribeWidPresence(alt);
-                    }
-                  }
-                }
+              }
+              const accLid = chat?.accountLid || uChat?.accountLid;
+              if (accLid) {
+                subscribeWidPresence(accLid);
               }
             } catch {}
           }
-          debugLog(`__waSubscribeChatPresence executado: ${subscribedCount} conversas inscritas`);
         };
 
         w.__waSubscribeChatPresence();
@@ -7343,7 +7358,7 @@ export class WhatsAppService {
         w.__waPresenceInterval = setInterval(collectPresenceSnapshot, 650);
         w.__waPresenceResubInterval = setInterval(() => {
           w.__waSubscribeChatPresence?.();
-        }, 18000);
+        }, 25000);
       });
     } catch (err: any) {
       logPresenceDebug(`Exceção em setupPresenceObserver: ${err?.message || String(err)}`);
@@ -7356,10 +7371,14 @@ export class WhatsAppService {
     if (!Array.isArray(chatIds) || chatIds.length === 0) return;
 
     try {
-      const hasFn = await this.client.pupPage.evaluate(() => {
-        return typeof (window as any).__waSubscribeChatPresence === 'function';
+      const isLatest = await this.client.pupPage.evaluate(() => {
+        const w = window as any;
+        return (
+          w.__waPresenceObserverVersion === 5 &&
+          typeof w.__waSubscribeChatPresence === 'function'
+        );
       });
-      if (!hasFn) {
+      if (!isLatest) {
         await this.setupPresenceObserver();
       }
       await this.client.pupPage.evaluate((ids: string[]) => {
