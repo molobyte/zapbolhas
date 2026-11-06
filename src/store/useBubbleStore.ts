@@ -14,6 +14,7 @@ import {
   IncomingMessagePayload,
   MessageReactionItem,
   MessageMediaType,
+  PollData,
   QuotedMessage,
   SavedContact,
   BubbleBorderMode,
@@ -444,6 +445,12 @@ interface BubbleStoreState {
     waveform?: number[];
   }) => Promise<void>;
   sendReaction: (chatId: string, messageId: string, emoji: string) => Promise<void>;
+  votePoll: (chatId: string, messageId: string, selectedLocalIds: number[]) => Promise<void>;
+  applyPollVoteUpdate: (payload: {
+    chatId?: string;
+    messageId: string;
+    pollData: PollData;
+  }) => void;
   applyReactionUpdate: (payload: {
     messageId: string;
     chatId?: string;
@@ -985,7 +992,15 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         const prev = prevMap.get(m.id);
         const resolvedReactions = m.reactions || prev?.reactions;
         const resolvedReaction = m.reaction || prev?.reaction;
-        if (!prev) return { ...m, reactions: resolvedReactions, reaction: resolvedReaction };
+        const resolvedPollData = m.pollData || prev?.pollData;
+        if (!prev) {
+          return {
+            ...m,
+            reactions: resolvedReactions,
+            reaction: resolvedReaction,
+            pollData: resolvedPollData,
+          };
+        }
         return {
           ...m,
           imageUrl: prev.isHdLoaded && !m.isHdLoaded ? prev.imageUrl || m.imageUrl : m.imageUrl,
@@ -995,6 +1010,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
             m.audioData && prev.audioData?.audioUrl
               ? { ...m.audioData, audioUrl: prev.audioData.audioUrl }
               : m.audioData,
+          pollData: resolvedPollData,
           reactions: resolvedReactions,
           reaction: resolvedReaction,
         };
@@ -3259,6 +3275,104 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
 
     if (window.electronAPI?.sendReaction) {
       await window.electronAPI.sendReaction(chatId, messageId, targetReaction);
+    }
+  },
+
+  applyPollVoteUpdate: (payload: {
+    chatId?: string;
+    messageId: string;
+    pollData: PollData;
+  }) => {
+    if (!payload?.messageId || !payload?.pollData) return;
+    const { messagesByChat } = get();
+
+    let targetChatId = payload.chatId;
+    if (!targetChatId || !messagesByChat[targetChatId]) {
+      for (const [cid, msgs] of Object.entries(messagesByChat)) {
+        if (msgs.some((m) => isMatchingMessageId(m.id, payload.messageId))) {
+          targetChatId = cid;
+          break;
+        }
+      }
+    }
+    if (!targetChatId) return;
+
+    const currentMsgs = messagesByChat[targetChatId];
+    if (!currentMsgs) return;
+
+    const msgIndex = currentMsgs.findIndex((m) => isMatchingMessageId(m.id, payload.messageId));
+    if (msgIndex === -1) return;
+
+    const updatedList = [...currentMsgs];
+    updatedList[msgIndex] = {
+      ...updatedList[msgIndex],
+      type: 'poll',
+      isViewOnce: false,
+      pollData: payload.pollData,
+    };
+
+    set({
+      messagesByChat: {
+        ...messagesByChat,
+        [targetChatId]: updatedList,
+      },
+    });
+  },
+
+  votePoll: async (chatId: string, messageId: string, selectedLocalIds: number[]) => {
+    const { messagesByChat, applyPollVoteUpdate } = get();
+    const currentMsgs = messagesByChat[chatId] || [];
+    const targetMsg = currentMsgs.find((m) => isMatchingMessageId(m.id, messageId));
+
+    if (targetMsg?.pollData) {
+      const selectedSet = new Set(selectedLocalIds);
+      const updatedOptions = targetMsg.pollData.options.map((opt) => {
+        const isSelected = selectedSet.has(opt.localId);
+        const otherVoters = (opt.voters || []).filter((v) => !v.fromMe);
+        const nextVoters = isSelected
+          ? [
+              ...otherVoters,
+              {
+                id: 'me',
+                name: 'Você',
+                fromMe: true,
+                timestamp: Date.now(),
+              },
+            ]
+          : otherVoters;
+        return {
+          ...opt,
+          selectedByMe: isSelected,
+          count: nextVoters.length,
+          voters: nextVoters,
+        };
+      });
+
+      const totalVotes = updatedOptions.reduce((sum, o) => sum + o.count, 0);
+      applyPollVoteUpdate({
+        chatId,
+        messageId,
+        pollData: {
+          ...targetMsg.pollData,
+          options: updatedOptions,
+          totalVotes,
+        },
+      });
+    }
+
+    if (window.electronAPI?.votePoll) {
+      try {
+        const res = await window.electronAPI.votePoll(chatId, messageId, selectedLocalIds);
+        if (res?.pollData) {
+          applyPollVoteUpdate({
+            chatId,
+            messageId,
+            pollData: res.pollData,
+          });
+        }
+      } catch (err) {
+        console.error('[Store] Falha ao votar na enquete:', err);
+      }
     }
   },
 }));

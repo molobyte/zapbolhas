@@ -1589,6 +1589,18 @@ function registerIpcHandlers() {
     }
   );
 
+  ipcMain.handle(
+    'wa:vote-poll',
+    async (
+      _event,
+      payload: { chatId: string; messageId: string; selectedLocalIds: number[] }
+    ) => {
+      if (!waService) return { success: false };
+      const { chatId, messageId, selectedLocalIds } = payload || {};
+      return waService.votePoll(chatId, messageId, Array.isArray(selectedLocalIds) ? selectedLocalIds : []);
+    }
+  );
+
   ipcMain.handle('wa:get-high-res-pic', async (_event, chatId: string) => {
     if (!waService) return null;
     return waService.getHighResProfilePic(chatId);

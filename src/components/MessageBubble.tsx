@@ -15,6 +15,9 @@ import {
   Download,
   FileText,
   Check,
+  BarChart2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { FormattedMessage, QuotedMessage, DEFAULT_AVATAR } from '../types/whatsapp';
 import { useBubbleStore } from '../store/useBubbleStore';
@@ -67,6 +70,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     reaction,
     audioData,
     documentData,
+    pollData,
     ack,
     senderName,
     senderColor,
@@ -81,6 +85,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     updateMessageMedia,
     setViewingImage,
     sendReaction,
+    votePoll,
     setActiveReactionDetailsMessage,
     chatFontSize = 13.5,
   } = useBubbleStore();
@@ -89,6 +94,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [savedSticker, setSavedSticker] = useState(false);
   const [isSavingFile, setIsSavingFile] = useState(false);
   const [savedFileSuccess, setSavedFileSuccess] = useState(false);
+  const [showPollVoters, setShowPollVoters] = useState(false);
+  const [isVotingPoll, setIsVotingPoll] = useState(false);
 
   const handleSaveMediaAs = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -245,23 +252,52 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   }, [showQuickReactions, showFullPicker]);
 
   const displayCaption = text && !isRawMediaBase64OrKey(text) ? text : '';
+  const isPollMsg = type === 'poll' || Boolean(pollData);
   // Mensagem de visualização única protegida pelo WhatsApp (aplicável apenas a mídias de foto/vídeo)
   const isMediaMsgType =
-    type === 'image' ||
-    type === 'video' ||
-    (message as any).rawType === 'view_once' ||
-    (message as any).rawType === 'image' ||
-    (message as any).rawType === 'video';
+    !isPollMsg &&
+    (type === 'image' ||
+      type === 'video' ||
+      (message as any).rawType === 'view_once' ||
+      (message as any).rawType === 'image' ||
+      (message as any).rawType === 'video');
 
   const isViewOnceMsg =
-    Boolean(message.isViewOnce) ||
-    (isMediaMsgType &&
-      !imageUrl &&
-      !videoUrl &&
-      !displayCaption &&
-      !audioData &&
-      type !== 'audio' &&
-      type !== 'sticker');
+    !isPollMsg &&
+    (Boolean(message.isViewOnce) ||
+      (isMediaMsgType &&
+        !imageUrl &&
+        !videoUrl &&
+        !displayCaption &&
+        !audioData &&
+        type !== 'audio' &&
+        type !== 'sticker'));
+
+  const handleTogglePollOption = async (e: React.MouseEvent, localId: number) => {
+    e.stopPropagation();
+    if (!pollData || isSelectionMode || isVotingPoll) return;
+
+    const currentSelectedIds = pollData.options
+      .filter((o) => o.selectedByMe)
+      .map((o) => o.localId);
+    const isCurrentlySelected = currentSelectedIds.includes(localId);
+
+    let nextSelectedIds: number[];
+    if (pollData.allowMultipleAnswers) {
+      nextSelectedIds = isCurrentlySelected
+        ? currentSelectedIds.filter((id) => id !== localId)
+        : [...currentSelectedIds, localId];
+    } else {
+      nextSelectedIds = isCurrentlySelected ? [] : [localId];
+    }
+
+    setIsVotingPoll(true);
+    try {
+      await votePoll(message.chatId, message.id, nextSelectedIds);
+    } finally {
+      setIsVotingPoll(false);
+    }
+  };
 
   // Decripta automaticamente imagens, vídeos, figurinhas e áudios em alta resolução (exceto visualização única protegida)
   useEffect(() => {
@@ -423,7 +459,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       author: fromMe ? 'Você' : senderName || 'Contato',
       authorColor: fromMe ? '#06CF9C' : senderColor || '#E59866',
       text:
-        type === 'audio'
+        isPollMsg
+          ? `📊 ${pollData?.question || text || 'Enquete'}`
+          : type === 'audio'
           ? `🎤 Mensagem de voz (${audioData?.duration || '0:46'})`
           : type === 'document'
           ? `📄 ${documentData?.filename || text || 'Documento'}`
@@ -711,6 +749,206 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     </div>
                   </div>
                 </div>
+              ) : isPollMsg && pollData ? (
+                <div
+                  data-interactive="true"
+                  onClick={(e) => e.stopPropagation()}
+                  className="min-w-[255px] max-w-[320px] pt-0.5 pb-1 select-none"
+                >
+                  {/* Pergunta da Enquete */}
+                  <div
+                    style={{
+                      fontSize: `${Math.max(13.5, Math.round(chatFontSize * 1.05))}px`,
+                      lineHeight: `${Math.round(chatFontSize * 1.35)}px`,
+                    }}
+                    className="font-semibold text-[#E9EDEF] break-words mb-1"
+                  >
+                    <FormattedText
+                      text={pollData.question || displayCaption || 'Enquete'}
+                      mentions={message.mentions}
+                    />
+                  </div>
+
+                  {/* Subtítulo: Voto único vs Múltipla escolha */}
+                  <div className="flex items-center gap-1.5 text-[11.5px] text-[#8696A0] mb-2.5">
+                    <BarChart2 className="w-3.5 h-3.5 text-[#00A884] shrink-0" />
+                    <span>
+                      {pollData.allowMultipleAnswers
+                        ? 'Selecione uma ou mais opções • Múltipla escolha'
+                        : 'Selecione uma opção • Voto único'}
+                    </span>
+                  </div>
+
+                  {/* Lista de Opções da Enquete */}
+                  <div className="flex flex-col gap-2">
+                    {(() => {
+                      const maxVotes = Math.max(
+                        1,
+                        ...pollData.options.map((o) => o.count || 0)
+                      );
+                      const totalPollVotes =
+                        pollData.totalVotes ??
+                        pollData.options.reduce((sum, o) => sum + (o.count || 0), 0);
+
+                      return pollData.options.map((opt) => {
+                        const pct =
+                          totalPollVotes > 0 && opt.count > 0
+                            ? Math.max(8, Math.round((opt.count / maxVotes) * 100))
+                            : 0;
+
+                        return (
+                          <button
+                            key={opt.localId}
+                            type="button"
+                            disabled={isVotingPoll}
+                            onClick={(e) => handleTogglePollOption(e, opt.localId)}
+                            className={`w-full text-left rounded-[7px] px-2.5 py-2 transition-all cursor-pointer border ${
+                              opt.selectedByMe
+                                ? fromMe
+                                  ? 'bg-[#025144]/95 border-[#25D366]/50'
+                                  : 'bg-[#1D282F] border-[#00A884]/50'
+                                : fromMe
+                                ? 'bg-black/15 hover:bg-black/25 border-white/[0.07]'
+                                : 'bg-[#182229]/75 hover:bg-[#182229] border-white/[0.06]'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                {/* Radio (Voto único) ou Checkbox (Múltipla escolha) */}
+                                <div
+                                  className={`w-[18px] h-[18px] shrink-0 flex items-center justify-center border-2 transition-all ${
+                                    pollData.allowMultipleAnswers
+                                      ? 'rounded-[4px]'
+                                      : 'rounded-full'
+                                  } ${
+                                    opt.selectedByMe
+                                      ? 'bg-[#00A884] border-[#00A884] text-[#111B21]'
+                                      : 'border-[#8696A0] bg-transparent'
+                                  }`}
+                                >
+                                  {opt.selectedByMe && (
+                                    <Check className="w-3 h-3 stroke-[3]" />
+                                  )}
+                                </div>
+
+                                <span
+                                  style={{
+                                    fontSize: `${Math.max(12.5, Math.round(chatFontSize * 0.96))}px`,
+                                  }}
+                                  className="text-[#E9EDEF] font-medium leading-snug break-words min-w-0 flex-1"
+                                >
+                                  <FormattedText text={opt.name} />
+                                </span>
+                              </div>
+
+                              {/* Mini-avatares dos votantes + Contador */}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {opt.voters && opt.voters.length > 0 && (
+                                  <div className="flex items-center -space-x-1.5">
+                                    {opt.voters.slice(0, 3).map((vt, vIdx) => (
+                                      <img
+                                        key={`${vt.id}-${vIdx}`}
+                                        src={vt.avatar || DEFAULT_AVATAR}
+                                        alt={vt.name}
+                                        title={vt.fromMe ? 'Você' : vt.name}
+                                        className="w-4 h-4 rounded-full object-cover ring-1 ring-[#111B21]"
+                                        draggable={false}
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                                <span className="text-[11.5px] font-semibold text-[#8696A0] tabular-nums">
+                                  {opt.count}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Barra de progresso de votos */}
+                            <div className="mt-1.5 w-full h-[5px] rounded-full bg-black/30 overflow-hidden">
+                              <div
+                                style={{ width: `${pct}%` }}
+                                className={`h-full rounded-full transition-all duration-300 ${
+                                  opt.selectedByMe ? 'bg-[#25D366]' : 'bg-[#00A884]/75'
+                                }`}
+                              />
+                            </div>
+                          </button>
+                        );
+                      });
+                    })()}
+                  </div>
+
+                  {/* Rodapé da Enquete: Total de votos + Botão Ver votos */}
+                  {(() => {
+                    const totalPollVotes =
+                      pollData.totalVotes ??
+                      pollData.options.reduce((sum, o) => sum + (o.count || 0), 0);
+
+                    return (
+                      <>
+                        <div className="mt-2.5 pt-1.5 border-t border-white/10 flex items-center justify-between text-[11.5px]">
+                          <span className="text-[#8696A0]">
+                            {totalPollVotes === 1 ? '1 voto' : `${totalPollVotes} votos`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowPollVoters((prev) => !prev);
+                            }}
+                            className="text-[#00A884] hover:text-[#25D366] font-medium flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <span>{showPollVoters ? 'Ocultar votos' : 'Ver votos'}</span>
+                            {showPollVoters ? (
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+
+                        {showPollVoters && (
+                          <div className="mt-2 pt-2 border-t border-white/10 flex flex-col gap-2 max-h-[170px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-white/10">
+                            {pollData.options.map((opt) => (
+                              <div key={`voters-${opt.localId}`} className="text-[11.5px]">
+                                <div className="flex items-center justify-between text-[#E9EDEF] font-medium mb-1">
+                                  <span className="truncate">{opt.name}</span>
+                                  <span className="text-[#8696A0] text-[10.5px] shrink-0 ml-2">
+                                    {opt.count === 1 ? '1 voto' : `${opt.count} votos`}
+                                  </span>
+                                </div>
+                                {opt.voters && opt.voters.length > 0 ? (
+                                  <div className="flex flex-col gap-1 pl-1.5 border-l-2 border-[#00A884]/40">
+                                    {opt.voters.map((vt, idx) => (
+                                      <div
+                                        key={`${vt.id}-${idx}`}
+                                        className="flex items-center gap-1.5 text-[#B8C7C4] text-[11px]"
+                                      >
+                                        <img
+                                          src={vt.avatar || DEFAULT_AVATAR}
+                                          alt={vt.name}
+                                          className="w-4 h-4 rounded-full object-cover shrink-0"
+                                          draggable={false}
+                                        />
+                                        <span className="truncate">
+                                          {vt.fromMe ? 'Você' : vt.name}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="text-[10.5px] text-[#8696A0] italic pl-1.5">
+                                    Sem votos
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
               ) : (
                 <>
                   {type === 'video' && (
@@ -977,11 +1215,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </>
               )}
 
-              {type === 'text' && displayCaption && (
+              {type === 'text' && !isPollMsg && displayCaption && (
                 <LinkPreviewCard text={displayCaption} fromMe={fromMe} />
               )}
 
-              {displayCaption && <FormattedText text={displayCaption} mentions={message.mentions} />}
+              {!isPollMsg && displayCaption && (
+                <FormattedText text={displayCaption} mentions={message.mentions} />
+              )}
 
               <span
                 style={{

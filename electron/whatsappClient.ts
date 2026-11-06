@@ -141,7 +141,7 @@ export interface FormattedChatMessage {
   timestamp: string;
   dateLabel?: string;
   fromMe: boolean;
-  type: 'text' | 'audio' | 'image' | 'video' | 'sticker' | 'document';
+  type: 'text' | 'audio' | 'image' | 'video' | 'sticker' | 'document' | 'poll';
   isViewOnce?: boolean;
   senderName?: string;
   senderColor?: string;
@@ -184,6 +184,25 @@ export interface FormattedChatMessage {
     mimetype: string;
     filesize?: number;
     pageCount?: number;
+  };
+  pollData?: {
+    question: string;
+    options: Array<{
+      localId: number;
+      name: string;
+      count: number;
+      selectedByMe: boolean;
+      voters: Array<{
+        id: string;
+        name: string;
+        avatar?: string;
+        fromMe: boolean;
+        timestamp?: number;
+      }>;
+    }>;
+    allowMultipleAnswers: boolean;
+    selectableOptionsCount: number;
+    totalVotes: number;
   };
   mentions?: string[];
 }
@@ -623,10 +642,69 @@ export class WhatsAppService {
                 t: message.t,
                 from: message.from,
                 to: message.to,
+                pollName: message.pollName,
+                pollOptions: message.pollOptions || [],
               };
             }
           };
           w.WWebJS._patchedSafeGetMsgModel = true;
+        }
+
+        // Safe window.onPollVoteEvent wrapper so poll vote events never crash on Backbone models or Uint8Array
+        if (typeof w.onPollVoteEvent === 'function' && !w.onPollVoteEvent._safePatched) {
+          const origPollVoteEvent = w.onPollVoteEvent;
+          const safePollVoteEvent = async function (votes: any[]) {
+            try {
+              if (!Array.isArray(votes)) return;
+              const sanitized = votes.map((v: any) => {
+                const pMsg = v?.parentMessage;
+                let safeParent: any = null;
+                if (pMsg && typeof w.WWebJS?.getMessageModel === 'function') {
+                  try {
+                    safeParent = w.WWebJS.getMessageModel(pMsg);
+                  } catch {}
+                }
+                if (!safeParent || !safeParent.id) {
+                  const rawKey = v?.parentMsgKey || pMsg?.id;
+                  const keyStr =
+                    typeof rawKey === 'string'
+                      ? rawKey
+                      : rawKey?._serialized || String(rawKey || '');
+                  safeParent = {
+                    id:
+                      typeof rawKey === 'object' && rawKey
+                        ? rawKey
+                        : { _serialized: keyStr },
+                    pollOptions: Array.isArray(pMsg?.pollOptions) ? pMsg.pollOptions : [],
+                    type: 'poll_creation',
+                  };
+                }
+                let localIds: number[] = [];
+                const rawIds = v?.selectedOptionLocalIds;
+                if (Array.isArray(rawIds)) {
+                  localIds = rawIds
+                    .map((x: any) => Number(x))
+                    .filter((n: number) => !Number.isNaN(n));
+                } else if (
+                  rawIds &&
+                  typeof rawIds === 'object' &&
+                  typeof rawIds.length === 'number'
+                ) {
+                  localIds = Array.from(rawIds as ArrayLike<number>)
+                    .map((x: any) => Number(x))
+                    .filter((n: number) => !Number.isNaN(n));
+                }
+                return {
+                  ...v,
+                  selectedOptionLocalIds: localIds,
+                  parentMessage: safeParent,
+                };
+              });
+              return await origPollVoteEvent(sanitized);
+            } catch {}
+          };
+          (safePollVoteEvent as any)._safePatched = true;
+          w.onPollVoteEvent = safePollVoteEvent;
         }
       });
     } catch {
@@ -906,6 +984,46 @@ export class WhatsAppService {
       }
     });
 
+    this.client.on('vote_update', async (vote: any) => {
+      try {
+        const serializeId = (val: any): string => {
+          if (!val) return '';
+          if (typeof val === 'string') return val;
+          return val._serialized || val.id || '';
+        };
+
+        const parentId =
+          serializeId(vote?.parentMessage?.id) ||
+          serializeId(vote?.parentMsgKey) ||
+          '';
+        if (!parentId) return;
+
+        let chatId =
+          serializeId(vote?.parentMessage?.to) ||
+          serializeId(vote?.parentMessage?.from) ||
+          serializeId(vote?.parentMessage?.id?.remote) ||
+          serializeId(vote?.parentMsgKey?.remote) ||
+          '';
+        if (!chatId && parentId) {
+          const match = parentId.match(/_([0-9a-zA-Z._-]+@(c\.us|g\.us|broadcast|lid))_/);
+          if (match) {
+            chatId = match[1];
+          }
+        }
+
+        const pollData = await this.getPollDataForMessage(chatId, parentId);
+        if (pollData) {
+          this.emitToRenderer('wa:poll-vote-received', {
+            chatId,
+            messageId: parentId,
+            pollData,
+          });
+        }
+      } catch (err) {
+        console.error('[WhatsAppService] Error handling vote_update:', err);
+      }
+    });
+
     this.client.on('message_revoke_everyone', async (after: any, before: any) => {
       try {
         const serializeId = (val: any): string => {
@@ -1046,6 +1164,23 @@ export class WhatsAppService {
 
         const checkIsViewOnce = (m: any): boolean => {
           if (!m) return false;
+
+          const rawTypeEarly = String(getProp(m, 'type') || '');
+          if (
+            rawTypeEarly === 'poll_creation' ||
+            rawTypeEarly === 'pollCreation' ||
+            rawTypeEarly === 'poll_update' ||
+            rawTypeEarly === 'event_creation' ||
+            rawTypeEarly === 'scheduled_event_creation' ||
+            rawTypeEarly === 'vcard' ||
+            rawTypeEarly === 'multi_vcard' ||
+            rawTypeEarly === 'location' ||
+            rawTypeEarly === 'live_location' ||
+            Boolean(getProp(m, 'pollName')) ||
+            (Array.isArray(getProp(m, 'pollOptions')) && getProp(m, 'pollOptions').length > 0)
+          ) {
+            return false;
+          }
 
           const mediaData = getProp(m, 'mediaData') || m.mediaData || m.__x_mediaData;
           const dataObj = m._data || {};
@@ -1799,7 +1934,9 @@ export class WhatsAppService {
               !m.isNotification &&
               m.type !== 'e2e_notification' &&
               m.type !== 'gp2' &&
-              m.type !== 'notification_template'
+              m.type !== 'notification_template' &&
+              m.type !== 'poll_update' &&
+              m.type !== 'reaction'
           );
           const lastMsg = msgs[msgs.length - 1];
           const lastIncomingMsg = [...msgs].reverse().find((m: any) => !m.id?.fromMe);
@@ -1915,6 +2052,14 @@ export class WhatsAppService {
           }
 
           let rawType = String(getProp(lastMsg, 'type') || 'chat');
+          if (
+            rawType !== 'poll_creation' &&
+            (Boolean(getProp(lastMsg, 'pollName')) ||
+              (Array.isArray(getProp(lastMsg, 'pollOptions')) &&
+                getProp(lastMsg, 'pollOptions').length > 0))
+          ) {
+            rawType = 'poll_creation';
+          }
           const isViewOnce = checkIsViewOnce(lastMsg);
           if (isViewOnce && (rawType === 'view_once' || rawType === 'chat')) {
             const mime = String(getProp(lastMsg, 'mimetype') || getProp(lastMsg?.mediaData, 'mimetype') || '');
@@ -1923,6 +2068,8 @@ export class WhatsAppService {
           const isChat = rawType === 'chat';
           const rawBody = isViewOnce
             ? String(getProp(lastMsg, 'caption') || '')
+            : rawType === 'poll_creation'
+            ? String(getProp(lastMsg, 'pollName') || getProp(lastMsg, 'body') || '')
             : isChat
             ? String(getProp(lastMsg, 'body') || '')
             : rawType === 'document'
@@ -2012,6 +2159,12 @@ export class WhatsAppService {
               ? raw.lastMsgBody
               : `📄 ${raw.lastMsgBody}`
             : '📄 Documento';
+        } else if (raw.lastMsgType === 'poll_creation') {
+          text = raw.lastMsgBody
+            ? raw.lastMsgBody.startsWith('📊')
+              ? raw.lastMsgBody
+              : `📊 ${raw.lastMsgBody}`
+            : '📊 Enquete';
         }
 
         const rawTimestampSec = Number(raw.timestamp || 0);
@@ -2089,6 +2242,23 @@ export class WhatsAppService {
 
           const checkIsViewOnce = (m: any): boolean => {
             if (!m) return false;
+
+            const rawTypeEarly = String(getProp(m, 'type') || '');
+            if (
+              rawTypeEarly === 'poll_creation' ||
+              rawTypeEarly === 'pollCreation' ||
+              rawTypeEarly === 'poll_update' ||
+              rawTypeEarly === 'event_creation' ||
+              rawTypeEarly === 'scheduled_event_creation' ||
+              rawTypeEarly === 'vcard' ||
+              rawTypeEarly === 'multi_vcard' ||
+              rawTypeEarly === 'location' ||
+              rawTypeEarly === 'live_location' ||
+              Boolean(getProp(m, 'pollName')) ||
+              (Array.isArray(getProp(m, 'pollOptions')) && getProp(m, 'pollOptions').length > 0)
+            ) {
+              return false;
+            }
 
             const mediaData = getProp(m, 'mediaData') || m.mediaData || m.__x_mediaData;
             const dataObj = m._data || {};
@@ -2709,6 +2879,7 @@ export class WhatsAppService {
             m.type !== 'gp2' &&
             m.type !== 'notification_template' &&
             m.type !== 'call_log' &&
+            m.type !== 'poll_update' &&
             m.type !== 'reaction';
 
           // Garante que todas as mensagens não lidas (+ margem de contexto acima da barra) sejam carregadas,
@@ -2942,10 +3113,253 @@ export class WhatsAppService {
             }
           }
 
+          const isPollMsg = (m: any): boolean => {
+            if (!m) return false;
+            const rt = String(getProp(m, 'type') || '');
+            if (rt === 'poll_creation' || rt === 'pollCreation') return true;
+            if (getProp(m, 'pollName')) return true;
+            const opts = getProp(m, 'pollOptions') || m.pollOptions || m._data?.pollOptions;
+            if (Array.isArray(opts) && opts.length > 0) return true;
+            if (opts && typeof opts.getModelsArray === 'function' && opts.getModelsArray().length > 0) {
+              return true;
+            }
+            return false;
+          };
+
+          const pollDataByMsgId = new Map<string, any>();
+          const pollMsgs = msgs.filter((m: any) => isPollMsg(m));
+
+          if (pollMsgs.length > 0) {
+            let pollVotesTable: any = null;
+            try {
+              const schemaMod = w.require?.('WAWebPollsVotesSchema');
+              if (schemaMod && typeof schemaMod.getTable === 'function') {
+                pollVotesTable = schemaMod.getTable();
+              }
+            } catch (_) {}
+
+            const PollVotesCol =
+              collections?.PollVotes ||
+              collections?.PollVote ||
+              w.require?.('WAWebPollVoteCollection')?.PollVoteCollection ||
+              null;
+
+            await Promise.all(
+              pollMsgs.map(async (m: any) => {
+                const mId = serializeId(m.id);
+                if (!mId) return;
+
+                const rawPollName = String(
+                  getProp(m, 'pollName') ||
+                    m.pollName ||
+                    m._data?.pollName ||
+                    getProp(m, 'body') ||
+                    ''
+                ).trim();
+                const { text: formattedQuestion } = formatMentionsInText(rawPollName, m);
+
+                const rawOptsSource =
+                  getProp(m, 'pollOptions') || m.pollOptions || m._data?.pollOptions;
+                const rawOptsList: any[] = Array.isArray(rawOptsSource)
+                  ? rawOptsSource
+                  : typeof rawOptsSource?.serialize === 'function'
+                  ? rawOptsSource.serialize()
+                  : typeof rawOptsSource?.getModelsArray === 'function'
+                  ? rawOptsSource.getModelsArray()
+                  : Array.isArray(rawOptsSource?.models)
+                  ? rawOptsSource.models
+                  : [];
+
+                const rawSelectable = Number(
+                  getProp(m, 'pollSelectableOptionsCount') ??
+                    getProp(m, 'selectableOptionsCount') ??
+                    m.pollSelectableOptionsCount ??
+                    m._data?.pollSelectableOptionsCount ??
+                    0
+                );
+                const allowMultipleAnswers = rawSelectable !== 1;
+
+                const rawVoteRows: any[] = [];
+
+                if (pollVotesTable && typeof pollVotesTable.equals === 'function') {
+                  try {
+                    const idbVotes: any = await Promise.race([
+                      pollVotesTable.equals(['parentMsgKey'], mId),
+                      new Promise((r) => setTimeout(() => r([]), 600)),
+                    ]);
+                    if (Array.isArray(idbVotes)) {
+                      rawVoteRows.push(...idbVotes);
+                    }
+                  } catch (_) {}
+                }
+
+                if (PollVotesCol) {
+                  try {
+                    const colArr =
+                      typeof PollVotesCol.getModelsArray === 'function'
+                        ? PollVotesCol.getModelsArray()
+                        : Array.isArray(PollVotesCol.models)
+                        ? PollVotesCol.models
+                        : [];
+                    for (const vm of colArr) {
+                      const pKey = serializeId(getProp(vm, 'parentMsgKey') || vm.parentMsgKey);
+                      if (pKey === mId || pKey.endsWith(`_${mId}`) || mId.endsWith(`_${pKey}`)) {
+                        rawVoteRows.push(vm);
+                      }
+                    }
+                  } catch (_) {}
+                }
+
+                const msgVotesSource = getProp(m, 'pollVotes') || m.pollVotes || m.votes;
+                if (msgVotesSource) {
+                  const mvArr = Array.isArray(msgVotesSource)
+                    ? msgVotesSource
+                    : typeof msgVotesSource.getModelsArray === 'function'
+                    ? msgVotesSource.getModelsArray()
+                    : Array.isArray(msgVotesSource.models)
+                    ? msgVotesSource.models
+                    : [];
+                  rawVoteRows.push(...mvArr);
+                }
+
+                const voterMap = new Map<
+                  string,
+                  {
+                    id: string;
+                    name: string;
+                    avatar?: string;
+                    fromMe: boolean;
+                    timestamp: number;
+                    selectedLocalIds: number[];
+                  }
+                >();
+
+                for (const v of rawVoteRows) {
+                  if (!v) continue;
+                  const rawSender =
+                    getProp(v, 'sender') ||
+                    v.sender ||
+                    getProp(v, 'senderUserJid') ||
+                    v.senderUserJid ||
+                    getProp(v, 'author') ||
+                    v.author;
+                  const senderId = serializeId(rawSender);
+                  const senderUser = senderId ? senderId.split('@')[0] : '';
+                  const vFromMe = Boolean(
+                    getProp(v, 'fromMe') ||
+                      v.fromMe ||
+                      v.msgKey?.fromMe ||
+                      (senderId && (myIds.has(senderId) || (senderUser && myIds.has(senderUser))))
+                  );
+                  const voterKey = vFromMe ? 'me' : senderUser || senderId || 'unknown';
+                  const ts = Number(
+                    getProp(v, 'senderTimestampMs') ||
+                      v.senderTimestampMs ||
+                      getProp(v, 't') ||
+                      v.t ||
+                      0
+                  );
+
+                  const existing = voterMap.get(voterKey);
+                  if (existing && existing.timestamp > ts) {
+                    continue;
+                  }
+
+                  let selectedLocalIds: number[] = [];
+                  const rawSel =
+                    getProp(v, 'selectedOptionLocalIds') ?? v.selectedOptionLocalIds;
+                  if (Array.isArray(rawSel)) {
+                    selectedLocalIds = rawSel
+                      .map((x: any) => Number(x))
+                      .filter((n: number) => !Number.isNaN(n));
+                  } else if (
+                    rawSel &&
+                    typeof rawSel === 'object' &&
+                    typeof rawSel.length === 'number'
+                  ) {
+                    selectedLocalIds = Array.from(rawSel as ArrayLike<number>)
+                      .map((x: any) => Number(x))
+                      .filter((n: number) => !Number.isNaN(n));
+                  } else if (rawSel instanceof Set) {
+                    selectedLocalIds = Array.from(rawSel)
+                      .map((x: any) => Number(x))
+                      .filter((n: number) => !Number.isNaN(n));
+                  }
+
+                  let vName = 'Você';
+                  let vAvatar: string | undefined;
+                  if (!vFromMe) {
+                    const sInfo = resolveSender(rawSender || senderId);
+                    vName =
+                      (sInfo.savedName || sInfo.pushname || sInfo.senderName || 'Contato')
+                        .replace(/^~/, '')
+                        .trim() || 'Contato';
+                    vAvatar =
+                      (senderId ? authorAvatarMap[senderId] : undefined) ||
+                      (() => {
+                        try {
+                          const pic = ProfilePicThumb?.get?.(rawSender || senderId);
+                          return pic?.eurl || pic?.img || pic?.imgFull || undefined;
+                        } catch {
+                          return undefined;
+                        }
+                      })();
+                  }
+
+                  voterMap.set(voterKey, {
+                    id: senderId || voterKey,
+                    name: vName,
+                    avatar: vAvatar,
+                    fromMe: vFromMe,
+                    timestamp: ts,
+                    selectedLocalIds,
+                  });
+                }
+
+                const allVoters = Array.from(voterMap.values());
+                const parsedOptions = rawOptsList.map((opt: any, idx: number) => {
+                  const localId = Number(getProp(opt, 'localId') ?? opt?.localId ?? idx);
+                  const rawOptName = String(getProp(opt, 'name') ?? opt?.name ?? '');
+                  const { text: cleanOptName } = formatMentionsInText(rawOptName, m);
+                  const optVoters = allVoters
+                    .filter((vt) => vt.selectedLocalIds.includes(localId))
+                    .map((vt) => ({
+                      id: vt.id,
+                      name: vt.name,
+                      avatar: vt.avatar,
+                      fromMe: vt.fromMe,
+                      timestamp: vt.timestamp,
+                    }));
+
+                  return {
+                    localId,
+                    name: cleanOptName || rawOptName || `Opção ${idx + 1}`,
+                    count: optVoters.length,
+                    selectedByMe: optVoters.some((vt) => vt.fromMe),
+                    voters: optVoters,
+                  };
+                });
+
+                const totalVotes = parsedOptions.reduce((sum, o) => sum + o.count, 0);
+
+                pollDataByMsgId.set(mId, {
+                  question: formattedQuestion || rawPollName || 'Enquete',
+                  options: parsedOptions,
+                  allowMultipleAnswers,
+                  selectableOptionsCount: rawSelectable,
+                  totalVotes,
+                });
+              })
+            );
+          }
+
           return msgs.map((m: any) => {
             const id = serializeId(m.id) || `${m.t}-${Math.random()}`;
             const fromMe = Boolean(m.id?.fromMe);
             let rawType = String(getProp(m, 'type') || 'chat');
+            if (isPollMsg(m)) {
+              rawType = 'poll_creation';
+            }
             const isViewOnce = checkIsViewOnce(m);
 
             if (isViewOnce && (rawType === 'view_once' || rawType === 'chat')) {
@@ -2997,6 +3411,8 @@ export class WhatsAppService {
               const qText =
                 qType === 'chat'
                   ? String(m.quotedMsg.body || '')
+                  : qType === 'poll_creation' || Boolean(m.quotedMsg.pollName)
+                  ? `📊 ${String(m.quotedMsg.pollName || m.quotedMsg.body || 'Enquete')}`
                   : qType === 'ptt' || qType === 'audio'
                   ? '🎤 Mensagem de voz'
                   : qType === 'sticker'
@@ -3089,11 +3505,17 @@ export class WhatsAppService {
             const reactions = parsedReactions && parsedReactions.length > 0 ? parsedReactions : undefined;
             const reaction = reactions?.[0]?.emoji || undefined;
 
+            const pollData = pollDataByMsgId.get(id);
+
             const isChat = rawType === 'chat';
             let rawBodyText = '';
             if (isViewOnce) {
               const c = String(getProp(m, 'caption') || '');
               rawBodyText = isRawMediaBase64OrKey(c) ? '' : c;
+            } else if (rawType === 'poll_creation') {
+              rawBodyText = String(
+                pollData?.question || getProp(m, 'pollName') || getProp(m, 'body') || ''
+              );
             } else if (isChat) {
               const b = String(getProp(m, 'body') || '');
               rawBodyText = isRawMediaBase64OrKey(b) ? '' : b;
@@ -3158,6 +3580,7 @@ export class WhatsAppService {
               mimetype,
               filesize,
               pageCount,
+              pollData,
             };
           });
         },
@@ -3186,8 +3609,10 @@ export class WhatsAppService {
       let lastDateLabel = '';
 
       return rawMsgs.map((m) => {
-        let type: 'text' | 'audio' | 'image' | 'video' | 'sticker' | 'document' = 'text';
-        if (m.rawType === 'ptt' || m.rawType === 'audio') {
+        let type: 'text' | 'audio' | 'image' | 'video' | 'sticker' | 'document' | 'poll' = 'text';
+        if (m.rawType === 'poll_creation' || Boolean((m as any).pollData)) {
+          type = 'poll';
+        } else if (m.rawType === 'ptt' || m.rawType === 'audio') {
           type = 'audio';
         } else if (m.rawType === 'document') {
           type = 'document';
@@ -3282,6 +3707,7 @@ export class WhatsAppService {
             : undefined,
           audioData,
           documentData,
+          pollData: (m as any).pollData || undefined,
           reaction: (m as any).reaction || undefined,
           reactions: (m as any).reactions || undefined,
         };
@@ -3372,6 +3798,23 @@ export class WhatsAppService {
 
         const checkIsViewOnce = (m: any): boolean => {
           if (!m) return false;
+
+          const rawTypeEarly = String(getProp(m, 'type') || '');
+          if (
+            rawTypeEarly === 'poll_creation' ||
+            rawTypeEarly === 'pollCreation' ||
+            rawTypeEarly === 'poll_update' ||
+            rawTypeEarly === 'event_creation' ||
+            rawTypeEarly === 'scheduled_event_creation' ||
+            rawTypeEarly === 'vcard' ||
+            rawTypeEarly === 'multi_vcard' ||
+            rawTypeEarly === 'location' ||
+            rawTypeEarly === 'live_location' ||
+            Boolean(getProp(m, 'pollName')) ||
+            (Array.isArray(getProp(m, 'pollOptions')) && getProp(m, 'pollOptions').length > 0)
+          ) {
+            return false;
+          }
 
           const mediaData = getProp(m, 'mediaData') || m.mediaData || m.__x_mediaData;
           const dataObj = m._data || {};
@@ -7576,6 +8019,483 @@ export class WhatsAppService {
       );
     } catch {
       return false;
+    }
+  }
+
+  public async getPollDataForMessage(
+    chatId: string,
+    messageId: string,
+    overrideMySelectedIds?: number[]
+  ): Promise<FormattedChatMessage['pollData'] | null> {
+    if (!this.client?.pupPage || this.status !== 'ready' || !messageId) return null;
+
+    try {
+      return await this.client.pupPage.evaluate(
+        async ({
+          targetChatId,
+          targetMsgId,
+          overrideIds,
+        }: {
+          targetChatId: string;
+          targetMsgId: string;
+          overrideIds?: number[];
+        }) => {
+          const w = window as any;
+          const serializeId = (val: any): string => {
+            if (!val) return '';
+            if (typeof val === 'string') return val;
+            if (typeof val._serialized === 'string' && val._serialized) return val._serialized;
+            if (typeof val.toString === 'function') {
+              const s = val.toString();
+              if (s && s !== '[object Object]') return s;
+            }
+            return '';
+          };
+
+          const getProp = (obj: any, key: string): any => {
+            if (!obj) return undefined;
+            if (typeof obj.get === 'function') {
+              try {
+                const v = obj.get(key);
+                if (v !== undefined) return v;
+              } catch (_) {}
+            }
+            return obj[key] ?? obj.attributes?.[key] ?? obj.__x?.[key] ?? obj._data?.[key];
+          };
+
+          const collections = w.require?.('WAWebCollections');
+          if (!collections) return null;
+          const MsgCol = collections.Msg;
+          const ChatCol = collections.Chat;
+          const ContactCol = collections.Contact;
+          const ProfilePicThumb = collections.ProfilePicThumb;
+          const ContactGetters = w.require?.('WAWebContactGetters');
+
+          let msg: any = MsgCol?.get?.(targetMsgId);
+          if (!msg && MsgCol?.getModelsArray) {
+            msg = MsgCol.getModelsArray().find((item: any) => {
+              const sid = serializeId(item?.id);
+              return (
+                sid === targetMsgId ||
+                sid.endsWith(`_${targetMsgId}`) ||
+                targetMsgId.endsWith(`_${sid}`)
+              );
+            });
+          }
+          if (!msg && targetChatId && ChatCol?.get) {
+            const chat = ChatCol.get(targetChatId);
+            const chatMsgs: any[] = chat?.msgs?.getModelsArray?.() || [];
+            msg = chatMsgs.find((item: any) => {
+              const sid = serializeId(item?.id);
+              return (
+                sid === targetMsgId ||
+                sid.endsWith(`_${targetMsgId}`) ||
+                targetMsgId.endsWith(`_${sid}`)
+              );
+            });
+          }
+          if (!msg && MsgCol?.getMessagesById) {
+            try {
+              const res = await MsgCol.getMessagesById([targetMsgId]);
+              msg = res?.messages?.[0] || null;
+            } catch (_) {}
+          }
+          if (!msg) return null;
+
+          const mId = serializeId(msg.id) || targetMsgId;
+
+          const myIds = new Set<string>();
+          try {
+            const mePrefs = w.require?.('WAWebUserPrefsMeUser') || {};
+            const connMod = w.require?.('WAWebConnModel') || {};
+            const addMe = (val: any) => {
+              const sid = serializeId(val);
+              if (sid) {
+                myIds.add(sid);
+                const u = sid.split('@')[0];
+                if (u) myIds.add(u);
+              }
+            };
+            addMe(mePrefs.getMaybeMePnUser?.());
+            addMe(mePrefs.getMaybeMeLidUser?.());
+            addMe(mePrefs.getMeUser?.());
+            addMe(connMod.Conn?.wid);
+          } catch (_) {}
+
+          const rawPollName = String(
+            getProp(msg, 'pollName') ||
+              msg.pollName ||
+              msg._data?.pollName ||
+              getProp(msg, 'body') ||
+              ''
+          ).trim();
+
+          const rawOptsSource =
+            getProp(msg, 'pollOptions') || msg.pollOptions || msg._data?.pollOptions;
+          const rawOptsList: any[] = Array.isArray(rawOptsSource)
+            ? rawOptsSource
+            : typeof rawOptsSource?.serialize === 'function'
+            ? rawOptsSource.serialize()
+            : typeof rawOptsSource?.getModelsArray === 'function'
+            ? rawOptsSource.getModelsArray()
+            : Array.isArray(rawOptsSource?.models)
+            ? rawOptsSource.models
+            : [];
+
+          if (rawOptsList.length === 0 && !rawPollName) return null;
+
+          const rawSelectable = Number(
+            getProp(msg, 'pollSelectableOptionsCount') ??
+              getProp(msg, 'selectableOptionsCount') ??
+              msg.pollSelectableOptionsCount ??
+              msg._data?.pollSelectableOptionsCount ??
+              0
+          );
+          const allowMultipleAnswers = rawSelectable !== 1;
+
+          const rawVoteRows: any[] = [];
+          try {
+            const schemaMod = w.require?.('WAWebPollsVotesSchema');
+            const table = schemaMod?.getTable?.();
+            if (table && typeof table.equals === 'function') {
+              const idbVotes: any = await Promise.race([
+                table.equals(['parentMsgKey'], mId),
+                new Promise((r) => setTimeout(() => r([]), 600)),
+              ]);
+              if (Array.isArray(idbVotes)) {
+                rawVoteRows.push(...idbVotes);
+              }
+            }
+          } catch (_) {}
+
+          const PollVotesCol =
+            collections?.PollVotes ||
+            collections?.PollVote ||
+            w.require?.('WAWebPollVoteCollection')?.PollVoteCollection ||
+            null;
+          if (PollVotesCol) {
+            try {
+              const colArr =
+                typeof PollVotesCol.getModelsArray === 'function'
+                  ? PollVotesCol.getModelsArray()
+                  : Array.isArray(PollVotesCol.models)
+                  ? PollVotesCol.models
+                  : [];
+              for (const vm of colArr) {
+                const pKey = serializeId(getProp(vm, 'parentMsgKey') || vm.parentMsgKey);
+                if (pKey === mId || pKey.endsWith(`_${mId}`) || mId.endsWith(`_${pKey}`)) {
+                  rawVoteRows.push(vm);
+                }
+              }
+            } catch (_) {}
+          }
+
+          const voterMap = new Map<
+            string,
+            {
+              id: string;
+              name: string;
+              avatar?: string;
+              fromMe: boolean;
+              timestamp: number;
+              selectedLocalIds: number[];
+            }
+          >();
+
+          for (const v of rawVoteRows) {
+            if (!v) continue;
+            const rawSender =
+              getProp(v, 'sender') ||
+              v.sender ||
+              getProp(v, 'senderUserJid') ||
+              v.senderUserJid ||
+              getProp(v, 'author') ||
+              v.author;
+            const senderId = serializeId(rawSender);
+            const senderUser = senderId ? senderId.split('@')[0] : '';
+            const vFromMe = Boolean(
+              getProp(v, 'fromMe') ||
+                v.fromMe ||
+                v.msgKey?.fromMe ||
+                (senderId && (myIds.has(senderId) || (senderUser && myIds.has(senderUser))))
+            );
+            const voterKey = vFromMe ? 'me' : senderUser || senderId || 'unknown';
+            const ts = Number(
+              getProp(v, 'senderTimestampMs') ||
+                v.senderTimestampMs ||
+                getProp(v, 't') ||
+                v.t ||
+                0
+            );
+
+            const existing = voterMap.get(voterKey);
+            if (existing && existing.timestamp > ts) continue;
+
+            let selectedLocalIds: number[] = [];
+            const rawSel =
+              getProp(v, 'selectedOptionLocalIds') ?? v.selectedOptionLocalIds;
+            if (Array.isArray(rawSel)) {
+              selectedLocalIds = rawSel
+                .map((x: any) => Number(x))
+                .filter((n: number) => !Number.isNaN(n));
+            } else if (
+              rawSel &&
+              typeof rawSel === 'object' &&
+              typeof rawSel.length === 'number'
+            ) {
+              selectedLocalIds = Array.from(rawSel as ArrayLike<number>)
+                .map((x: any) => Number(x))
+                .filter((n: number) => !Number.isNaN(n));
+            } else if (rawSel instanceof Set) {
+              selectedLocalIds = Array.from(rawSel)
+                .map((x: any) => Number(x))
+                .filter((n: number) => !Number.isNaN(n));
+            }
+
+            let vName = 'Você';
+            let vAvatar: string | undefined;
+            if (!vFromMe) {
+              const c =
+                (rawSender ? ContactCol?.get?.(rawSender) : null) ||
+                (senderId ? ContactCol?.get?.(senderId) : null);
+              const rawName =
+                (ContactGetters?.getName
+                  ? (() => {
+                      try {
+                        return ContactGetters.getName(c);
+                      } catch {
+                        return '';
+                      }
+                    })()
+                  : '') ||
+                c?.name ||
+                c?.shortName ||
+                c?.displayName ||
+                c?.pushname ||
+                c?.formattedTitle ||
+                senderUser ||
+                'Contato';
+              vName = String(rawName).replace(/^~/, '').trim() || 'Contato';
+              try {
+                const pic = ProfilePicThumb?.get?.(rawSender || senderId);
+                vAvatar = pic?.eurl || pic?.img || pic?.imgFull || undefined;
+              } catch {}
+            }
+
+            voterMap.set(voterKey, {
+              id: senderId || voterKey,
+              name: vName,
+              avatar: vAvatar,
+              fromMe: vFromMe,
+              timestamp: ts,
+              selectedLocalIds,
+            });
+          }
+
+          if (Array.isArray(overrideIds)) {
+            voterMap.set('me', {
+              id: 'me',
+              name: 'Você',
+              fromMe: true,
+              timestamp: Date.now(),
+              selectedLocalIds: overrideIds,
+            });
+          }
+
+          const allVoters = Array.from(voterMap.values());
+          const parsedOptions = rawOptsList.map((opt: any, idx: number) => {
+            const localId = Number(getProp(opt, 'localId') ?? opt?.localId ?? idx);
+            const rawOptName = String(getProp(opt, 'name') ?? opt?.name ?? '');
+            const optVoters = allVoters
+              .filter((vt) => vt.selectedLocalIds.includes(localId))
+              .map((vt) => ({
+                id: vt.id,
+                name: vt.name,
+                avatar: vt.avatar,
+                fromMe: vt.fromMe,
+                timestamp: vt.timestamp,
+              }));
+
+            return {
+              localId,
+              name: rawOptName || `Opção ${idx + 1}`,
+              count: optVoters.length,
+              selectedByMe: optVoters.some((vt) => vt.fromMe),
+              voters: optVoters,
+            };
+          });
+
+          const totalVotes = parsedOptions.reduce((sum, o) => sum + o.count, 0);
+
+          return {
+            question: rawPollName || 'Enquete',
+            options: parsedOptions,
+            allowMultipleAnswers,
+            selectableOptionsCount: rawSelectable,
+            totalVotes,
+          };
+        },
+        {
+          targetChatId: chatId,
+          targetMsgId: messageId,
+          overrideIds: overrideMySelectedIds,
+        }
+      );
+    } catch (err) {
+      console.error('[WhatsAppService] Error in getPollDataForMessage:', err);
+      return null;
+    }
+  }
+
+  public async votePoll(
+    chatId: string,
+    messageId: string,
+    selectedLocalIds: number[]
+  ): Promise<{ success: boolean; pollData?: FormattedChatMessage['pollData'] }> {
+    if (!this.client?.pupPage || this.status !== 'ready' || !messageId) {
+      return { success: false };
+    }
+
+    try {
+      const voteResult = await this.client.pupPage.evaluate(
+        async ({
+          targetChatId,
+          targetMsgId,
+          requestedLocalIds,
+        }: {
+          targetChatId: string;
+          targetMsgId: string;
+          requestedLocalIds: number[];
+        }) => {
+          const w = window as any;
+          const serializeId = (val: any): string => {
+            if (!val) return '';
+            if (typeof val === 'string') return val;
+            if (typeof val._serialized === 'string' && val._serialized) return val._serialized;
+            if (typeof val.toString === 'function') {
+              const s = val.toString();
+              if (s && s !== '[object Object]') return s;
+            }
+            return '';
+          };
+
+          const getProp = (obj: any, key: string): any => {
+            if (!obj) return undefined;
+            if (typeof obj.get === 'function') {
+              try {
+                const v = obj.get(key);
+                if (v !== undefined) return v;
+              } catch (_) {}
+            }
+            return obj[key] ?? obj.attributes?.[key] ?? obj.__x?.[key] ?? obj._data?.[key];
+          };
+
+          const collections = w.require?.('WAWebCollections');
+          if (!collections) return { ok: false, appliedIds: [] as number[] };
+          const MsgCol = collections.Msg;
+          const ChatCol = collections.Chat;
+
+          let msg: any = MsgCol?.get?.(targetMsgId);
+          if (!msg && MsgCol?.getModelsArray) {
+            msg = MsgCol.getModelsArray().find((item: any) => {
+              const sid = serializeId(item?.id);
+              return (
+                sid === targetMsgId ||
+                sid.endsWith(`_${targetMsgId}`) ||
+                targetMsgId.endsWith(`_${sid}`)
+              );
+            });
+          }
+          if (!msg && targetChatId && ChatCol?.get) {
+            const chat = ChatCol.get(targetChatId);
+            const chatMsgs: any[] = chat?.msgs?.getModelsArray?.() || [];
+            msg = chatMsgs.find((item: any) => {
+              const sid = serializeId(item?.id);
+              return (
+                sid === targetMsgId ||
+                sid.endsWith(`_${targetMsgId}`) ||
+                targetMsgId.endsWith(`_${sid}`)
+              );
+            });
+          }
+          if (!msg && MsgCol?.getMessagesById) {
+            try {
+              const res = await MsgCol.getMessagesById([targetMsgId]);
+              msg = res?.messages?.[0] || null;
+            } catch (_) {}
+          }
+          if (!msg) return { ok: false, appliedIds: [] as number[] };
+
+          const rawOptsSource =
+            getProp(msg, 'pollOptions') || msg.pollOptions || msg._data?.pollOptions;
+          const rawOptsList: any[] = Array.isArray(rawOptsSource)
+            ? rawOptsSource
+            : typeof rawOptsSource?.serialize === 'function'
+            ? rawOptsSource.serialize()
+            : typeof rawOptsSource?.getModelsArray === 'function'
+            ? rawOptsSource.getModelsArray()
+            : Array.isArray(rawOptsSource?.models)
+            ? rawOptsSource.models
+            : [];
+
+          const availableLocalIds = new Set<number>(
+            rawOptsList.map((opt: any, idx: number) =>
+              Number(getProp(opt, 'localId') ?? opt?.localId ?? idx)
+            )
+          );
+
+          const rawSelectable = Number(
+            getProp(msg, 'pollSelectableOptionsCount') ??
+              getProp(msg, 'selectableOptionsCount') ??
+              msg.pollSelectableOptionsCount ??
+              msg._data?.pollSelectableOptionsCount ??
+              0
+          );
+
+          let validIds = (Array.isArray(requestedLocalIds) ? requestedLocalIds : [])
+            .map((x) => Number(x))
+            .filter((n) => !Number.isNaN(n) && availableLocalIds.has(n));
+
+          if (rawSelectable === 1 && validIds.length > 1) {
+            validIds = [validIds[validIds.length - 1]];
+          }
+
+          const localIdSet = new Set<number>(validIds);
+          const sendVoteMod = w.require?.('WAWebPollsSendVoteMsgAction');
+          if (!sendVoteMod || typeof sendVoteMod.sendVote !== 'function') {
+            return { ok: false, appliedIds: [] as number[] };
+          }
+
+          await sendVoteMod.sendVote(msg, localIdSet);
+          return { ok: true, appliedIds: validIds };
+        },
+        {
+          targetChatId: chatId,
+          targetMsgId: messageId,
+          requestedLocalIds: selectedLocalIds,
+        }
+      );
+
+      if (!voteResult?.ok) {
+        return { success: false };
+      }
+
+      const pollData =
+        (await this.getPollDataForMessage(chatId, messageId, voteResult.appliedIds)) ||
+        undefined;
+
+      if (pollData) {
+        this.emitToRenderer('wa:poll-vote-received', {
+          chatId,
+          messageId,
+          pollData,
+        });
+      }
+
+      return { success: true, pollData };
+    } catch (err) {
+      console.error('[WhatsAppService] Error in votePoll:', err);
+      return { success: false };
     }
   }
 

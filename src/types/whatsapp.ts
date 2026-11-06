@@ -85,6 +85,31 @@ export interface MessageReactionItem {
   senders?: ReactionSender[];
 }
 
+export interface PollVoter {
+  id: string;
+  name?: string;
+  avatar?: string;
+  fromMe?: boolean;
+  timestamp?: number;
+}
+
+export interface PollOptionItem {
+  localId: number;
+  name: string;
+  count: number;
+  selectedByMe: boolean;
+  voters?: PollVoter[];
+}
+
+export interface PollData {
+  question: string;
+  allowMultipleAnswers: boolean;
+  selectableOptionsCount: number;
+  totalVotes: number;
+  totalVoters?: number;
+  options: PollOptionItem[];
+}
+
 export interface FormattedMessage {
   id: string;
   chatId: string;
@@ -92,7 +117,7 @@ export interface FormattedMessage {
   timestamp: string;
   dateLabel?: string;
   fromMe: boolean;
-  type: 'text' | 'audio' | 'image' | 'video' | 'sticker' | 'document';
+  type: 'text' | 'audio' | 'image' | 'video' | 'sticker' | 'document' | 'poll';
   isViewOnce?: boolean;
   senderName?: string;
   senderColor?: string;
@@ -107,6 +132,7 @@ export interface FormattedMessage {
   reactions?: MessageReactionItem[];
   audioData?: AudioData;
   documentData?: DocumentData;
+  pollData?: PollData;
   mentions?: string[];
 }
 
@@ -381,6 +407,18 @@ export interface ElectronAPI {
       senderId?: string;
       fromMe?: boolean;
       timestamp?: number;
+    }) => void
+  ) => () => void;
+  votePoll?: (
+    chatId: string,
+    messageId: string,
+    selectedLocalIds: number[]
+  ) => Promise<{ success: boolean; pollData?: PollData | null }>;
+  onPollVoteReceived?: (
+    callback: (payload: {
+      chatId: string;
+      messageId: string;
+      pollData: PollData;
     }) => void
   ) => () => void;
   downloadMedia: (msgId: string) => Promise<string | null>;

@@ -102,6 +102,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:send-reaction', { chatId, messageId, reaction });
   },
 
+  votePoll: (chatId: string, messageId: string, selectedLocalIds: number[]) => {
+    return ipcRenderer.invoke('wa:vote-poll', { chatId, messageId, selectedLocalIds });
+  },
+
   getHighResProfilePic: (chatId: string) => {
     return ipcRenderer.invoke('wa:get-high-res-pic', chatId);
   },
@@ -330,6 +334,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
     ipcRenderer.on('wa:reaction-received', handler);
     return () => ipcRenderer.removeListener('wa:reaction-received', handler);
+  },
+
+  onPollVoteReceived: (callback: (payload: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('wa:poll-vote-received', handler);
+    return () => ipcRenderer.removeListener('wa:poll-vote-received', handler);
   },
 
   onStatusChange: (callback: (payload: { status: string; error?: string | null }) => void) => {

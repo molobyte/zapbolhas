@@ -23,6 +23,7 @@ export const App: React.FC = () => {
     applyRealWhatsAppChats,
     receiveIncomingMessage,
     applyReactionUpdate,
+    applyPollVoteUpdate,
     updateMessageAck,
     deleteMessagesLocally,
     applyExternalSettingsUpdate,
@@ -147,6 +148,12 @@ export const App: React.FC = () => {
         })
       : () => {};
 
+    const unsubPollVote = api.onPollVoteReceived
+      ? api.onPollVoteReceived((payload) => {
+          applyPollVoteUpdate(payload);
+        })
+      : () => {};
+
     const unsubAck = api.onMessageAck
       ? api.onMessageAck((payload) => {
           updateMessageAck(payload);
@@ -205,6 +212,7 @@ export const App: React.FC = () => {
       unsubChats();
       unsubMsg();
       unsubReaction();
+      unsubPollVote();
       unsubAck();
       unsubDeleted();
       unsubStatus();
@@ -223,6 +231,7 @@ export const App: React.FC = () => {
     applyRealWhatsAppChats,
     receiveIncomingMessage,
     applyReactionUpdate,
+    applyPollVoteUpdate,
     updateMessageAck,
     deleteMessagesLocally,
     applyExternalSettingsUpdate,
