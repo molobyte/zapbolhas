@@ -236,27 +236,28 @@ export function isFormatActive(
 }
 
 /**
- * Calcula o ponto horizontal central da seleção do texto dentro do textarea em pixels.
+ * Calcula o ponto horizontal central da seleção do texto dentro do textarea ou input em pixels.
  */
 export function getSelectionHorizontalOffset(
-  textarea: HTMLTextAreaElement,
+  element: HTMLTextAreaElement | HTMLInputElement,
   start: number,
   end: number
 ): number {
   try {
     if (start === end || typeof window === 'undefined') {
-      return textarea.clientWidth / 2;
+      return element.clientWidth / 2;
     }
 
-    const computed = window.getComputedStyle(textarea);
+    const computed = window.getComputedStyle(element);
     const mirror = document.createElement('div');
     mirror.style.position = 'absolute';
     mirror.style.top = '-9999px';
     mirror.style.left = '-9999px';
     mirror.style.visibility = 'hidden';
-    mirror.style.whiteSpace = 'pre-wrap';
-    mirror.style.wordBreak = 'break-word';
-    mirror.style.width = `${textarea.clientWidth}px`;
+    const isInput = element.tagName.toLowerCase() === 'input';
+    mirror.style.whiteSpace = isInput ? 'pre' : 'pre-wrap';
+    mirror.style.wordBreak = isInput ? 'normal' : 'break-word';
+    mirror.style.width = `${element.clientWidth}px`;
     mirror.style.font = computed.font;
     mirror.style.fontSize = computed.fontSize;
     mirror.style.fontFamily = computed.fontFamily;
@@ -265,8 +266,8 @@ export function getSelectionHorizontalOffset(
     mirror.style.paddingRight = computed.paddingRight;
     mirror.style.boxSizing = computed.boxSizing;
 
-    const beforeText = textarea.value.substring(0, start);
-    const selectedText = textarea.value.substring(start, end);
+    const beforeText = element.value.substring(0, start);
+    const selectedText = element.value.substring(start, end);
 
     const spanBefore = document.createElement('span');
     spanBefore.textContent = beforeText;
@@ -278,11 +279,13 @@ export function getSelectionHorizontalOffset(
     mirror.appendChild(spanSelected);
     document.body.appendChild(mirror);
 
-    const offsetLeft = spanSelected.offsetLeft + spanSelected.offsetWidth / 2;
+    const rawOffset = spanSelected.offsetLeft + spanSelected.offsetWidth / 2;
+    const scrollLeft = element.scrollLeft || 0;
+    const offsetLeft = rawOffset - scrollLeft;
     document.body.removeChild(mirror);
 
-    return Math.max(12, Math.min(textarea.clientWidth - 12, offsetLeft));
+    return Math.max(12, Math.min(element.clientWidth - 12, offsetLeft));
   } catch {
-    return textarea.clientWidth / 2;
+    return element.clientWidth / 2;
   }
 }

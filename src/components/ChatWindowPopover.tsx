@@ -146,6 +146,14 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     centerX: number;
     containerWidth: number;
   } | null>(null);
+  const pendingInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const pendingBarRef = useRef<HTMLDivElement | null>(null);
+  const [pendingSelectionToolbar, setPendingSelectionToolbar] = useState<{
+    start: number;
+    end: number;
+    centerX: number;
+    containerWidth: number;
+  } | null>(null);
   const userHasScrolledUpRef = useRef<boolean>(false);
   const isAtBottomRef = useRef<boolean>(true);
   const initialUnreadScrolledForChatRef = useRef<string | null>(null);
@@ -622,10 +630,19 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
   }, [inputText]);
 
   useEffect(() => {
+    const textarea = pendingInputRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    const nextHeight = Math.min(textarea.scrollHeight, 84);
+    textarea.style.height = `${Math.max(36, nextHeight)}px`;
+  }, [pendingCaption]);
+
+  useEffect(() => {
     setViewingImage(null);
     setPickerOpen(false);
     setShowMentionPopover(false);
     setSelectionToolbar(null);
+    setPendingSelectionToolbar(null);
     setZoom(1);
   }, [activeChatId, setViewingImage]);
 
@@ -637,6 +654,9 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     const handleGlobalMouseDown = (e: MouseEvent) => {
       if (formRef.current && !formRef.current.contains(e.target as Node)) {
         setSelectionToolbar(null);
+      }
+      if (pendingBarRef.current && !pendingBarRef.current.contains(e.target as Node)) {
+        setPendingSelectionToolbar(null);
       }
     };
     window.addEventListener('mousedown', handleGlobalMouseDown);
@@ -704,6 +724,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     caption?: string;
   }) => {
     setPickerOpen(false);
+    setPendingSelectionToolbar(null);
     setPendingCaption(media.caption || '');
     setPendingMedia({
       ...media,
@@ -715,6 +736,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     if (pendingMedia?.previousInputText !== undefined) {
       setInputText(pendingMedia.previousInputText);
     }
+    setPendingSelectionToolbar(null);
     setPendingMedia(null);
     setPendingCaption('');
     requestAnimationFrame(() => {
@@ -770,6 +792,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
       caption: captionForWhatsApp ? captionForWhatsApp : undefined,
       mentions: mentionJids.size > 0 ? Array.from(mentionJids) : undefined,
     };
+    setPendingSelectionToolbar(null);
     setPendingMedia(null);
     setPendingCaption('');
     setInputText('');
@@ -809,6 +832,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         if (typeof reader.result === 'string') {
           const textAlreadyTyped = inputText.trim();
           setPickerOpen(false);
+          setPendingSelectionToolbar(null);
           setPendingCaption(textAlreadyTyped);
           setPendingMedia({
             mediaDataUrl: reader.result,
@@ -871,6 +895,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
               e.preventDefault();
               e.stopPropagation();
               setPickerOpen(false);
+              setPendingSelectionToolbar(null);
               setPendingCaption(inputText.trim());
               setPendingMedia({
                 mediaDataUrl: clip.dataUrl,
@@ -1386,6 +1411,63 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
         inputRef.current.focus();
         inputRef.current.setSelectionRange(result.newStart, result.newEnd);
         handleCheckTextSelection();
+      }
+    });
+  };
+
+  const handleCheckPendingTextSelection = () => {
+    const textarea = pendingInputRef.current;
+    const bar = pendingBarRef.current;
+    if (!textarea || !bar) {
+      setPendingSelectionToolbar(null);
+      return;
+    }
+
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+
+    if (start >= end) {
+      setPendingSelectionToolbar(null);
+      return;
+    }
+
+    const selectedStr = textarea.value.substring(start, end);
+    if (!selectedStr.trim()) {
+      setPendingSelectionToolbar(null);
+      return;
+    }
+
+    const barRect = bar.getBoundingClientRect();
+    const textareaRect = textarea.getBoundingClientRect();
+    const offsetInsideTextarea = getSelectionHorizontalOffset(textarea, start, end);
+    const centerX = textareaRect.left - barRect.left + offsetInsideTextarea;
+
+    setPendingSelectionToolbar({
+      start,
+      end,
+      centerX,
+      containerWidth: barRect.width,
+    });
+  };
+
+  const handleApplyPendingFormat = (type: FormatType) => {
+    const textarea = pendingInputRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    if (start >= end) return;
+
+    const currentVal = textarea.value;
+    const result = formatSelectedText(type, currentVal, start, end);
+
+    setPendingCaption(result.nextText);
+
+    requestAnimationFrame(() => {
+      if (pendingInputRef.current) {
+        pendingInputRef.current.focus();
+        pendingInputRef.current.setSelectionRange(result.newStart, result.newEnd);
+        handleCheckPendingTextSelection();
       }
     });
   };
@@ -2928,11 +3010,32 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
             </div>
 
             {/* Barra Inferior com Legenda e Botões Cancelar / Confirmar */}
-            <div className="p-2.5 bg-[#111B21] border-t border-white/10 flex items-center gap-2 shrink-0 z-10">
-              <input
-                type="text"
+            <div
+              ref={pendingBarRef}
+              className="relative p-2.5 bg-[#111B21] border-t border-white/10 flex items-center gap-2 shrink-0 z-10"
+            >
+              {/* Barra Flutuante de Formatação de Texto (WhatsApp Web) */}
+              <AnimatePresence>
+                {pendingSelectionToolbar && (
+                  <TextFormatToolbar
+                    fullText={pendingCaption}
+                    selectionStart={pendingSelectionToolbar.start}
+                    selectionEnd={pendingSelectionToolbar.end}
+                    centerX={pendingSelectionToolbar.centerX}
+                    containerWidth={pendingSelectionToolbar.containerWidth}
+                    onApplyFormat={handleApplyPendingFormat}
+                  />
+                )}
+              </AnimatePresence>
+
+              <textarea
+                ref={pendingInputRef}
+                rows={1}
                 value={pendingCaption}
                 onChange={(e) => setPendingCaption(e.target.value)}
+                onSelect={handleCheckPendingTextSelection}
+                onKeyUp={handleCheckPendingTextSelection}
+                onMouseUp={handleCheckPendingTextSelection}
                 onKeyDown={(e) => {
                   if (e.ctrlKey || e.metaKey) {
                     const input = e.currentTarget;
@@ -2948,29 +3051,37 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
                       if (fType) {
                         e.preventDefault();
-                        const res = formatSelectedText(fType, pendingCaption, start, end);
-                        setPendingCaption(res.nextText);
-                        requestAnimationFrame(() => {
-                          input.setSelectionRange(res.newStart, res.newEnd);
-                        });
+                        handleApplyPendingFormat(fType);
                         return;
                       }
                     }
                   }
+
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    if (pendingSelectionToolbar) {
+                      setPendingSelectionToolbar(null);
+                      return;
+                    }
+                    handleCancelPendingMedia();
+                    return;
+                  }
+
                   if (e.key === 'Enter') {
+                    if (e.shiftKey) {
+                      return;
+                    }
                     e.preventDefault();
                     handleConfirmPendingMedia();
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    handleCancelPendingMedia();
                   }
                 }}
                 placeholder="Adicionar legenda... (Opcional)"
                 autoFocus
                 style={{
                   fontSize: `${chatFontSize}px`,
+                  lineHeight: `${Math.round(chatFontSize * 1.38)}px`,
                 }}
-                className="flex-1 bg-[#202C33] text-[#D1D7DB] placeholder-[#8696A0] px-3.5 py-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#00A884]/60 transition-all border border-transparent"
+                className="flex-1 bg-[#202C33] text-[#D1D7DB] placeholder-[#8696A0] px-3.5 py-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#00A884]/60 transition-all border border-transparent resize-none overflow-y-auto max-h-[84px] wa-scrollbar"
               />
 
               <button
