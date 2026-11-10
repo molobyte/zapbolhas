@@ -247,8 +247,8 @@ function updateTrayMenu() {
 
   appTray.setToolTip(
     isZapBolhasHidden
-      ? 'ZapBolhas (Escondido — Clique para revelar)'
-      : 'ZapBolhas (Ativo — Clique para esconder)'
+      ? `ZapBolhas v${app.getVersion()} (Escondido — Clique para revelar)`
+      : `ZapBolhas v${app.getVersion()} (Ativo — Clique para esconder)`
   );
   appTray.setContextMenu(contextMenu);
 }

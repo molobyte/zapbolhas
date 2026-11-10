@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-bubbles",
-  "version": "1.0.0",
+  "version": "0.44.57",
   "description": "WhatsApp Bubbles Desktop Overlay (Chat Heads) for Windows 11",
   "main": "dist-electron/main.js",
   "scripts": {

@@ -259,7 +259,7 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
           {/* Rodapé da Barra Lateral */}
           <div className="pt-2 border-t border-white/[0.06] px-2 text-[10.5px] text-[#8696A0] flex items-center justify-between">
             <span>Zapbolhas</span>
-            <span className="px-1.5 py-0.5 rounded bg-[#202C33] text-[9.5px] text-[#AEBAC1]">Desktop</span>
+            <span className="px-1.5 py-0.5 rounded bg-[#202C33] text-[9.5px] text-[#25D366] font-mono font-medium">v0.44.57</span>
           </div>
         </aside>
 
@@ -1200,6 +1200,22 @@ export const SettingsPopover: React.FC<SettingsPopoverProps> = ({
                       <span className="px-1.5 py-0.5 rounded bg-[#111B21] text-[#E9EDEF] font-mono text-[10px] shrink-0">Arrastar</span>
                       <span>Arraste pela barra de título superior para mover janelas livremente pela sua área de trabalho.</span>
                     </div>
+                  </div>
+                </section>
+
+                {/* 3. Informações da Versão */}
+                <section className="bg-[#111B21]/90 rounded-[8px] p-3.5 border border-white/[0.06] flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Info className="w-4 h-4 text-[#25D366]" />
+                    <span className="text-[13px] font-semibold text-[#E9EDEF]">
+                      Versão do Zapbolhas
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-[#8696A0]">44 feats • 57 fixes</span>
+                    <span className="px-2 py-0.5 rounded bg-[#25D366]/15 border border-[#25D366]/30 text-[11px] font-mono text-[#25D366] font-semibold">
+                      v0.44.57
+                    </span>
                   </div>
                 </section>
               </>
