@@ -265,6 +265,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:logout');
   },
 
+  reconnectWhatsApp: () => {
+    return ipcRenderer.invoke('wa:reconnect');
+  },
+
+  resetSessionForQr: () => {
+    return ipcRenderer.invoke('wa:reset-session-qr');
+  },
+
   refreshWhatsApp: () => {
     return ipcRenderer.invoke('wa:refresh');
   },
@@ -342,9 +350,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('wa:poll-vote-received', handler);
   },
 
-  onStatusChange: (callback: (payload: { status: string; error?: string | null }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, payload: { status: string; error?: string | null }) =>
-      callback(payload);
+  onStatusChange: (callback: (payload: { status: string; error?: string | null; details?: unknown }) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: { status: string; error?: string | null; details?: unknown }
+    ) => callback(payload);
     ipcRenderer.on('wa:status-change', handler);
     return () => ipcRenderer.removeListener('wa:status-change', handler);
   },

@@ -640,6 +640,16 @@ function registerIpcHandlers() {
     return await waService.logout();
   });
 
+  ipcMain.handle('wa:reconnect', async () => {
+    if (!waService) return { status: 'disconnected', qrDataUrl: null };
+    return await waService.reconnect();
+  });
+
+  ipcMain.handle('wa:reset-session-qr', async () => {
+    if (!waService) return { status: 'disconnected', qrDataUrl: null };
+    return await waService.resetSessionForQr();
+  });
+
   ipcMain.handle('window:get-displays', async () => {
     const primary = screen.getPrimaryDisplay();
     const allDisplays = screen.getAllDisplays();

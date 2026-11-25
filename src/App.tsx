@@ -120,7 +120,7 @@ export const App: React.FC = () => {
       if (res.qrDataUrl) {
         setQrDataUrl(res.qrDataUrl);
       }
-      setWaStatus(res.status);
+      setWaStatus(res.status, null, res.details);
     });
 
     const unsubQr = api.onQr((qrDataUrl) => {
@@ -166,8 +166,8 @@ export const App: React.FC = () => {
         })
       : () => {};
 
-    const unsubStatus = api.onStatusChange(({ status, error }) => {
-      setWaStatus(status, error);
+    const unsubStatus = api.onStatusChange(({ status, error, details }) => {
+      setWaStatus(status, error, details);
     });
 
     const unsubSettings = api.onSettingsUpdated

@@ -22,6 +22,7 @@ import {
   StartupChatFilter,
   TypingParticipantInfo,
   ViewingImageState,
+  WaConnectionDetails,
   WaConnectionState,
 } from '../types/whatsapp';
 import { triggerIncomingNotificationSound } from '../utils/notificationSound';
@@ -327,6 +328,8 @@ interface BubbleStoreState {
   waStatus: WaConnectionState;
   qrDataUrl: string | null;
   waError: string | null;
+  waConnectionDetails: WaConnectionDetails;
+  isReconnectingSession: boolean;
   hasSyncedRealChats: boolean;
 
   // Configurações do Usuário
@@ -367,7 +370,11 @@ interface BubbleStoreState {
   dockAnimPhase: 'visible' | 'merging' | 'zooming-out' | 'hidden' | 'zooming-in' | 'emerging';
 
   // Actions
-  setWaStatus: (status: WaConnectionState, error?: string | null) => void;
+  setWaStatus: (
+    status: WaConnectionState,
+    error?: string | null,
+    details?: WaConnectionDetails
+  ) => void;
   setQrDataUrl: (qr: string | null) => void;
   setChats: (chats: ChatSummary[]) => void;
   setTypingByChat: (presenceByChat: Record<string, TypingParticipantInfo[]>) => void;
@@ -402,6 +409,9 @@ interface BubbleStoreState {
   applyExternalSettingsUpdate: (patch: Record<string, unknown>) => void;
   openSettings: () => void;
   logoutWhatsApp: () => Promise<void>;
+  reconnectWhatsApp: () => Promise<void>;
+  requestNewQrSession: () => Promise<void>;
+  openQrCodePopover: () => void;
   refreshApp: () => Promise<void>;
 
   // Core Business Logic Flows (Specs Section 5)
@@ -564,6 +574,22 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   waStatus: 'initializing',
   qrDataUrl: null,
   waError: null,
+  waConnectionDetails: {
+    stage: 'launching_browser',
+    title: 'Iniciando WhatsApp...',
+    detail: 'Preparando conexão com a sessão do WhatsApp...',
+    isConnected: false,
+    hasSavedSession: false,
+    canRetry: true,
+    needsQrCode: false,
+    progressPercent: null,
+    chatsLoadedCount: 0,
+    waWebState: null,
+    lastActivityAt: Date.now(),
+    stageStartedAt: Date.now(),
+    reason: null,
+  },
+  isReconnectingSession: false,
   hasSyncedRealChats: false,
 
   bubbleScale: initialSettings.bubbleScale,
@@ -602,9 +628,82 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   isDockHidden: false,
   dockAnimPhase: 'visible',
 
-  setWaStatus: (waStatus, waError = null) => {
-    const { activePopover } = get();
-    set({ waStatus, waError });
+  setWaStatus: (waStatus, waError = null, details) => {
+    const { activePopover, waConnectionDetails } = get();
+    const now = Date.now();
+
+    const fallbackDetails: WaConnectionDetails = details
+      ? details
+      : waStatus === 'ready'
+      ? {
+          ...waConnectionDetails,
+          stage: get().hasSyncedRealChats ? 'ready' : 'loading_chats',
+          title: get().hasSyncedRealChats ? 'Conectado' : 'Carregando suas conversas...',
+          detail: get().hasSyncedRealChats
+            ? 'Sessão conectada ao WhatsApp.'
+            : 'Conectado ao WhatsApp! Sincronizando lista de conversas...',
+          isConnected: true,
+          needsQrCode: false,
+          lastActivityAt: now,
+        }
+      : waStatus === 'authenticated'
+      ? {
+          ...waConnectionDetails,
+          stage: 'syncing_messages',
+          title: 'Sessão conectada! Lendo mensagens...',
+          detail: 'Autenticação confirmada — sincronizando mensagens recentes...',
+          isConnected: true,
+          needsQrCode: false,
+          lastActivityAt: now,
+        }
+      : waStatus === 'qr'
+      ? {
+          ...waConnectionDetails,
+          stage: 'awaiting_qr',
+          title: 'Escaneie o QR Code',
+          detail: 'Sessão não conectada. Aponte a câmera do WhatsApp no celular para conectar.',
+          isConnected: false,
+          needsQrCode: true,
+          canRetry: true,
+          lastActivityAt: now,
+        }
+      : waStatus === 'disconnected'
+      ? {
+          ...waConnectionDetails,
+          stage: 'disconnected',
+          title: 'Sessão desconectada',
+          detail:
+            waError ||
+            'A conexão foi encerrada ou o token expirou. Tente reconectar ou leia o QR Code novamente.',
+          isConnected: false,
+          needsQrCode: true,
+          canRetry: true,
+          reason: waError,
+          lastActivityAt: now,
+        }
+      : waStatus === 'error'
+      ? {
+          ...waConnectionDetails,
+          stage: 'error',
+          title: 'Erro na conexão',
+          detail: waError || 'Não foi possível iniciar o motor do WhatsApp.',
+          isConnected: false,
+          needsQrCode: true,
+          canRetry: true,
+          reason: waError,
+          lastActivityAt: now,
+        }
+      : {
+          ...waConnectionDetails,
+          lastActivityAt: now,
+        };
+
+    set({
+      waStatus,
+      waError,
+      waConnectionDetails: fallbackDetails,
+      ...(waStatus !== 'initializing' ? { isReconnectingSession: false } : {}),
+    });
 
     if (waStatus === 'qr') {
       // Sem sessão conectada: abre automaticamente o leitor de QR Code
@@ -1606,6 +1705,110 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     }
   },
 
+  reconnectWhatsApp: async () => {
+    const now = Date.now();
+    set((state) => ({
+      isReconnectingSession: true,
+      waStatus: 'initializing',
+      waError: null,
+      qrDataUrl: null,
+      waConnectionDetails: {
+        ...state.waConnectionDetails,
+        stage: 'launching_browser',
+        title: 'Reconectando ao WhatsApp...',
+        detail: 'Reiniciando a conexão e verificando sua sessão salva...',
+        isConnected: false,
+        canRetry: true,
+        needsQrCode: false,
+        progressPercent: null,
+        lastActivityAt: now,
+        stageStartedAt: now,
+        reason: null,
+      },
+    }));
+    try {
+      const api = window.electronAPI;
+      const res = api?.reconnectWhatsApp
+        ? await api.reconnectWhatsApp()
+        : api?.initWhatsApp
+        ? await api.initWhatsApp()
+        : null;
+      if (res) {
+        if (res.qrDataUrl) {
+          set({ qrDataUrl: res.qrDataUrl });
+        }
+        get().setWaStatus(res.status, null, res.details);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Falha ao tentar reconectar.';
+      get().setWaStatus('error', msg);
+    } finally {
+      set({ isReconnectingSession: false });
+    }
+  },
+
+  requestNewQrSession: async () => {
+    const now = Date.now();
+    set({
+      isReconnectingSession: true,
+      waStatus: 'initializing',
+      qrDataUrl: null,
+      waError: null,
+      hasSyncedRealChats: false,
+      activeChatId: null,
+      replyingTo: null,
+      viewingImage: null,
+      activePopover: 'qr-code',
+      waConnectionDetails: {
+        stage: 'launching_browser',
+        title: 'Preparando novo QR Code...',
+        detail: 'Encerrando a sessão antiga para gerar um novo QR Code limpo...',
+        isConnected: false,
+        hasSavedSession: false,
+        canRetry: true,
+        needsQrCode: true,
+        progressPercent: null,
+        chatsLoadedCount: 0,
+        waWebState: null,
+        lastActivityAt: now,
+        stageStartedAt: now,
+        reason: null,
+      },
+    });
+    try {
+      const api = window.electronAPI;
+      if (api?.resetSessionForQr) {
+        const res = await api.resetSessionForQr();
+        if (res) {
+          if (res.qrDataUrl) {
+            set({ qrDataUrl: res.qrDataUrl });
+          }
+          get().setWaStatus(res.status, null, res.details);
+        }
+      } else if (api?.logoutWhatsApp) {
+        await api.logoutWhatsApp();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Falha ao gerar novo QR Code.';
+      get().setWaStatus('error', msg);
+    } finally {
+      set({ isReconnectingSession: false });
+    }
+  },
+
+  openQrCodePopover: () => {
+    const { qrDataUrl, waStatus } = get();
+    set({
+      activePopover: 'qr-code',
+      activeChatId: null,
+      replyingTo: null,
+      viewingImage: null,
+    });
+    if (!qrDataUrl && waStatus !== 'qr') {
+      get().requestNewQrSession();
+    }
+  },
+
   refreshApp: async () => {
     // 1. Invoca refresh no backend (limpa caches e puxa conversas mais recentes do WhatsApp)
     if (window.electronAPI?.refreshWhatsApp) {
@@ -1788,14 +1991,12 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
   toggleMainButton: () => {
     const { activePopover, waStatus, qrDataUrl } = get();
 
-    // Caso não tenha conexão (precisa escanear QR Code ou deu erro/desconectou), abre o QR Code
-    const needsQrOrReconnect =
+    // Caso já exista QR Code pronto aguardando leitura, abre diretamente o QR Code
+    const hasActiveQrWaiting =
       waStatus === 'qr' ||
-      waStatus === 'disconnected' ||
-      waStatus === 'error' ||
       Boolean(qrDataUrl && waStatus !== 'ready' && waStatus !== 'authenticated');
 
-    if (needsQrOrReconnect) {
+    if (hasActiveQrWaiting) {
       if (activePopover === 'qr-code') {
         set({ activePopover: 'none', activeChatId: null, viewingImage: null });
       } else {
@@ -1805,18 +2006,11 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           replyingTo: null,
           viewingImage: null,
         });
-        if (
-          window.electronAPI &&
-          (waStatus === 'disconnected' || waStatus === 'error')
-        ) {
-          window.electronAPI.initWhatsApp();
-        }
       }
       return;
     }
 
-    // Conectado ou sincronizando sessão já existente: abre/fecha a lista de conversas
-    // (se ainda estiver carregando as conversas, o ChatListPopover exibe a animação de carregamento)
+    // Conectado, sincronizando ou desconectado (mostra diagnóstico detalhado + ações no ChatListPopover)
     if (activePopover === 'chat-list') {
       set({ activePopover: 'none', activeChatId: null, viewingImage: null });
     } else {

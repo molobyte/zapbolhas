@@ -274,6 +274,36 @@ export type ConnectionMode = 'mock' | 'whatsapp';
 
 export type WaConnectionState = 'disconnected' | 'initializing' | 'qr' | 'authenticated' | 'ready' | 'error';
 
+export type WaSyncStage =
+  | 'launching_browser'
+  | 'opening_whatsapp'
+  | 'checking_session'
+  | 'awaiting_qr'
+  | 'authenticating'
+  | 'syncing_messages'
+  | 'loading_chats'
+  | 'ready'
+  | 'session_expired'
+  | 'disconnected'
+  | 'stalled'
+  | 'error';
+
+export interface WaConnectionDetails {
+  stage: WaSyncStage;
+  title: string;
+  detail: string;
+  isConnected: boolean;
+  hasSavedSession: boolean;
+  canRetry: boolean;
+  needsQrCode: boolean;
+  progressPercent?: number | null;
+  chatsLoadedCount?: number;
+  waWebState?: string | null;
+  lastActivityAt: number;
+  stageStartedAt: number;
+  reason?: string | null;
+}
+
 export interface IncomingMessagePayload {
   chat: ChatSummary;
   message: FormattedMessage;
@@ -466,12 +496,31 @@ export interface ElectronAPI {
   onDisplayChanged?: (callback: (displayId: number) => void) => () => void;
   syncTrayState?: (state: { hidden?: boolean; soundMuted?: boolean }) => void;
   logoutWhatsApp?: () => Promise<boolean>;
+  reconnectWhatsApp?: () => Promise<{
+    status: WaConnectionState;
+    qrDataUrl?: string | null;
+    details?: WaConnectionDetails;
+  }>;
+  resetSessionForQr?: () => Promise<{
+    status: WaConnectionState;
+    qrDataUrl?: string | null;
+    details?: WaConnectionDetails;
+  }>;
   refreshWhatsApp?: () => Promise<ChatSummary[]>;
   reloadWindow?: () => void;
   quitApp?: () => void;
-  initWhatsApp: () => Promise<{ status: WaConnectionState; qrDataUrl?: string | null }>;
+  initWhatsApp: () => Promise<{
+    status: WaConnectionState;
+    qrDataUrl?: string | null;
+    details?: WaConnectionDetails;
+  }>;
   getChats: () => Promise<ChatSummary[]>;
-  getStatus: () => Promise<{ status: WaConnectionState; qrDataUrl?: string | null; error?: string | null }>;
+  getStatus: () => Promise<{
+    status: WaConnectionState;
+    qrDataUrl?: string | null;
+    error?: string | null;
+    details?: WaConnectionDetails;
+  }>;
   onQr: (callback: (qrDataUrl: string) => void) => () => void;
   onReady: (callback: () => void) => () => void;
   onChatsLoaded: (callback: (chats: ChatSummary[]) => void) => () => void;
@@ -480,7 +529,13 @@ export interface ElectronAPI {
     callback: (payload: { chatId: string; messageId: string; everyone: boolean }) => void
   ) => () => void;
   onMessageAck?: (callback: (payload: { chatId: string; messageId: string; ack: 'sent' | 'delivered' | 'read' }) => void) => () => void;
-  onStatusChange: (callback: (status: { status: WaConnectionState; error?: string | null }) => void) => () => void;
+  onStatusChange: (
+    callback: (status: {
+      status: WaConnectionState;
+      error?: string | null;
+      details?: WaConnectionDetails;
+    }) => void
+  ) => () => void;
 }
 
 declare global {

@@ -397,17 +397,77 @@ function logPresenceDebug(msg: string) {
   } catch {}
 }
 
+export type WaConnectionStatus =
+  | 'disconnected'
+  | 'initializing'
+  | 'qr'
+  | 'authenticated'
+  | 'ready'
+  | 'error';
+
+export type WaSyncStage =
+  | 'launching_browser'
+  | 'opening_whatsapp'
+  | 'checking_session'
+  | 'awaiting_qr'
+  | 'authenticating'
+  | 'syncing_messages'
+  | 'loading_chats'
+  | 'ready'
+  | 'session_expired'
+  | 'disconnected'
+  | 'stalled'
+  | 'error';
+
+export interface WaConnectionDetails {
+  stage: WaSyncStage;
+  title: string;
+  detail: string;
+  isConnected: boolean;
+  hasSavedSession: boolean;
+  canRetry: boolean;
+  needsQrCode: boolean;
+  progressPercent?: number | null;
+  chatsLoadedCount?: number;
+  waWebState?: string | null;
+  lastActivityAt: number;
+  stageStartedAt: number;
+  reason?: string | null;
+}
+
 export class WhatsAppService {
   private client: Client | null = null;
   private mainWindow: BrowserWindow | null = null;
-  private status: 'disconnected' | 'initializing' | 'qr' | 'authenticated' | 'ready' | 'error' =
-    'disconnected';
+  private status: WaConnectionStatus = 'disconnected';
   private qrDataUrl: string | null = null;
   private lastError: string | null = null;
   private avatarCache = new Map<string, string>();
   private mediaCache = new Map<string, string>();
   private myAvatarUrl = createInitialsAvatarDataUrl('Eu');
   private syncTimer: NodeJS.Timeout | null = null;
+  private startupMonitorTimer: NodeJS.Timeout | null = null;
+  private isProbingStartup = false;
+  private initGeneration = 0;
+  private hasEmittedInitialChats = false;
+  private lastLoadingPercent: number | null = null;
+  private lastProbeChatsCount = 0;
+  private lastProbeSocketState: string | null = null;
+  private unpairedDetectedAt: number | null = null;
+  private connectionDetails: WaConnectionDetails = {
+    stage: 'launching_browser',
+    title: 'Preparando WhatsApp...',
+    detail: 'Aguardando inicialização da sessão.',
+    isConnected: false,
+    hasSavedSession: false,
+    canRetry: true,
+    needsQrCode: false,
+    progressPercent: null,
+    chatsLoadedCount: 0,
+    waWebState: null,
+    lastActivityAt: Date.now(),
+    stageStartedAt: Date.now(),
+    reason: null,
+  };
 
   constructor(mainWindow: BrowserWindow) {
     this.mainWindow = mainWindow;
@@ -417,11 +477,30 @@ export class WhatsAppService {
     this.mainWindow = win;
   }
 
+  private getAuthDataPath(): string {
+    return path.join(app.getPath('userData'), 'wwebjs_auth');
+  }
+
+  private hasSavedLocalAuthSession(): boolean {
+    try {
+      const sessionDefaultDir = path.join(this.getAuthDataPath(), 'session', 'Default');
+      if (!fs.existsSync(sessionDefaultDir)) return false;
+      return (
+        fs.existsSync(path.join(sessionDefaultDir, 'IndexedDB')) ||
+        fs.existsSync(path.join(sessionDefaultDir, 'Local Storage')) ||
+        fs.existsSync(path.join(sessionDefaultDir, 'Preferences'))
+      );
+    } catch {
+      return false;
+    }
+  }
+
   public getStatus() {
     return {
       status: this.status,
       qrDataUrl: this.qrDataUrl,
       error: this.lastError,
+      details: this.connectionDetails,
     };
   }
 
@@ -432,17 +511,631 @@ export class WhatsAppService {
   }
 
   private updateStatus(
-    status: 'disconnected' | 'initializing' | 'qr' | 'authenticated' | 'ready' | 'error',
-    error: string | null = null
+    status: WaConnectionStatus,
+    error: string | null = null,
+    detailsPatch?: Partial<WaConnectionDetails>
   ) {
+    const now = Date.now();
     this.status = status;
     this.lastError = error;
-    this.emitToRenderer('wa:status-change', { status, error });
+
+    if (detailsPatch) {
+      const stageChanged =
+        detailsPatch.stage !== undefined && detailsPatch.stage !== this.connectionDetails.stage;
+      this.connectionDetails = {
+        ...this.connectionDetails,
+        ...detailsPatch,
+        hasSavedSession:
+          detailsPatch.hasSavedSession !== undefined
+            ? detailsPatch.hasSavedSession
+            : this.hasSavedLocalAuthSession(),
+        stageStartedAt: stageChanged
+          ? now
+          : detailsPatch.stageStartedAt ?? this.connectionDetails.stageStartedAt,
+        lastActivityAt: detailsPatch.lastActivityAt ?? now,
+      };
+    }
+
+    this.emitToRenderer('wa:status-change', {
+      status: this.status,
+      error: this.lastError,
+      details: this.connectionDetails,
+    });
+  }
+
+  private updateConnectionDetails(
+    patch: Partial<WaConnectionDetails>,
+    markActivity = true
+  ) {
+    const now = Date.now();
+    const prev = this.connectionDetails;
+    const stageChanged = patch.stage !== undefined && patch.stage !== prev.stage;
+    const next: WaConnectionDetails = {
+      ...prev,
+      ...patch,
+      stageStartedAt: stageChanged ? now : patch.stageStartedAt ?? prev.stageStartedAt,
+      lastActivityAt: markActivity ? now : patch.lastActivityAt ?? prev.lastActivityAt,
+    };
+
+    const changed =
+      prev.stage !== next.stage ||
+      prev.title !== next.title ||
+      prev.detail !== next.detail ||
+      prev.isConnected !== next.isConnected ||
+      prev.canRetry !== next.canRetry ||
+      prev.needsQrCode !== next.needsQrCode ||
+      prev.progressPercent !== next.progressPercent ||
+      prev.chatsLoadedCount !== next.chatsLoadedCount ||
+      prev.waWebState !== next.waWebState ||
+      prev.reason !== next.reason;
+
+    this.connectionDetails = next;
+
+    if (changed) {
+      this.emitToRenderer('wa:status-change', {
+        status: this.status,
+        error: this.lastError,
+        details: this.connectionDetails,
+      });
+    }
+  }
+
+  private stopStartupMonitor() {
+    if (this.startupMonitorTimer) {
+      clearInterval(this.startupMonitorTimer);
+      this.startupMonitorTimer = null;
+    }
+    this.isProbingStartup = false;
+  }
+
+  private startStartupMonitor(gen: number) {
+    this.stopStartupMonitor();
+    this.startupMonitorTimer = setInterval(() => {
+      if (gen !== this.initGeneration) {
+        this.stopStartupMonitor();
+        return;
+      }
+      this.probeStartupProgress(gen).catch(() => {});
+    }, 2000);
+  }
+
+  private async probeStartupProgress(gen: number) {
+    if (this.isProbingStartup || gen !== this.initGeneration) return;
+
+    if (
+      this.status === 'qr' ||
+      this.status === 'disconnected' ||
+      this.status === 'error' ||
+      (this.status === 'ready' && this.hasEmittedInitialChats)
+    ) {
+      this.stopStartupMonitor();
+      return;
+    }
+
+    this.isProbingStartup = true;
+    try {
+      const now = Date.now();
+      const hasSaved = this.hasSavedLocalAuthSession();
+      const client = this.client;
+
+      if (!client) {
+        this.stopStartupMonitor();
+        return;
+      }
+
+      const browser = (client as any).pupBrowser;
+      const page = client.pupPage;
+
+      if (browser && typeof browser.isConnected === 'function' && !browser.isConnected()) {
+        this.stopStartupMonitor();
+        this.updateStatus('disconnected', 'O navegador em segundo plano foi encerrado.', {
+          stage: 'disconnected',
+          title: 'Conexão interrompida',
+          detail: 'O processo do WhatsApp Web foi fechado inesperadamente. Tente reconectar.',
+          isConnected: false,
+          hasSavedSession: hasSaved,
+          canRetry: true,
+          needsQrCode: true,
+          reason: 'BROWSER_CLOSED',
+        });
+        return;
+      }
+
+      if (!page) {
+        const silentMs = now - this.connectionDetails.lastActivityAt;
+        if (silentMs >= 20000 && this.connectionDetails.stage !== 'stalled') {
+          this.updateConnectionDetails(
+            {
+              stage: 'stalled',
+              title: 'Demorando para iniciar',
+              detail:
+                'O motor do WhatsApp em segundo plano está demorando mais que o normal para abrir. Tente reconectar.',
+              isConnected: false,
+              hasSavedSession: hasSaved,
+              canRetry: true,
+              needsQrCode: true,
+              reason: 'BROWSER_LAUNCH_SLOW',
+            },
+            false
+          );
+        }
+        return;
+      }
+
+      if (page.isClosed()) {
+        this.stopStartupMonitor();
+        this.updateStatus('disconnected', 'A página do WhatsApp Web foi fechada.', {
+          stage: 'disconnected',
+          title: 'Sessão encerrada',
+          detail: 'A aba interna do WhatsApp Web fechou inesperadamente. Clique para reconectar.',
+          isConnected: false,
+          hasSavedSession: hasSaved,
+          canRetry: true,
+          needsQrCode: true,
+          reason: 'PAGE_CLOSED',
+        });
+        return;
+      }
+
+      const probePromise = page
+        .evaluate(() => {
+          const w = window as any;
+          let socketState: string | null = null;
+          let hasSynced = false;
+          let offlineProgress: number | null = null;
+          let domProgress: number | null = null;
+          let chatsCount = 0;
+
+          try {
+            const socketMod = typeof w.require === 'function' ? w.require('WAWebSocketModel') : null;
+            if (socketMod?.Socket) {
+              socketState = typeof socketMod.Socket.state === 'string' ? socketMod.Socket.state : null;
+              hasSynced = Boolean(socketMod.Socket.hasSynced);
+            }
+          } catch {}
+
+          try {
+            const handler = w.AuthStore?.OfflineMessageHandler;
+            if (handler && typeof handler.getOfflineDeliveryProgress === 'function') {
+              const p = Number(handler.getOfflineDeliveryProgress());
+              if (!Number.isNaN(p) && p >= 0 && p <= 100) {
+                offlineProgress = Math.round(p);
+              }
+            }
+          } catch {}
+
+          try {
+            const progEl = document.querySelector('progress') as HTMLProgressElement | null;
+            if (progEl && typeof progEl.value === 'number' && typeof progEl.max === 'number' && progEl.max > 0) {
+              domProgress = Math.max(0, Math.min(100, Math.round((progEl.value / progEl.max) * 100)));
+            }
+          } catch {}
+
+          try {
+            const cols = typeof w.require === 'function' ? w.require('WAWebCollections') : null;
+            if (cols?.Chat) {
+              chatsCount =
+                typeof cols.Chat.length === 'number'
+                  ? cols.Chat.length
+                  : Array.isArray(cols.Chat.getModelsArray?.())
+                  ? cols.Chat.getModelsArray().length
+                  : 0;
+            }
+          } catch {}
+
+          const hasQrCanvas = Boolean(
+            document.querySelector(
+              '[data-ref] canvas, canvas[aria-label*="QR"], canvas[aria-label*="Scan"], [data-testid="qrcode"]'
+            )
+          );
+          const hasQrReloadBtn = Boolean(
+            document.querySelector('[data-testid="refresh-large"], [data-ref] button')
+          );
+
+          return {
+            onLine: navigator.onLine,
+            url: window.location.href || '',
+            readyState: document.readyState,
+            socketState,
+            hasSynced,
+            offlineProgress,
+            domProgress,
+            chatsCount,
+            hasQrCanvas,
+            hasQrReloadBtn,
+          };
+        })
+        .catch(() => null);
+
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));
+      const probe = await Promise.race([probePromise, timeoutPromise]);
+
+      if (gen !== this.initGeneration) return;
+
+      if (!probe) {
+        const silentMs = now - this.connectionDetails.lastActivityAt;
+        if (silentMs >= 25000 && this.connectionDetails.stage !== 'stalled') {
+          this.updateConnectionDetails(
+            {
+              stage: 'stalled',
+              title: 'WhatsApp Web sem resposta',
+              detail: hasSaved
+                ? 'A sessão salva não respondeu até o momento. O token pode ter expirado ou o carregamento travou.'
+                : 'O WhatsApp Web está demorando muito para responder.',
+              isConnected: this.status === 'authenticated' || this.status === 'ready',
+              hasSavedSession: hasSaved,
+              canRetry: true,
+              needsQrCode: true,
+              reason: 'PAGE_UNRESPONSIVE',
+            },
+            false
+          );
+        }
+        return;
+      }
+
+      if (!probe.onLine) {
+        this.updateConnectionDetails(
+          {
+            stage: 'disconnected',
+            title: 'Sem conexão com a internet',
+            detail: 'Verifique sua rede. Assim que a internet voltar, tente reconectar.',
+            isConnected: false,
+            hasSavedSession: hasSaved,
+            canRetry: true,
+            needsQrCode: false,
+            waWebState: probe.socketState,
+            reason: 'OFFLINE',
+          },
+          false
+        );
+        return;
+      }
+
+      const detectedPct =
+        this.lastLoadingPercent !== null
+          ? Math.max(this.lastLoadingPercent, probe.offlineProgress ?? 0, probe.domProgress ?? 0)
+          : probe.offlineProgress ?? probe.domProgress;
+
+      const madeProgress =
+        (detectedPct !== null && detectedPct !== this.connectionDetails.progressPercent) ||
+        probe.chatsCount > this.lastProbeChatsCount ||
+        (probe.socketState !== null && probe.socketState !== this.lastProbeSocketState);
+
+      if (probe.chatsCount > this.lastProbeChatsCount) {
+        this.lastProbeChatsCount = probe.chatsCount;
+      }
+      if (probe.socketState) {
+        this.lastProbeSocketState = probe.socketState;
+      }
+
+      // Detecta tela de QR / sessão não pareada mesmo se o evento 'qr' atrasar ou expirar
+      if (
+        this.status === 'initializing' &&
+        (probe.socketState === 'UNPAIRED' ||
+          probe.socketState === 'UNPAIRED_IDLE' ||
+          probe.hasQrCanvas ||
+          probe.hasQrReloadBtn)
+      ) {
+        if (!this.unpairedDetectedAt) {
+          this.unpairedDetectedAt = now;
+        }
+        const unpairedForMs = now - this.unpairedDetectedAt;
+
+        if (probe.hasQrReloadBtn || unpairedForMs >= 6000) {
+          this.updateConnectionDetails(
+            {
+              stage: 'session_expired',
+              title: hasSaved ? 'Sessão desconectada ou expirada' : 'Leitura de QR Code necessária',
+              detail: hasSaved
+                ? 'O token salvo não está mais conectado ao seu celular. Clique abaixo para ler o QR Code novamente.'
+                : 'Nenhuma sessão ativa foi encontrada. Clique abaixo para gerar e ler o QR Code.',
+              isConnected: false,
+              hasSavedSession: hasSaved,
+              canRetry: true,
+              needsQrCode: true,
+              progressPercent: null,
+              waWebState: probe.socketState || 'UNPAIRED',
+              reason: probe.hasQrReloadBtn ? 'QR_EXPIRED' : 'UNPAIRED',
+            },
+            false
+          );
+        } else {
+          this.updateConnectionDetails(
+            {
+              stage: 'checking_session',
+              title: 'Sessão anterior desconectada',
+              detail: 'Preparando QR Code para conectar seu WhatsApp novamente...',
+              isConnected: false,
+              hasSavedSession: hasSaved,
+              canRetry: true,
+              needsQrCode: true,
+              waWebState: probe.socketState || 'UNPAIRED',
+            },
+            madeProgress
+          );
+        }
+        return;
+      }
+
+      this.unpairedDetectedAt = null;
+
+      if (probe.socketState === 'CONFLICT') {
+        this.updateConnectionDetails(
+          {
+            stage: 'disconnected',
+            title: 'Sessão aberta em outro local',
+            detail: 'O WhatsApp detectou conflito de conexão. Tente reconectar ou leia um novo QR Code.',
+            isConnected: false,
+            hasSavedSession: hasSaved,
+            canRetry: true,
+            needsQrCode: true,
+            waWebState: 'CONFLICT',
+            reason: 'CONFLICT',
+          },
+          false
+        );
+        return;
+      }
+
+      if (probe.socketState === 'TIMEOUT') {
+        this.updateConnectionDetails(
+          {
+            stage: 'stalled',
+            title: 'Tempo limite na conexão',
+            detail: 'Não houve resposta do WhatsApp. Verifique sua internet/celular e tente reconectar.',
+            isConnected: false,
+            hasSavedSession: hasSaved,
+            canRetry: true,
+            needsQrCode: true,
+            waWebState: 'TIMEOUT',
+            reason: 'TIMEOUT',
+          },
+          false
+        );
+        return;
+      }
+
+      if (
+        probe.socketState === 'PROXYBLOCK' ||
+        probe.socketState === 'TOS_BLOCK' ||
+        probe.socketState === 'SMB_TOS_BLOCK' ||
+        probe.socketState === 'DEPRECATED_VERSION'
+      ) {
+        this.updateConnectionDetails(
+          {
+            stage: 'error',
+            title: 'Conexão bloqueada pelo WhatsApp',
+            detail: `O WhatsApp Web reportou o estado ${probe.socketState}. Tente gerar uma nova sessão via QR Code.`,
+            isConnected: false,
+            hasSavedSession: hasSaved,
+            canRetry: true,
+            needsQrCode: true,
+            waWebState: probe.socketState,
+            reason: probe.socketState,
+          },
+          false
+        );
+        return;
+      }
+
+      const isAlreadyConnected =
+        this.status === 'ready' ||
+        this.status === 'authenticated' ||
+        probe.socketState === 'CONNECTED' ||
+        probe.hasSynced ||
+        (detectedPct !== null && detectedPct > 0);
+
+      // Se já está ready e existem conversas na memória mas ainda não emitimos, puxa agora!
+      if (this.status === 'ready' && !this.hasEmittedInitialChats && probe.chatsCount > 0) {
+        const chats = await this.getRecentChats();
+        if (gen !== this.initGeneration) return;
+        if (chats.length > 0) {
+          this.hasEmittedInitialChats = true;
+          this.stopStartupMonitor();
+          this.updateConnectionDetails({
+            stage: 'ready',
+            title: 'Conectado',
+            detail: `${chats.length} conversas sincronizadas.`,
+            isConnected: true,
+            hasSavedSession: true,
+            canRetry: false,
+            needsQrCode: false,
+            progressPercent: 100,
+            chatsLoadedCount: chats.length,
+            waWebState: 'CONNECTED',
+            reason: null,
+          });
+          this.emitToRenderer('wa:chats-loaded', chats);
+          this.subscribePresence(chats.slice(0, 25).map((c) => c.id)).catch(() => {});
+          return;
+        }
+      }
+
+      const silentMs = now - this.connectionDetails.lastActivityAt;
+
+      if (isAlreadyConnected) {
+        if (!madeProgress && silentMs >= 35000) {
+          this.updateConnectionDetails(
+            {
+              stage: 'stalled',
+              title: 'Sincronização demorando muito',
+              detail:
+                'Conectado ao WhatsApp, mas o carregamento não avançou recentemente. Aguarde mais um pouco, reconecte ou leia um novo QR Code.',
+              isConnected: true,
+              hasSavedSession: hasSaved,
+              canRetry: true,
+              needsQrCode: true,
+              progressPercent: detectedPct,
+              chatsLoadedCount: probe.chatsCount,
+              waWebState: probe.socketState || 'CONNECTED',
+              reason: 'SYNC_SLOW',
+            },
+            false
+          );
+          return;
+        }
+
+        if (this.status === 'ready') {
+          this.updateConnectionDetails(
+            {
+              stage: 'loading_chats',
+              title: 'Carregando lista de conversas...',
+              detail:
+                probe.chatsCount > 0
+                  ? `Conectado! Organizando ${probe.chatsCount} conversas recentes...`
+                  : 'Conectado! Aguardando o WhatsApp finalizar a leitura das conversas...',
+              isConnected: true,
+              hasSavedSession: hasSaved,
+              canRetry: true,
+              needsQrCode: false,
+              progressPercent: detectedPct ?? 100,
+              chatsLoadedCount: probe.chatsCount,
+              waWebState: probe.socketState || 'CONNECTED',
+              reason: null,
+            },
+            madeProgress
+          );
+        } else {
+          const pctLabel = detectedPct !== null ? ` (${detectedPct}%)` : '';
+          const chatsLabel = probe.chatsCount > 0 ? ` • ${probe.chatsCount} conversas` : '';
+          this.updateConnectionDetails(
+            {
+              stage: 'syncing_messages',
+              title: 'Lendo mensagens recebidas...',
+              detail: `Conectado ao WhatsApp — baixando mensagens recentes${pctLabel}${chatsLabel}`,
+              isConnected: true,
+              hasSavedSession: hasSaved,
+              canRetry: true,
+              needsQrCode: false,
+              progressPercent: detectedPct,
+              chatsLoadedCount: probe.chatsCount,
+              waWebState: probe.socketState || 'CONNECTED',
+              reason: null,
+            },
+            madeProgress
+          );
+        }
+        return;
+      }
+
+      // Ainda não conectou (OPENING, PAIRING, ou carregando página)
+      if (!madeProgress && silentMs >= 25000) {
+        this.updateConnectionDetails(
+          {
+            stage: 'stalled',
+            title: 'Conexão demorando mais que o normal',
+            detail: hasSaved
+              ? 'Ainda não foi possível validar sua sessão salva. O token pode ter expirado ou o WhatsApp não respondeu.'
+              : 'O WhatsApp Web está demorando para iniciar. Tente reconectar ou gerar um novo QR Code.',
+            isConnected: false,
+            hasSavedSession: hasSaved,
+            canRetry: true,
+            needsQrCode: true,
+            progressPercent: detectedPct,
+            chatsLoadedCount: probe.chatsCount,
+            waWebState: probe.socketState,
+            reason: 'CONNECT_TIMEOUT',
+          },
+          false
+        );
+        return;
+      }
+
+      if (probe.socketState === 'PAIRING') {
+        this.updateConnectionDetails(
+          {
+            stage: 'authenticating',
+            title: 'Pareando com seu celular...',
+            detail: 'Confirmando autenticação com o WhatsApp no telefone...',
+            isConnected: false,
+            hasSavedSession: hasSaved,
+            canRetry: true,
+            needsQrCode: false,
+            waWebState: 'PAIRING',
+          },
+          madeProgress
+        );
+      } else if (probe.socketState === 'OPENING' || probe.url.includes('web.whatsapp.com')) {
+        this.updateConnectionDetails(
+          {
+            stage: probe.socketState === 'OPENING' ? 'checking_session' : 'opening_whatsapp',
+            title: hasSaved ? 'Validando sessão salva...' : 'Conectando ao WhatsApp Web...',
+            detail: hasSaved
+              ? 'Verificando se o token salvo ainda está conectado ao seu celular...'
+              : 'Carregando página do WhatsApp Web para iniciar a conexão...',
+            isConnected: false,
+            hasSavedSession: hasSaved,
+            canRetry: true,
+            needsQrCode: false,
+            waWebState: probe.socketState,
+          },
+          madeProgress
+        );
+      }
+    } finally {
+      this.isProbingStartup = false;
+    }
+  }
+
+  private async destroyClientSafely(shouldLogoutFirst = false): Promise<void> {
+    this.stopStartupMonitor();
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+      this.syncTimer = null;
+    }
+
+    const oldClient = this.client;
+    this.client = null;
+    if (!oldClient) return;
+
+    if (shouldLogoutFirst && (this.status === 'ready' || this.status === 'authenticated')) {
+      await Promise.race([
+        oldClient.logout().catch(() => null),
+        new Promise((resolve) => setTimeout(resolve, 3500)),
+      ]);
+    }
+
+    let destroyFinished = false;
+    await Promise.race([
+      oldClient
+        .destroy()
+        .then(() => {
+          destroyFinished = true;
+        })
+        .catch(() => {
+          destroyFinished = true;
+        }),
+      new Promise((resolve) => setTimeout(resolve, 4000)),
+    ]);
+
+    if (!destroyFinished) {
+      try {
+        const proc = (oldClient as any).pupBrowser?.process?.();
+        if (proc && !proc.killed) {
+          proc.kill();
+        }
+      } catch {}
+    }
+  }
+
+  private async clearAuthDataDir(): Promise<void> {
+    const authDataPath = this.getAuthDataPath();
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        if (!fs.existsSync(authDataPath)) return;
+        fs.rmSync(authDataPath, { recursive: true, force: true });
+        return;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
   }
 
   public async initialize(): Promise<{
-    status: 'disconnected' | 'initializing' | 'qr' | 'authenticated' | 'ready' | 'error';
+    status: WaConnectionStatus;
     qrDataUrl?: string | null;
+    details?: WaConnectionDetails;
   }> {
     if (
       this.client &&
@@ -454,18 +1147,54 @@ export class WhatsAppService {
       if (this.status === 'ready') {
         this.getRecentChats().then((chats) => {
           if (chats.length > 0) {
+            this.hasEmittedInitialChats = true;
             this.emitToRenderer('wa:chats-loaded', chats);
           }
         });
       }
-      return { status: this.status, qrDataUrl: this.qrDataUrl };
+      return {
+        status: this.status,
+        qrDataUrl: this.qrDataUrl,
+        details: this.connectionDetails,
+      };
     }
 
-    this.updateStatus('initializing');
+    // Se havia algum client anterior em erro/desconectado, garante limpeza antes de recriar
+    if (this.client) {
+      await this.destroyClientSafely(false);
+    }
+
+    const gen = ++this.initGeneration;
+    this.hasEmittedInitialChats = false;
+    this.lastLoadingPercent = null;
+    this.lastProbeChatsCount = 0;
+    this.lastProbeSocketState = null;
+    this.unpairedDetectedAt = null;
+    this.qrDataUrl = null;
+
+    const hasSaved = this.hasSavedLocalAuthSession();
+    const now = Date.now();
+    this.updateStatus('initializing', null, {
+      stage: 'launching_browser',
+      title: hasSaved ? 'Iniciando sessão salva...' : 'Iniciando WhatsApp...',
+      detail: hasSaved
+        ? 'Abrindo navegador em segundo plano para reconectar sua conta...'
+        : 'Abrindo navegador em segundo plano para gerar o QR Code...',
+      isConnected: false,
+      hasSavedSession: hasSaved,
+      canRetry: true,
+      needsQrCode: false,
+      progressPercent: null,
+      chatsLoadedCount: 0,
+      waWebState: null,
+      lastActivityAt: now,
+      stageStartedAt: now,
+      reason: null,
+    });
 
     try {
       const executablePath = findBrowserExecutable();
-      const authDataPath = path.join(app.getPath('userData'), 'wwebjs_auth');
+      const authDataPath = this.getAuthDataPath();
 
       this.client = new Client({
         authStrategy: new LocalAuth({
@@ -485,18 +1214,88 @@ export class WhatsAppService {
         },
       });
 
-      this.registerEvents();
+      this.registerEvents(gen);
+      this.startStartupMonitor(gen);
+
       this.client.initialize().catch((err: Error) => {
+        if (gen !== this.initGeneration) return;
         console.error('[WhatsAppService] Client initialization error:', err);
-        this.updateStatus('error', err.message || 'Falha ao iniciar o WhatsApp Web');
+        this.stopStartupMonitor();
+        const errMsg = err?.message || 'Falha ao iniciar o WhatsApp Web';
+        this.updateStatus('error', errMsg, {
+          stage: 'error',
+          title: 'Falha ao iniciar WhatsApp',
+          detail: `${errMsg}. Você pode tentar reconectar ou iniciar uma nova sessão via QR Code.`,
+          isConnected: false,
+          hasSavedSession: this.hasSavedLocalAuthSession(),
+          canRetry: true,
+          needsQrCode: true,
+          reason: errMsg,
+        });
       });
 
-      return { status: this.status, qrDataUrl: this.qrDataUrl };
+      return {
+        status: this.status,
+        qrDataUrl: this.qrDataUrl,
+        details: this.connectionDetails,
+      };
     } catch (err: unknown) {
+      if (gen !== this.initGeneration) {
+        return {
+          status: this.status,
+          qrDataUrl: this.qrDataUrl,
+          details: this.connectionDetails,
+        };
+      }
+      this.stopStartupMonitor();
       const message = err instanceof Error ? err.message : 'Erro desconhecido';
-      this.updateStatus('error', message);
-      return { status: 'error', qrDataUrl: null };
+      this.updateStatus('error', message, {
+        stage: 'error',
+        title: 'Erro ao iniciar conexão',
+        detail: `${message}. Tente reconectar ou gerar um novo QR Code.`,
+        isConnected: false,
+        hasSavedSession: this.hasSavedLocalAuthSession(),
+        canRetry: true,
+        needsQrCode: true,
+        reason: message,
+      });
+      return {
+        status: 'error',
+        qrDataUrl: null,
+        details: this.connectionDetails,
+      };
     }
+  }
+
+  public async reconnect(): Promise<{
+    status: WaConnectionStatus;
+    qrDataUrl?: string | null;
+    details?: WaConnectionDetails;
+  }> {
+    console.log('[WhatsAppService] Reconnect requested (preserving saved session)...');
+    this.initGeneration++;
+    await this.destroyClientSafely(false);
+    this.qrDataUrl = null;
+    this.avatarCache.clear();
+    this.mediaCache.clear();
+    this.status = 'disconnected';
+    return await this.initialize();
+  }
+
+  public async resetSessionForQr(): Promise<{
+    status: WaConnectionStatus;
+    qrDataUrl?: string | null;
+    details?: WaConnectionDetails;
+  }> {
+    console.log('[WhatsAppService] Reset session for fresh QR Code requested...');
+    this.initGeneration++;
+    await this.destroyClientSafely(false);
+    this.qrDataUrl = null;
+    this.avatarCache.clear();
+    this.mediaCache.clear();
+    this.status = 'disconnected';
+    await this.clearAuthDataDir();
+    return await this.initialize();
   }
 
   private async patchWWebJSGetChatModel() {
@@ -712,10 +1511,33 @@ export class WhatsAppService {
     }
   }
 
-  private registerEvents() {
+  private registerEvents(gen: number) {
     if (!this.client) return;
 
+    this.client.on('loading_screen', (percent: number | string, message: string) => {
+      if (gen !== this.initGeneration) return;
+      const pct = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+      this.lastLoadingPercent = pct;
+      const hasSaved = this.hasSavedLocalAuthSession();
+      this.updateConnectionDetails({
+        stage: 'syncing_messages',
+        title: 'Lendo mensagens recebidas...',
+        detail:
+          pct < 100
+            ? `Conectado ao WhatsApp — baixando mensagens que chegaram enquanto você estava fora (${pct}%)`
+            : `Mensagens sincronizadas (${pct}%) — finalizando abertura das conversas...`,
+        isConnected: true,
+        hasSavedSession: hasSaved,
+        canRetry: true,
+        needsQrCode: false,
+        progressPercent: pct,
+        waWebState: 'CONNECTED',
+        reason: message || null,
+      });
+    });
+
     this.client.on('qr', async (qr: string) => {
+      if (gen !== this.initGeneration) return;
       try {
         const dataUrl = await QRCode.toDataURL(qr, {
           width: 240,
@@ -725,8 +1547,24 @@ export class WhatsAppService {
             light: '#FFFFFF',
           },
         });
+        if (gen !== this.initGeneration) return;
         this.qrDataUrl = dataUrl;
-        this.updateStatus('qr');
+        this.stopStartupMonitor();
+        const hasSaved = this.hasSavedLocalAuthSession();
+        this.updateStatus('qr', null, {
+          stage: 'awaiting_qr',
+          title: 'Escaneie o QR Code',
+          detail: hasSaved
+            ? 'Sua sessão anterior desconectou. Leia o QR Code no celular para reconectar.'
+            : 'Nenhuma sessão conectada. Leia o QR Code com o WhatsApp do celular.',
+          isConnected: false,
+          hasSavedSession: hasSaved,
+          canRetry: true,
+          needsQrCode: true,
+          progressPercent: null,
+          waWebState: 'UNPAIRED',
+          reason: null,
+        });
         this.emitToRenderer('wa:qr', dataUrl);
       } catch (err) {
         console.error('[WhatsAppService] QR generation failed:', err);
@@ -734,14 +1572,113 @@ export class WhatsAppService {
     });
 
     this.client.on('authenticated', () => {
+      if (gen !== this.initGeneration) return;
       this.qrDataUrl = null;
-      this.updateStatus('authenticated');
+      this.updateStatus('authenticated', null, {
+        stage: 'syncing_messages',
+        title: 'Sessão conectada! Lendo mensagens...',
+        detail: 'Autenticação confirmada — sincronizando mensagens recentes do WhatsApp...',
+        isConnected: true,
+        hasSavedSession: true,
+        canRetry: true,
+        needsQrCode: false,
+        progressPercent: this.lastLoadingPercent,
+        waWebState: 'CONNECTED',
+        reason: null,
+      });
+      this.startStartupMonitor(gen);
+    });
+
+    this.client.on('auth_failure', (msg: string) => {
+      if (gen !== this.initGeneration) return;
+      console.warn('[WhatsAppService] Authentication failure:', msg);
+      this.stopStartupMonitor();
+      this.qrDataUrl = null;
+      this.updateStatus('disconnected', msg || 'Falha ao restaurar sessão salva', {
+        stage: 'session_expired',
+        title: 'Sessão expirada ou inválida',
+        detail:
+          'O token salvo não foi aceito pelo WhatsApp. Leia o QR Code novamente para conectar sua conta.',
+        isConnected: false,
+        hasSavedSession: this.hasSavedLocalAuthSession(),
+        canRetry: true,
+        needsQrCode: true,
+        progressPercent: null,
+        waWebState: 'UNPAIRED',
+        reason: msg || 'AUTH_FAILURE',
+      });
+    });
+
+    this.client.on('change_state', (state: string) => {
+      if (gen !== this.initGeneration) return;
+      const stateStr = String(state || '');
+      this.lastProbeSocketState = stateStr;
+      if (stateStr === 'CONFLICT') {
+        this.updateConnectionDetails({
+          stage: 'disconnected',
+          title: 'Sessão em conflito',
+          detail: 'O WhatsApp Web foi aberto ou desconectado em outro lugar. Tente reconectar.',
+          isConnected: false,
+          canRetry: true,
+          needsQrCode: true,
+          waWebState: stateStr,
+          reason: 'CONFLICT',
+        });
+      } else if (stateStr === 'TIMEOUT') {
+        this.updateConnectionDetails({
+          stage: 'stalled',
+          title: 'Conexão expirou (Timeout)',
+          detail: 'Não foi possível comunicar com o WhatsApp. Verifique sua internet ou reconecte.',
+          isConnected: false,
+          canRetry: true,
+          needsQrCode: true,
+          waWebState: stateStr,
+          reason: 'TIMEOUT',
+        });
+      } else if (stateStr === 'UNPAIRED' || stateStr === 'UNPAIRED_IDLE') {
+        this.updateConnectionDetails({
+          stage: 'session_expired',
+          title: 'Sessão desconectada',
+          detail: 'O aparelho foi desconectado no celular. Leia o QR Code novamente para voltar.',
+          isConnected: false,
+          canRetry: true,
+          needsQrCode: true,
+          waWebState: stateStr,
+          reason: stateStr,
+        });
+      } else if (stateStr === 'CONNECTED' && !this.hasEmittedInitialChats) {
+        this.updateConnectionDetails({
+          stage: this.status === 'ready' ? 'loading_chats' : 'syncing_messages',
+          title:
+            this.status === 'ready'
+              ? 'Carregando suas conversas...'
+              : 'Conectado! Lendo mensagens...',
+          detail: 'Sessão ativa no WhatsApp — sincronizando conversas recentes...',
+          isConnected: true,
+          canRetry: true,
+          needsQrCode: false,
+          waWebState: stateStr,
+        });
+      }
     });
 
     this.client.on('ready', async () => {
+      if (gen !== this.initGeneration) return;
       this.qrDataUrl = null;
       await this.patchWWebJSGetChatModel();
-      this.updateStatus('ready');
+      if (gen !== this.initGeneration) return;
+      this.updateStatus('ready', null, {
+        stage: 'loading_chats',
+        title: 'Carregando suas conversas...',
+        detail: 'Conectado ao WhatsApp! Organizando a lista de conversas recentes...',
+        isConnected: true,
+        hasSavedSession: true,
+        canRetry: true,
+        needsQrCode: false,
+        progressPercent: 100,
+        waWebState: 'CONNECTED',
+        reason: null,
+      });
       await this.setupPresenceObserver();
       this.emitToRenderer('wa:ready');
 
@@ -760,21 +1697,38 @@ export class WhatsAppService {
         // Ignore own pic error
       }
 
+      const emitChatsIfReady = (chats: FormattedChatSummary[]) => {
+        if (gen !== this.initGeneration) return;
+        if (chats.length > 0) {
+          this.hasEmittedInitialChats = true;
+          this.stopStartupMonitor();
+          this.updateConnectionDetails({
+            stage: 'ready',
+            title: 'Conectado',
+            detail: `${chats.length} conversas sincronizadas.`,
+            isConnected: true,
+            hasSavedSession: true,
+            canRetry: false,
+            needsQrCode: false,
+            progressPercent: 100,
+            chatsLoadedCount: chats.length,
+            waWebState: 'CONNECTED',
+            reason: null,
+          });
+          this.emitToRenderer('wa:chats-loaded', chats);
+          this.subscribePresence(chats.slice(0, 25).map((c) => c.id)).catch(() => {});
+        }
+      };
+
       const chats = await this.getRecentChats();
-      if (chats.length > 0) {
-        this.emitToRenderer('wa:chats-loaded', chats);
-        this.subscribePresence(chats.slice(0, 25).map((c) => c.id)).catch(() => {});
-      }
+      emitChatsIfReady(chats);
 
       // Re-sincronizações rápidas após o boot inicial caso a agenda/IndexedDB do WhatsApp Web termine de hidratar alguns segundos depois do evento ready
       for (const delayMs of [1800, 4200]) {
         setTimeout(async () => {
-          if (this.status === 'ready') {
+          if (gen === this.initGeneration && this.status === 'ready') {
             const hydratedChats = await this.getRecentChats();
-            if (hydratedChats.length > 0) {
-              this.emitToRenderer('wa:chats-loaded', hydratedChats);
-              this.subscribePresence(hydratedChats.slice(0, 25).map((c) => c.id)).catch(() => {});
-            }
+            emitChatsIfReady(hydratedChats);
           }
         }, delayMs);
       }
@@ -782,10 +1736,14 @@ export class WhatsAppService {
       // Sincronização leve periódica para manter contadores e novas conversas atualizados
       if (this.syncTimer) clearInterval(this.syncTimer);
       this.syncTimer = setInterval(async () => {
-        if (this.status === 'ready') {
+        if (gen === this.initGeneration && this.status === 'ready') {
           const updatedChats = await this.getRecentChats();
           if (updatedChats.length > 0) {
-            this.emitToRenderer('wa:chats-loaded', updatedChats);
+            if (!this.hasEmittedInitialChats) {
+              emitChatsIfReady(updatedChats);
+            } else {
+              this.emitToRenderer('wa:chats-loaded', updatedChats);
+            }
           }
         }
       }, 8000);
@@ -1073,13 +2031,42 @@ export class WhatsAppService {
     });
 
     this.client.on('disconnected', (reason: string) => {
+      if (gen !== this.initGeneration) return;
       console.warn('[WhatsAppService] Client disconnected:', reason);
+      this.stopStartupMonitor();
       if (this.syncTimer) {
         clearInterval(this.syncTimer);
         this.syncTimer = null;
       }
       this.qrDataUrl = null;
-      this.updateStatus('disconnected', reason);
+      const reasonStr = String(reason || '');
+      const upper = reasonStr.toUpperCase();
+      const isTokenLost =
+        upper.includes('LOGOUT') ||
+        upper.includes('UNPAIRED') ||
+        upper.includes('NAVIGATION');
+      const isQrExpired = upper.includes('MAX QRCODE') || upper.includes('QRCODE');
+
+      this.updateStatus('disconnected', reasonStr, {
+        stage: isTokenLost ? 'session_expired' : 'disconnected',
+        title: isQrExpired
+          ? 'QR Code expirou'
+          : isTokenLost
+          ? 'Sessão desconectada (token perdido)'
+          : 'Conexão com o WhatsApp perdida',
+        detail: isQrExpired
+          ? 'O tempo para escanear o QR Code terminou. Clique abaixo para gerar um novo QR Code.'
+          : isTokenLost
+          ? 'O acesso foi encerrado no celular ou o token expirou. Leia o QR Code novamente para reconectar.'
+          : 'A conexão foi interrompida. Você pode tentar reconectar ou ler um novo QR Code.',
+        isConnected: false,
+        hasSavedSession: this.hasSavedLocalAuthSession(),
+        canRetry: true,
+        needsQrCode: true,
+        progressPercent: null,
+        waWebState: reasonStr || 'DISCONNECTED',
+        reason: reasonStr || 'DISCONNECTED',
+      });
     });
   }
 
@@ -6532,8 +7519,8 @@ export class WhatsAppService {
     this.avatarCache.clear();
 
     if (!this.client || this.status !== 'ready') {
-      console.log('[WhatsAppService] Client not ready, attempting re-initialization...');
-      this.initialize().catch(() => null);
+      console.log('[WhatsAppService] Client not ready, forcing clean reconnect...');
+      this.reconnect().catch(() => null);
       return [];
     }
 
@@ -6541,6 +7528,8 @@ export class WhatsAppService {
       await this.setupPresenceObserver().catch(() => {});
       const chats = await this.getRecentChats();
       if (chats.length > 0) {
+        this.hasEmittedInitialChats = true;
+        this.stopStartupMonitor();
         this.emitToRenderer('wa:chats-loaded', chats);
         this.subscribePresence(chats.slice(0, 25).map((c) => c.id)).catch(() => {});
       }
@@ -8500,35 +9489,27 @@ export class WhatsAppService {
   }
 
   public async logout(): Promise<boolean> {
-    if (this.syncTimer) {
-      clearInterval(this.syncTimer);
-      this.syncTimer = null;
-    }
+    this.initGeneration++;
+    await this.destroyClientSafely(true);
 
-    try {
-      if (this.client) {
-        await this.client.logout().catch(() => null);
-        await this.client.destroy().catch(() => null);
-      }
-    } catch (err) {
-      console.warn('[WhatsAppService] Error during logout/destroy:', err);
-    }
-
-    this.client = null;
     this.qrDataUrl = null;
     this.avatarCache.clear();
     this.mediaCache.clear();
-    this.updateStatus('disconnected');
+    this.updateStatus('disconnected', null, {
+      stage: 'session_expired',
+      title: 'Sessão encerrada',
+      detail: 'Desconectado com sucesso. Gerando novo QR Code para nova conexão...',
+      isConnected: false,
+      hasSavedSession: false,
+      canRetry: true,
+      needsQrCode: true,
+      progressPercent: null,
+      chatsLoadedCount: 0,
+      waWebState: 'LOGOUT',
+      reason: 'LOGOUT',
+    });
 
-    try {
-      const authDataPath = path.join(app.getPath('userData'), 'wwebjs_auth');
-      if (fs.existsSync(authDataPath)) {
-        fs.rmSync(authDataPath, { recursive: true, force: true });
-      }
-    } catch {
-      // Ignore auth folder cleanup error
-    }
-
+    await this.clearAuthDataDir();
     await this.initialize();
     return true;
   }

@@ -28,6 +28,7 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
     activePopover,
     activeChatId,
     waStatus,
+    waConnectionDetails,
     hasSyncedRealChats,
     bubbleScale,
     toggleMainButton,
@@ -51,10 +52,59 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
   const dockContainerRef = useRef<HTMLDivElement | null>(null);
   const bubbleMenuRef = useRef<HTMLDivElement | null>(null);
 
+  const stage = waConnectionDetails?.stage;
+  const isDisconnectedOrError =
+    waStatus === 'disconnected' ||
+    waStatus === 'error' ||
+    stage === 'session_expired' ||
+    stage === 'disconnected' ||
+    stage === 'error';
+  const isAwaitingQr = waStatus === 'qr' || stage === 'awaiting_qr';
+  const isStalled = stage === 'stalled';
+  const isConnectedReading =
+    !isDisconnectedOrError &&
+    !isAwaitingQr &&
+    !isStalled &&
+    !hasSyncedRealChats &&
+    Boolean(
+      waConnectionDetails?.isConnected ||
+        waStatus === 'authenticated' ||
+        waStatus === 'ready'
+    );
   const isSyncing =
-    waStatus === 'initializing' ||
-    waStatus === 'authenticated' ||
-    (waStatus === 'ready' && !hasSyncedRealChats);
+    !isDisconnectedOrError &&
+    !isAwaitingQr &&
+    (waStatus === 'initializing' ||
+      waStatus === 'authenticated' ||
+      (waStatus === 'ready' && !hasSyncedRealChats));
+
+  const mainButtonTitle = isDisconnectedOrError
+    ? `${waConnectionDetails?.title || 'WhatsApp desconectado'} — Clique para reconectar ou ler QR Code`
+    : isAwaitingQr
+    ? 'QR Code pronto — Clique para conectar seu WhatsApp'
+    : isStalled
+    ? `${waConnectionDetails?.title || 'Conexão demorando'} — Clique para verificar ou ler novo QR Code`
+    : isConnectedReading
+    ? `${waConnectionDetails?.title || 'Lendo mensagens recebidas...'}${
+        typeof waConnectionDetails?.progressPercent === 'number'
+          ? ` (${waConnectionDetails.progressPercent}%)`
+          : ''
+      }`
+    : isSyncing
+    ? waConnectionDetails?.title || 'Conectando à sessão do WhatsApp...'
+    : 'WhatsApp Bubbles (Clique para abrir/fechar conversas)';
+
+  const badgeDotColor = isDisconnectedOrError
+    ? 'bg-[#EF4444]'
+    : isAwaitingQr
+    ? 'bg-[#38BDF8]'
+    : isConnectedReading
+    ? 'bg-[#4ADE80]'
+    : 'bg-[#FBBF24]';
+
+  const showStatusDot =
+    dockAnimPhase === 'visible' &&
+    (isDisconnectedOrError || isAwaitingQr || isSyncing || isStalled);
 
   // Fecha menu da bolha ao clicar fora ou ao pressionar Escape
   useEffect(() => {
@@ -370,32 +420,28 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
               ? { duration: 0.44, ease: 'easeOut' }
               : { type: 'spring', stiffness: 420, damping: 25 }
           }
-          title={
-            isSyncing
-              ? 'Sincronizando conversas do WhatsApp...'
-              : 'WhatsApp Bubbles (Clique para abrir/fechar conversas)'
-          }
+          title={mainButtonTitle}
           className="relative z-30 w-[48px] h-[48px] shrink-0 rounded-full bg-[#25D366] hover:bg-[#22c55e] text-white shadow-[0_4px_14px_rgba(0,0,0,0.65)] flex items-center justify-center focus:outline-none"
         >
           {/* Ícone Oficial do WhatsApp */}
           <svg
             viewBox="0 0 24 24"
             className={`w-[26px] h-[26px] fill-current ${
-              isSyncing ? 'animate-pulse' : ''
+              isSyncing && !isStalled ? 'animate-pulse' : ''
             }`}
             aria-hidden="true"
           >
             <path d="M12.031 2c-5.516 0-9.969 4.453-9.969 9.969 0 1.766.469 3.484 1.359 5.016L2 22l5.156-1.359c1.484.813 3.156 1.25 4.875 1.25 5.516 0 9.969-4.453 9.969-9.969S17.547 2 12.031 2zm0 18.25c-1.5 0-2.969-.406-4.266-1.172l-.313-.188-3.047.797.813-2.969-.203-.313c-.844-1.344-1.281-2.891-1.281-4.484 0-4.594 3.734-8.328 8.328-8.328 4.578 0 8.313 3.734 8.313 8.328 0 4.594-3.734 8.328-8.344 8.328zm4.563-6.219c-.25-.125-1.484-.734-1.719-.813-.234-.078-.391-.125-.563.125-.172.25-.641.813-.797.984-.141.172-.297.188-.547.063-.25-.125-1.063-.391-2.016-1.25-.75-.672-1.25-1.484-1.406-1.734-.141-.25-.016-.391.109-.516.109-.109.25-.297.375-.438.125-.141.172-.25.25-.422.078-.172.047-.313-.016-.438-.063-.125-.563-1.359-.766-1.859-.203-.484-.406-.422-.563-.422-.141-.016-.313-.016-.484-.016s-.438.063-.672.313c-.234.25-.891.875-.891 2.125s.906 2.469 1.031 2.641c.125.172 1.781 2.719 4.313 3.813.609.266 1.078.422 1.453.531.609.188 1.156.172 1.594.109.484-.078 1.484-.609 1.688-1.203.219-.594.219-1.094.156-1.203-.063-.094-.234-.156-.484-.281z" />
           </svg>
-          {isSyncing && dockAnimPhase === 'visible' && (
+          {showStatusDot && (
             <>
               <span
-                title="Sincronizando WhatsApp..."
-                className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#FBBF24] border-2 border-[#111B21] animate-ping"
+                title={mainButtonTitle}
+                className={`absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full ${badgeDotColor} border-2 border-[#111B21] animate-ping`}
               />
               <span
-                title="Sincronizando WhatsApp..."
-                className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-[#FBBF24] border-2 border-[#111B21]"
+                title={mainButtonTitle}
+                className={`absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full ${badgeDotColor} border-2 border-[#111B21]`}
               />
             </>
           )}
