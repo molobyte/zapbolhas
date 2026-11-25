@@ -5,6 +5,7 @@ import {
   PinOff,
   Maximize2,
   ChevronLeft,
+  ChevronRight,
   Check,
   CheckCheck,
   CircleDot,
@@ -46,6 +47,7 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
   const [bubbleMenu, setBubbleMenu] = useState<{
     bubble: BubbleItem;
     rightPx: number;
+    submenuSide: 'left' | 'right';
   } | null>(null);
   const [showSizeSubmenu, setShowSizeSubmenu] = useState(false);
 
@@ -139,10 +141,24 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
 
   const handleOpenBubbleMenu = (bubble: BubbleItem, e: React.MouseEvent) => {
     if (!dockContainerRef.current) return;
+    const MENU_WIDTH = 215;
+    const SUBMENU_REQUIRED_SPACE = 176; // 160px submenu + gap + margem de segurança
+    const EDGE_MARGIN = 12;
+
     const dockRect = dockContainerRef.current.getBoundingClientRect();
     const targetRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const rightPx = Math.max(0, dockRect.right - targetRect.right);
-    setBubbleMenu({ bubble, rightPx });
+    const rawRightPx = Math.max(0, dockRect.right - targetRect.right);
+
+    // Garante que o menu de contexto nunca ultrapasse a borda esquerda do overlay/monitor
+    const maxRightPx = Math.max(0, dockRect.right - MENU_WIDTH - EDGE_MARGIN);
+    const clampedRightPx = Math.min(rawRightPx, maxRightPx);
+
+    // Calcula o espaço disponível à esquerda do menu; se não couber o submenu, abre para a direita
+    const menuLeftEdge = dockRect.right - clampedRightPx - MENU_WIDTH;
+    const submenuSide: 'left' | 'right' =
+      menuLeftEdge < SUBMENU_REQUIRED_SPACE ? 'right' : 'left';
+
+    setBubbleMenu({ bubble, rightPx: clampedRightPx, submenuSide });
   };
 
   return (
@@ -240,17 +256,35 @@ export const BubbleDock: React.FC<BubbleDockProps> = ({
                   <Maximize2 className="w-4 h-4 text-[#8696A0] shrink-0" />
                   <span className="whitespace-nowrap">Tamanho da conversa</span>
                 </div>
-                <ChevronLeft className="w-4 h-4 text-[#8696A0] shrink-0" />
+                {bubbleMenu.submenuSide === 'right' ? (
+                  <ChevronRight className="w-4 h-4 text-[#8696A0] shrink-0" />
+                ) : (
+                  <ChevronLeft className="w-4 h-4 text-[#8696A0] shrink-0" />
+                )}
               </button>
 
-              {/* Submenu de Tamanhos (expande para a esquerda) */}
+              {/* Submenu de Tamanhos (expande para a esquerda, ou automaticamente para a direita quando próximo à borda) */}
               <AnimatePresence>
                 {showSizeSubmenu && (
-                  <div className="absolute right-full top-0 pr-1.5 z-[130]">
+                  <div
+                    className={
+                      bubbleMenu.submenuSide === 'right'
+                        ? 'absolute left-full top-0 pl-1.5 z-[130]'
+                        : 'absolute right-full top-0 pr-1.5 z-[130]'
+                    }
+                  >
                     <motion.div
-                      initial={{ opacity: 0, x: 6, scale: 0.95 }}
+                      initial={{
+                        opacity: 0,
+                        x: bubbleMenu.submenuSide === 'right' ? -6 : 6,
+                        scale: 0.95,
+                      }}
                       animate={{ opacity: 1, x: 0, scale: 1 }}
-                      exit={{ opacity: 0, x: 6, scale: 0.95 }}
+                      exit={{
+                        opacity: 0,
+                        x: bubbleMenu.submenuSide === 'right' ? -6 : 6,
+                        scale: 0.95,
+                      }}
                       transition={{ duration: 0.12 }}
                       className="w-[160px] bg-[#182229]/95 backdrop-blur-md rounded-[10px] shadow-[0_14px_38px_rgba(0,0,0,0.92)] border border-white/15 py-1.5 overflow-hidden"
                     >

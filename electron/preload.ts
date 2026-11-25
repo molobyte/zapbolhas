@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('window:set-overlay-expanded', expanded);
   },
 
+  setOverlayMinWidth: (minWidthPx: number) => {
+    ipcRenderer.send('window:set-overlay-min-width', minWidthPx);
+  },
+
   getMessages: (chatId: string, limit?: number) => {
     return ipcRenderer.invoke('wa:get-messages', chatId, limit);
   },

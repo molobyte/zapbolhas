@@ -409,6 +409,7 @@ export interface ElectronAPI {
   ) => () => void;
   setIgnoreMouseEvents: (ignore: boolean) => void;
   setOverlayExpanded?: (expanded: boolean) => void;
+  setOverlayMinWidth?: (minWidthPx: number) => void;
   getMessages: (chatId: string, limit?: number) => Promise<FormattedMessage[]>;
   getGroupParticipants?: (
     chatId: string,

@@ -15,6 +15,7 @@ export const App: React.FC = () => {
     activeChatId,
     activeBubbles,
     pinnedChatIds,
+    bubbleScale,
     waStatus,
     viewingImage,
     setQrDataUrl,
@@ -102,12 +103,21 @@ export const App: React.FC = () => {
     window.electronAPI?.syncTrayState?.({ hidden: isDockHidden, soundMuted });
   }, [isDockHidden, soundMuted, isSettingsWindow]);
 
-  // Expande a largura do overlay apenas quando o visualizador de mídia está aberto,
-  // evitando cobrir players de vídeo no lado esquerdo da tela ou disparar oclusão no navegador.
+  // Expande a largura do overlay quando o visualizador de mídia está aberto ou quando há muitas bolhas
+  // (garantindo espaço à esquerda para menus de contexto, submenus e janelas das bolhas da ponta sem cortar,
+  // mantendo a margem anti-oclusão de 4px para não pausar players de vídeo no navegador).
   useEffect(() => {
     if (isSettingsWindow) return;
     window.electronAPI?.setOverlayExpanded?.(Boolean(viewingImage));
   }, [viewingImage, isSettingsWindow]);
+
+  useEffect(() => {
+    if (isSettingsWindow) return;
+    const dockWidthPx = Math.ceil(((activeBubbles.length + 1) * 60 + 40) * (bubbleScale || 1));
+    // Reserva espaço extra à esquerda da bolha mais afastada para o menu de contexto (215px) + submenu (160px) + margem
+    const requiredWidthPx = Math.max(1200, dockWidthPx + 420);
+    window.electronAPI?.setOverlayMinWidth?.(requiredWidthPx);
+  }, [activeBubbles.length, bubbleScale, isSettingsWindow]);
 
   // Inicializa automaticamente a sessão do WhatsApp (LocalAuth) em segundo plano ao abrir o app
   // e escuta todos os eventos IPC em tempo real (apenas na janela principal das bolhas).

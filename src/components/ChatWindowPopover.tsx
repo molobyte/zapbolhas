@@ -115,6 +115,15 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
 
   // Estados para Sidebar do Contato, Pesquisa e Seleção de Mensagens
   const [showContactSidebar, setShowContactSidebar] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth : 1200
+  );
+
+  useEffect(() => {
+    const handleResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
   const [isSearchingInChat, setIsSearchingInChat] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchIndex, setSearchIndex] = useState(0);
@@ -329,7 +338,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     // Quando a bolha está mais afastada à esquerda do que a largura do balão comporta,
     // o balão se desloca para a esquerda (popoverShiftX) e a seta permanece na extremidade esquerda do balão
     const unconstrainedShift = idealArrowRight - maxArrowRightInWindow;
-    const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const screenWidth = viewportWidth || 1200;
     // Margem de segurança de 32px para não vazar a borda esquerda do overlay (+ largura da sidebar se aberta)
     const extraLeftSpace = showContactSidebar ? 345 : 32;
     const maxAllowedShift = Math.max(0, screenWidth - currentSize.width - extraLeftSpace);

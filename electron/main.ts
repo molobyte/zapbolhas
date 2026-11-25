@@ -273,6 +273,7 @@ function createSystemTray() {
 const DEFAULT_OVERLAY_WIDTH = 1200;
 const OCCLUSION_SAFE_MARGIN_PX = 4;
 let isOverlayFullWidth = false;
+let requestedOverlayMinWidth = DEFAULT_OVERLAY_WIDTH;
 
 interface SavedDisplayPref {
   displayId: number;
@@ -351,9 +352,10 @@ function positionWindowBottomRight(win: BrowserWindow) {
   const { x, y, width, height } = targetDisplay.workArea;
   const maxSafeWidth = Math.max(400, width - OCCLUSION_SAFE_MARGIN_PX);
   const maxSafeHeight = Math.max(400, height - OCCLUSION_SAFE_MARGIN_PX);
+  const targetWidth = Math.max(DEFAULT_OVERLAY_WIDTH, requestedOverlayMinWidth);
   const overlayWidth = isOverlayFullWidth
     ? maxSafeWidth
-    : Math.min(maxSafeWidth, DEFAULT_OVERLAY_WIDTH);
+    : Math.min(maxSafeWidth, targetWidth);
   const overlayHeight = maxSafeHeight;
   const targetX = Math.round(x + width - overlayWidth);
   const targetY = Math.round(y + height - overlayHeight);
@@ -372,9 +374,10 @@ function createOverlayWindow() {
   const { x, y, width, height } = targetDisplay.workArea;
   const maxSafeWidth = Math.max(400, width - OCCLUSION_SAFE_MARGIN_PX);
   const maxSafeHeight = Math.max(400, height - OCCLUSION_SAFE_MARGIN_PX);
+  const targetWidth = Math.max(DEFAULT_OVERLAY_WIDTH, requestedOverlayMinWidth);
   const overlayWidth = isOverlayFullWidth
     ? maxSafeWidth
-    : Math.min(maxSafeWidth, DEFAULT_OVERLAY_WIDTH);
+    : Math.min(maxSafeWidth, targetWidth);
   const overlayHeight = maxSafeHeight;
   const targetX = Math.round(x + width - overlayWidth);
   const targetY = Math.round(y + height - overlayHeight);
@@ -512,6 +515,15 @@ function registerIpcHandlers() {
     const next = Boolean(expanded);
     if (isOverlayFullWidth === next) return;
     isOverlayFullWidth = next;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      positionWindowBottomRight(mainWindow);
+    }
+  });
+
+  ipcMain.on('window:set-overlay-min-width', (_event, minWidthPx: number) => {
+    const clamped = Math.max(DEFAULT_OVERLAY_WIDTH, Math.round(Number(minWidthPx) || DEFAULT_OVERLAY_WIDTH));
+    if (requestedOverlayMinWidth === clamped) return;
+    requestedOverlayMinWidth = clamped;
     if (mainWindow && !mainWindow.isDestroyed()) {
       positionWindowBottomRight(mainWindow);
     }
