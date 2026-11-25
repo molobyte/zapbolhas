@@ -20,6 +20,7 @@ import {
   BubbleBorderMode,
   SoundPreset,
   StartupChatFilter,
+  StickerAudioData,
   TypingParticipantInfo,
   ViewingImageState,
   WaConnectionDetails,
@@ -389,6 +390,7 @@ interface BubbleStoreState {
   ) => Promise<GroupParticipant[]>;
   fetchGroupMetadata: (chatId: string) => Promise<GroupMetadataInfo | null>;
   updateMessageMedia: (chatId: string, msgId: string, mediaDataUrl: string) => void;
+  updateStickerAudioUrl: (chatId: string, msgId: string, audioUrl: string) => void;
   setReplyingTo: (quote: QuotedMessage | null) => void;
   setViewingImage: (img: ViewingImageState | null) => void;
   setActiveReactionDetailsMessage: (msg: FormattedMessage | null) => void;
@@ -441,7 +443,7 @@ interface BubbleStoreState {
     textForWhatsApp?: string,
     mentionedDisplayNames?: string[]
   ) => Promise<void>;
-  sendSticker: (stickerDataUrl: string) => Promise<void>;
+  sendSticker: (stickerDataUrl: string, stickerAudio?: StickerAudioData) => Promise<void>;
   sendMedia: (payload: {
     mediaDataUrl: string;
     mediaType?: 'image' | 'video';
@@ -1256,6 +1258,27 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
           [chatId]: updated,
         },
         viewingImage: updatedViewingImage,
+      };
+    }),
+
+  updateStickerAudioUrl: (chatId, msgId, audioUrl) =>
+    set((state) => {
+      const existing = state.messagesByChat[chatId] || [];
+      const updated = existing.map((m) => {
+        if (m.id !== msgId) return m;
+        return {
+          ...m,
+          stickerAudio: {
+            ...(m.stickerAudio || {}),
+            audioUrl,
+          },
+        };
+      });
+      return {
+        messagesByChat: {
+          ...state.messagesByChat,
+          [chatId]: updated,
+        },
       };
     }),
 
@@ -2589,6 +2612,9 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         await window.electronAPI.sendSticker({
           chatId: targetChatId,
           stickerDataUrl: msg.imageUrl,
+          stickerAudioDataUrl: msg.stickerAudio?.audioUrl,
+          stickerAudioDuration: msg.stickerAudio?.durationSeconds,
+          stickerAudioMeta: msg.stickerAudio,
         });
       } else if (msg.type === 'video' && window.electronAPI?.sendMedia) {
         // Se for vídeo/gif, NUNCA usar imageUrl (que é apenas a thumbnail JPEG minúscula).
@@ -2732,12 +2758,13 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
     }
   },
 
-  // Envio de figurinha (sticker)
-  sendSticker: async (stickerDataUrl) => {
+  // Envio de figurinha (sticker) — com suporte a áudio embutido (Sound Sticker)
+  sendSticker: async (stickerDataUrl, stickerAudio) => {
     const { activeChatId, replyingTo, messagesByChat, chats, unreadBannerByChat } =
       get();
     if (!stickerDataUrl || !activeChatId) return;
 
+    const hasAudio = Boolean(stickerAudio && (stickerAudio.audioUrl || stickerAudio.mediaKey));
     const timestamp = getCurrentTimeStr();
     const optimisticSticker: FormattedMessage = {
       id: `sticker-${Date.now()}`,
@@ -2750,6 +2777,7 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
       isHdLoaded: true,
       ack: 'sent',
       quotedMessage: replyingTo || undefined,
+      ...(hasAudio ? { stickerAudio } : {}),
     };
 
     const currentMsgs = messagesByChat[activeChatId] || [];
@@ -2758,8 +2786,9 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         ? {
             ...c,
             lastMessage: {
-              text: 'Figurinha',
+              text: hasAudio ? 'Figurinha com áudio' : 'Figurinha',
               mediaType: 'sticker' as const,
+              ...(hasAudio ? { hasAudio: true } : {}),
               fromMe: true,
               ack: 'sent' as const,
               timestamp,
@@ -2792,6 +2821,13 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
         chatId: activeChatId,
         stickerDataUrl,
         quotedMessageId: replyingTo?.id,
+        ...(hasAudio
+          ? {
+              stickerAudioDataUrl: stickerAudio?.audioUrl,
+              stickerAudioDuration: stickerAudio?.durationSeconds,
+              stickerAudioMeta: stickerAudio,
+            }
+          : {}),
       });
       const freshMsgs = await window.electronAPI.getMessages(
         activeChatId,
@@ -2803,7 +2839,12 @@ export const useBubbleStore = create<BubbleStoreState>((set, get) => ({
             (sentMsg && m.id === sentMsg.id) ||
             (idx === freshMsgs.length - 1 && m.fromMe && m.type === 'sticker' && !m.imageUrl)
           ) {
-            return { ...m, imageUrl: m.imageUrl || stickerDataUrl, isHdLoaded: true };
+            return {
+              ...m,
+              imageUrl: m.imageUrl || stickerDataUrl,
+              isHdLoaded: true,
+              ...(hasAudio && !m.stickerAudio ? { stickerAudio: sentMsg?.stickerAudio || stickerAudio } : {}),
+            };
           }
           return m;
         });

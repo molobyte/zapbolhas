@@ -703,7 +703,10 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     }
   };
 
-  const handleSendSticker = async (stickerDataUrl: string) => {
+  const handleSendSticker = async (
+    stickerDataUrl: string,
+    stickerAudio?: import('../types/whatsapp').StickerAudioData
+  ) => {
     isAtBottomRef.current = true;
     userHasScrolledUpRef.current = false;
     setPickerOpen(false);
@@ -713,7 +716,7 @@ export const ChatWindowPopover: React.FC<ChatWindowPopoverProps> = ({
     requestAnimationFrame(() => {
       inputRef.current?.focus();
     });
-    await sendSticker(stickerDataUrl);
+    await sendSticker(stickerDataUrl, stickerAudio);
     inputRef.current?.focus();
   };
 

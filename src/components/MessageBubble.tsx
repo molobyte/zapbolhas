@@ -18,9 +18,12 @@ import {
   BarChart2,
   ChevronDown,
   ChevronUp,
+  Volume2,
+  Square,
 } from 'lucide-react';
 import { FormattedMessage, QuotedMessage, DEFAULT_AVATAR } from '../types/whatsapp';
 import { useBubbleStore } from '../store/useBubbleStore';
+import { useAudioPlaybackStore } from '../store/useAudioPlaybackStore';
 import { AudioPlayer } from './AudioPlayer';
 import {
   normalizeImageToStickerWebp,
@@ -69,6 +72,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     quotedMessage,
     reaction,
     audioData,
+    stickerAudio,
     documentData,
     pollData,
     ack,
@@ -83,15 +87,32 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const {
     updateMessageMedia,
+    updateStickerAudioUrl,
     setViewingImage,
     sendReaction,
     votePoll,
     setActiveReactionDetailsMessage,
     chatFontSize = 13.5,
   } = useBubbleStore();
+  const activeAudio = useAudioPlaybackStore((s) => s.activeAudio);
+  const playAudio = useAudioPlaybackStore((s) => s.play);
+  const stopAudio = useAudioPlaybackStore((s) => s.stop);
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
+  const [isLoadingStickerAudio, setIsLoadingStickerAudio] = useState(false);
   const [autoPlayVideo, setAutoPlayVideo] = useState(false);
   const [savedSticker, setSavedSticker] = useState(false);
+
+  const hasStickerAudio = Boolean(
+    type === 'sticker' &&
+      stickerAudio &&
+      (stickerAudio.audioUrl ||
+        stickerAudio.directPath ||
+        stickerAudio.deprecatedMms3Url ||
+        stickerAudio.mediaKey)
+  );
+  const isStickerAudioPlaying = Boolean(
+    hasStickerAudio && activeAudio?.messageId === message.id && activeAudio.isPlaying
+  );
   const [isSavingFile, setIsSavingFile] = useState(false);
   const [savedFileSuccess, setSavedFileSuccess] = useState(false);
   const [showPollVoters, setShowPollVoters] = useState(false);
@@ -433,6 +454,40 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
   };
 
+  const handleToggleStickerAudio = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!hasStickerAudio) return;
+
+    if (isStickerAudioPlaying) {
+      stopAudio(message.chatId);
+      return;
+    }
+
+    let audioUrl = stickerAudio?.audioUrl;
+    if (!audioUrl && window.electronAPI?.downloadStickerAudio) {
+      if (isLoadingStickerAudio) return;
+      setIsLoadingStickerAudio(true);
+      try {
+        const downloaded = await window.electronAPI.downloadStickerAudio(message.id);
+        if (downloaded) {
+          audioUrl = downloaded;
+          updateStickerAudioUrl(message.chatId, message.id, downloaded);
+        }
+      } finally {
+        setIsLoadingStickerAudio(false);
+      }
+    }
+
+    if (audioUrl) {
+      playAudio({
+        chatId: message.chatId,
+        messageId: message.id,
+        audioUrl,
+        duration: stickerAudio?.durationSeconds || 5,
+      });
+    }
+  };
+
   const handleSaveStickerToLibrary = async (e: React.MouseEvent) => {
     e.stopPropagation();
     let targetUrl = imageUrl;
@@ -447,7 +502,26 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
     if (!targetUrl || !window.electronAPI?.saveStickerToLibrary) return;
     const webpUrl = await normalizeImageToStickerWebp(targetUrl);
-    const saved = await window.electronAPI.saveStickerToLibrary(webpUrl);
+
+    let savedAudioUrl = stickerAudio?.audioUrl;
+    if (hasStickerAudio && !savedAudioUrl && window.electronAPI?.downloadStickerAudio) {
+      try {
+        const downloaded = await window.electronAPI.downloadStickerAudio(message.id);
+        if (downloaded) {
+          savedAudioUrl = downloaded;
+          updateStickerAudioUrl(message.chatId, message.id, downloaded);
+        }
+      } catch {}
+    }
+
+    const saved = hasStickerAudio
+      ? await window.electronAPI.saveStickerToLibrary({
+          dataUrl: webpUrl,
+          audioDataUrl: savedAudioUrl,
+          audioDuration: stickerAudio?.durationSeconds,
+          stickerAudioMeta: stickerAudio,
+        })
+      : await window.electronAPI.saveStickerToLibrary(webpUrl);
     if (saved) {
       setSavedSticker(true);
     }
@@ -472,7 +546,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           : type === 'image'
           ? text || '📷 Foto'
           : type === 'sticker'
-          ? '💟 Figurinha'
+          ? hasStickerAudio
+            ? '💟🔊 Figurinha com áudio'
+            : '💟 Figurinha'
           : text,
     });
   };
@@ -1123,8 +1199,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <div className="relative group/img mb-1.5 overflow-hidden rounded-[6px]">
                       {imageUrl ? (
                         <div
-                          onClick={handleOpenImage}
-                          title="Clique para visualizar e ampliar a imagem"
+                          onClick={hasStickerAudio ? handleToggleStickerAudio : handleOpenImage}
+                          title={
+                            hasStickerAudio
+                              ? isStickerAudioPlaying
+                                ? 'Clique para parar o áudio da figurinha'
+                                : 'Clique para ouvir o áudio da figurinha'
+                              : 'Clique para visualizar e ampliar a imagem'
+                          }
                           className="relative cursor-pointer overflow-hidden rounded-[6px]"
                         >
                           <img
@@ -1149,6 +1231,46 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                             } ${!isHdLoaded && isLoadingMedia ? 'blur-[1.5px] brightness-90' : ''}`}
                           />
 
+                          {/* Badge persistente de Figurinha com Áudio (canto superior direito, padrão WhatsApp Web) */}
+                          {hasStickerAudio && (
+                            <button
+                              type="button"
+                              onClick={handleToggleStickerAudio}
+                              title={
+                                isStickerAudioPlaying
+                                  ? 'Parar áudio da figurinha'
+                                  : 'Reproduzir áudio da figurinha'
+                              }
+                              className={`absolute top-1 right-1 z-20 flex items-center gap-1 px-1.5 py-1 rounded-full shadow-md border transition-all cursor-pointer ${
+                                isStickerAudioPlaying
+                                  ? 'bg-[#25D366] text-[#111B21] border-[#25D366] scale-105'
+                                  : 'bg-[#111B21]/90 hover:bg-[#00A884] text-[#25D366] hover:text-white border-white/15'
+                              }`}
+                            >
+                              {isLoadingStickerAudio ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : isStickerAudioPlaying ? (
+                                <>
+                                  <Square className="w-2.5 h-2.5 fill-current" />
+                                  <span className="flex items-end gap-[1.5px] h-3">
+                                    <span className="w-[2px] h-2 bg-current rounded-full animate-pulse" />
+                                    <span className="w-[2px] h-3 bg-current rounded-full animate-bounce" />
+                                    <span className="w-[2px] h-1.5 bg-current rounded-full animate-pulse" />
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <Volume2 className="w-3.5 h-3.5" />
+                                  {stickerAudio?.duration && (
+                                    <span className="text-[9.5px] font-semibold leading-none pr-0.5">
+                                      {stickerAudio.duration}
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </button>
+                          )}
+
                           {/* Spinner sutil enquanto baixa a versão HD */}
                           {isLoadingMedia && (
                             <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
@@ -1158,9 +1280,31 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
                           {/* Overlay em Hover com botões de Ampliar, Favoritar Figurinha e Abrir no Windows */}
                           <div className="absolute inset-0 bg-black/25 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-                            <span className="p-1.5 rounded-full bg-[#111B21]/85 text-white shadow-md hover:bg-[#00A884] transition-colors">
+                            {hasStickerAudio && (
+                              <button
+                                type="button"
+                                onClick={handleToggleStickerAudio}
+                                title={isStickerAudioPlaying ? 'Parar áudio' : 'Ouvir áudio da figurinha'}
+                                className="p-1.5 rounded-full bg-[#25D366] text-[#111B21] shadow-md hover:bg-[#1fb855] transition-colors"
+                              >
+                                {isStickerAudioPlaying ? (
+                                  <Square className="w-4 h-4 fill-current" />
+                                ) : (
+                                  <Volume2 className="w-4 h-4" />
+                                )}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenImage(e);
+                              }}
+                              title="Ampliar imagem"
+                              className="p-1.5 rounded-full bg-[#111B21]/85 text-white shadow-md hover:bg-[#00A884] transition-colors"
+                            >
                               <Maximize2 className="w-4 h-4" />
-                            </span>
+                            </button>
                             {type === 'sticker' && (
                               <button
                                 type="button"
@@ -1168,6 +1312,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                                 title={
                                   savedSticker
                                     ? 'Salva na sua biblioteca de figurinhas!'
+                                    : hasStickerAudio
+                                    ? 'Salvar figurinha com áudio na minha biblioteca'
                                     : 'Salvar figurinha na minha biblioteca'
                                 }
                                 className={`p-1.5 rounded-full bg-[#111B21]/85 shadow-md transition-colors ${

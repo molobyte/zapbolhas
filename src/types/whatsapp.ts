@@ -4,6 +4,7 @@ export interface LastMessagePreview {
   text: string;
   senderName?: string;
   mediaType: MessageMediaType;
+  hasAudio?: boolean;
   fromMe?: boolean;
   ack?: 'sent' | 'delivered' | 'read';
   duration?: string;
@@ -52,6 +53,20 @@ export interface AudioData {
   senderAvatar: string;
   waveform: number[];
   filename?: string;
+}
+
+export interface StickerAudioData {
+  audioUrl?: string;
+  duration?: string;
+  durationSeconds?: number;
+  mimetype?: string;
+  directPath?: string | null;
+  deprecatedMms3Url?: string | null;
+  mediaKey?: string | null;
+  mediaKeyTimestamp?: number;
+  filehash?: string;
+  encFilehash?: string;
+  size?: number;
 }
 
 export interface DocumentData {
@@ -131,6 +146,7 @@ export interface FormattedMessage {
   reaction?: string;
   reactions?: MessageReactionItem[];
   audioData?: AudioData;
+  stickerAudio?: StickerAudioData;
   documentData?: DocumentData;
   pollData?: PollData;
   mentions?: string[];
@@ -333,6 +349,9 @@ export interface SendStickerPayload {
   chatId: string;
   stickerDataUrl: string;
   quotedMessageId?: string;
+  stickerAudioDataUrl?: string;
+  stickerAudioDuration?: number;
+  stickerAudioMeta?: StickerAudioData;
 }
 
 export interface SendMediaPayload {
@@ -350,6 +369,7 @@ export interface StickerItem {
   dataUrl: string;
   source: 'library' | 'whatsapp';
   name?: string;
+  stickerAudio?: StickerAudioData;
 }
 
 export interface GroupMetadataInfo {
@@ -417,8 +437,19 @@ export interface ElectronAPI {
   getWhatsAppStickers?: () => Promise<StickerItem[]>;
   getUserStickers?: () => Promise<StickerItem[]>;
   importStickersFromDisk?: () => Promise<StickerItem[]>;
-  saveStickerToLibrary?: (dataUrl: string) => Promise<StickerItem | null>;
+  selectStickerAudioFile?: () => Promise<{ dataUrl: string; filename: string } | null>;
+  saveStickerToLibrary?: (
+    payload:
+      | string
+      | {
+          dataUrl: string;
+          audioDataUrl?: string;
+          audioDuration?: number;
+          stickerAudioMeta?: StickerAudioData;
+        }
+  ) => Promise<StickerItem | null>;
   deleteUserSticker?: (stickerId: string) => Promise<boolean>;
+  downloadStickerAudio?: (msgId: string) => Promise<string | null>;
   deleteMessages?: (payload: {
     chatId: string;
     messageIds: string[];

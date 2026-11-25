@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     chatId: string;
     stickerDataUrl: string;
     quotedMessageId?: string;
+    stickerAudioDataUrl?: string;
+    stickerAudioDuration?: number;
+    stickerAudioMeta?: unknown;
   }) => {
     return ipcRenderer.invoke('wa:send-sticker', payload);
   },
@@ -82,12 +85,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('wa:import-stickers');
   },
 
-  saveStickerToLibrary: (dataUrl: string) => {
-    return ipcRenderer.invoke('wa:save-sticker-to-library', dataUrl);
+  selectStickerAudioFile: () => {
+    return ipcRenderer.invoke('wa:select-sticker-audio-file');
+  },
+
+  saveStickerToLibrary: (
+    payload:
+      | string
+      | {
+          dataUrl: string;
+          audioDataUrl?: string;
+          audioDuration?: number;
+          stickerAudioMeta?: unknown;
+        }
+  ) => {
+    return ipcRenderer.invoke('wa:save-sticker-to-library', payload);
   },
 
   deleteUserSticker: (stickerId: string) => {
     return ipcRenderer.invoke('wa:delete-user-sticker', stickerId);
+  },
+
+  downloadStickerAudio: (msgId: string) => {
+    return ipcRenderer.invoke('wa:download-sticker-audio', msgId);
   },
 
   markAsRead: (chatId: string) => {

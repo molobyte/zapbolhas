@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   KeyRound,
   MessageSquareText,
+  Volume2,
 } from 'lucide-react';
 import {
   useBubbleStore,
@@ -251,7 +252,10 @@ export const ChatListPopover: React.FC<ChatListPopoverProps> = ({
             <span className="truncate max-w-[140px]">{lastMessage.senderName}:</span>
           )}
           <StickerIcon />
-          <span>Figurinha</span>
+          {lastMessage.hasAudio && (
+            <Volume2 className="w-[12px] h-[12px] text-[#25D366] shrink-0 inline-block" />
+          )}
+          <span>{lastMessage.hasAudio ? 'Figurinha com áudio' : 'Figurinha'}</span>
         </span>
       );
     }

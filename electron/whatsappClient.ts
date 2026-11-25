@@ -109,6 +109,109 @@ async function convertAudioToWhatsAppVoiceOgg(
   });
 }
 
+async function convertAudioToStickerAudioOgg(
+  inputBuffer: Buffer,
+  inputExt = '.webm'
+): Promise<{ buffer: Buffer; isOgg: boolean }> {
+  if (!ffmpegExecutablePath || !fs.existsSync(ffmpegExecutablePath)) {
+    return { buffer: inputBuffer, isOgg: false };
+  }
+
+  const safeExt = inputExt.startsWith('.') ? inputExt : `.${inputExt}`;
+  const tempInput = path.join(
+    os.tmpdir(),
+    `wa_stkaudio_in_${Date.now()}_${Math.random().toString(36).slice(2)}${safeExt}`
+  );
+  const tempOutput = path.join(
+    os.tmpdir(),
+    `wa_stkaudio_out_${Date.now()}_${Math.random().toString(36).slice(2)}.ogg`
+  );
+
+  try {
+    fs.writeFileSync(tempInput, inputBuffer);
+  } catch (err) {
+    console.error('[WhatsAppService] Falha ao escrever tempInput para áudio da figurinha:', err);
+    return { buffer: inputBuffer, isOgg: false };
+  }
+
+  return new Promise<{ buffer: Buffer; isOgg: boolean }>((resolve) => {
+    // Limita a 10 segundos (padrão WhatsApp Sound Stickers) em Opus mono 48kHz OGG limpo
+    execFile(
+      ffmpegExecutablePath!,
+      [
+        '-y',
+        '-i',
+        tempInput,
+        '-t',
+        '10',
+        '-vn',
+        '-c:a',
+        'libopus',
+        '-b:a',
+        '32k',
+        '-vbr',
+        'on',
+        '-ar',
+        '48000',
+        '-ac',
+        '1',
+        '-application',
+        'voip',
+        '-avoid_negative_ts',
+        'make_zero',
+        '-map_metadata',
+        '-1',
+        '-f',
+        'ogg',
+        tempOutput,
+      ],
+      { timeout: 15000 },
+      (err, _stdout, stderr) => {
+        try {
+          if (fs.existsSync(tempInput)) fs.unlinkSync(tempInput);
+        } catch {}
+
+        if (err) {
+          console.error('[WhatsAppService] Erro ao converter áudio de figurinha:', err, stderr);
+          try {
+            if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
+          } catch {}
+          resolve({ buffer: inputBuffer, isOgg: false });
+          return;
+        }
+
+        try {
+          if (fs.existsSync(tempOutput)) {
+            const outBuf = fs.readFileSync(tempOutput);
+            try {
+              fs.unlinkSync(tempOutput);
+            } catch {}
+            resolve({ buffer: outBuf, isOgg: true });
+            return;
+          }
+        } catch (readErr) {
+          console.error('[WhatsAppService] Falha ao ler OGG da figurinha:', readErr);
+        }
+        resolve({ buffer: inputBuffer, isOgg: false });
+      }
+    );
+  });
+}
+
+export interface StickerAudioDescriptor {
+  audioUrl?: string;
+  duration?: string;
+  durationSeconds?: number;
+  mimetype?: string;
+  directPath?: string | null;
+  deprecatedMms3Url?: string | null;
+  mediaKey?: string | null;
+  mediaKeyTimestamp?: number;
+  filehash?: string;
+  encFilehash?: string;
+  size?: number;
+}
+
 export interface FormattedChatSummary {
   id: string;
   name: string;
@@ -126,6 +229,7 @@ export interface FormattedChatSummary {
     text: string;
     senderName?: string;
     mediaType: 'text' | 'sticker' | 'photo' | 'video' | 'audio';
+    hasAudio?: boolean;
     fromMe?: boolean;
     ack?: 'sent' | 'delivered' | 'read';
     duration?: string;
@@ -179,6 +283,7 @@ export interface FormattedChatMessage {
     waveform: number[];
     filename?: string;
   };
+  stickerAudio?: StickerAudioDescriptor;
   documentData?: {
     filename: string;
     mimetype: string;
@@ -443,6 +548,7 @@ export class WhatsAppService {
   private lastError: string | null = null;
   private avatarCache = new Map<string, string>();
   private mediaCache = new Map<string, string>();
+  private stickerAudioCache = new Map<string, string>();
   private myAvatarUrl = createInitialsAvatarDataUrl('Eu');
   private syncTimer: NodeJS.Timeout | null = null;
   private startupMonitorTimer: NodeJS.Timeout | null = null;
@@ -1284,6 +1390,7 @@ export class WhatsAppService {
     this.qrDataUrl = null;
     this.avatarCache.clear();
     this.mediaCache.clear();
+    this.stickerAudioCache.clear();
     this.status = 'disconnected';
     return await this.initialize();
   }
@@ -1299,6 +1406,7 @@ export class WhatsAppService {
     this.qrDataUrl = null;
     this.avatarCache.clear();
     this.mediaCache.clear();
+    this.stickerAudioCache.clear();
     this.status = 'disconnected';
     await this.clearAuthDataDir();
     return await this.initialize();
@@ -3270,6 +3378,8 @@ export class WhatsAppService {
             isPinned: isChatPinned,
             timestamp: Number(lastMsg?.t || c.t || 0),
             lastMsgType: rawType,
+            lastMsgHasStickerAudio:
+              rawType === 'sticker' && Boolean(getProp(lastMsg, 'stickerAudio') || lastMsg?.stickerAudio),
             lastMsgIsViewOnce: isViewOnce,
             lastMsgBody: cleanLastMsgText,
             lastMsgFromMe: Boolean(lastMsg?.id?.fromMe),
@@ -3299,10 +3409,12 @@ export class WhatsAppService {
         let mediaType: 'text' | 'sticker' | 'photo' | 'video' | 'audio' = 'text';
         let text = raw.lastMsgBody || '';
         let duration: string | undefined;
+        let hasAudio: boolean | undefined;
 
         if (raw.lastMsgType === 'sticker') {
           mediaType = 'sticker';
-          text = 'Figurinha';
+          hasAudio = Boolean(raw.lastMsgHasStickerAudio);
+          text = hasAudio ? 'Figurinha com áudio' : 'Figurinha';
         } else if (raw.lastMsgType === 'image' || isViewOnce) {
           mediaType = 'photo';
           text = isViewOnce
@@ -3362,6 +3474,7 @@ export class WhatsAppService {
             text,
             senderName: raw.senderName || undefined,
             mediaType,
+            ...(hasAudio ? { hasAudio: true } : {}),
             fromMe: raw.lastMsgFromMe,
             ack: mapAck(raw.lastMsgAck),
             duration,
@@ -4730,6 +4843,32 @@ export class WhatsAppService {
               finalText = '';
             }
 
+            const rawStickerAudio =
+              rawType === 'sticker'
+                ? getProp(m, 'stickerAudio') || m.stickerAudio || m.__x_stickerAudio || null
+                : null;
+            const stickerAudio =
+              rawStickerAudio && typeof rawStickerAudio === 'object'
+                ? {
+                    directPath: rawStickerAudio.directPath || null,
+                    deprecatedMms3Url: rawStickerAudio.deprecatedMms3Url || null,
+                    mediaKey: rawStickerAudio.mediaKey || null,
+                    mediaKeyTimestamp:
+                      typeof rawStickerAudio.mediaKeyTimestamp === 'number'
+                        ? rawStickerAudio.mediaKeyTimestamp
+                        : undefined,
+                    filehash: rawStickerAudio.filehash || undefined,
+                    encFilehash: rawStickerAudio.encFilehash || undefined,
+                    size:
+                      typeof rawStickerAudio.size === 'number' ? rawStickerAudio.size : undefined,
+                    mimetype: rawStickerAudio.mimetype || 'audio/ogg; codecs=opus',
+                    durationSeconds:
+                      typeof rawStickerAudio.duration === 'number' && rawStickerAudio.duration > 0
+                        ? rawStickerAudio.duration
+                        : undefined,
+                  }
+                : undefined;
+
             return {
               id,
               rawType,
@@ -4753,6 +4892,7 @@ export class WhatsAppService {
               filesize,
               pageCount,
               pollData,
+              stickerAudio,
             };
           });
         },
@@ -4845,6 +4985,26 @@ export class WhatsAppService {
           };
         }
 
+        let stickerAudio: FormattedChatMessage['stickerAudio'];
+        if (type === 'sticker' && (m as any).stickerAudio) {
+          const sa = (m as any).stickerAudio;
+          const durSec =
+            typeof sa.durationSeconds === 'number' && sa.durationSeconds > 0
+              ? Math.round(sa.durationSeconds)
+              : undefined;
+          stickerAudio = {
+            ...sa,
+            durationSeconds: durSec,
+            duration: durSec ? formatDuration(durSec) : undefined,
+            audioUrl: this.stickerAudioCache.get(m.id) || undefined,
+          };
+        } else if (type === 'sticker' && this.stickerAudioCache.has(m.id)) {
+          stickerAudio = {
+            audioUrl: this.stickerAudioCache.get(m.id),
+            mimetype: 'audio/ogg; codecs=opus',
+          };
+        }
+
         return {
           id: m.id,
           chatId,
@@ -4878,6 +5038,7 @@ export class WhatsAppService {
               }
             : undefined,
           audioData,
+          stickerAudio,
           documentData,
           pollData: (m as any).pollData || undefined,
           reaction: (m as any).reaction || undefined,
@@ -6473,10 +6634,128 @@ export class WhatsAppService {
     }
   }
 
+  public async downloadStickerAudio(msgId: string): Promise<string | null> {
+    if (this.stickerAudioCache.has(msgId)) {
+      return this.stickerAudioCache.get(msgId)!;
+    }
+    if (!this.client?.pupPage || this.status !== 'ready') {
+      return null;
+    }
+
+    try {
+      const dataUrl = await this.client.pupPage.evaluate(async (targetMsgId: string) => {
+        const w = window as unknown as {
+          require: (mod: string) => Record<string, any>;
+          WWebJS?: {
+            arrayBufferToBase64Async?: (buf: ArrayBuffer) => Promise<string>;
+          };
+        };
+
+        const serializeId = (val: any): string => {
+          if (!val) return '';
+          if (typeof val === 'string') return val;
+          if (typeof val._serialized === 'string' && val._serialized) return val._serialized;
+          if (typeof val.toString === 'function') {
+            const s = val.toString();
+            if (s && s !== '[object Object]') return s;
+          }
+          return '';
+        };
+
+        const getProp = (obj: any, key: string): any => {
+          if (!obj) return undefined;
+          if (typeof obj.get === 'function') {
+            try {
+              const v = obj.get(key);
+              if (v !== undefined) return v;
+            } catch {}
+          }
+          return obj[key] ?? obj.attributes?.[key] ?? obj.__x?.[key] ?? obj._data?.[key];
+        };
+
+        const collections = w.require('WAWebCollections');
+        const MsgCol = collections?.Msg;
+        let msg = MsgCol?.get?.(targetMsgId);
+        if (!msg && MsgCol?.getModelsArray) {
+          msg = MsgCol.getModelsArray().find((m: any) => serializeId(m.id) === targetMsgId);
+        }
+        if (!msg && collections?.Chat?.getModelsArray) {
+          for (const chat of collections.Chat.getModelsArray()) {
+            const found = chat?.msgs?.getModelsArray?.()?.find?.((m: any) => serializeId(m.id) === targetMsgId);
+            if (found) {
+              msg = found;
+              break;
+            }
+          }
+        }
+        if (!msg) return null;
+
+        const sa = getProp(msg, 'stickerAudio') || msg.stickerAudio || msg.__x_stickerAudio;
+        if (!sa || (!sa.directPath && !sa.deprecatedMms3Url)) return null;
+
+        const mimetype = sa.mimetype || 'audio/ogg; codecs=opus';
+        const mockQpl = {
+          addAnnotations() {
+            return this;
+          },
+          addPoint() {
+            return this;
+          },
+        };
+
+        const downloadManager = w.require('WAWebDownloadManager')?.downloadManager;
+        if (!downloadManager?.downloadAndMaybeDecrypt) return null;
+
+        const decryptedMedia: ArrayBuffer | null = await downloadManager
+          .downloadAndMaybeDecrypt({
+            directPath: sa.directPath || undefined,
+            deprecatedMms3Url: sa.deprecatedMms3Url || undefined,
+            encFilehash: sa.encFilehash,
+            filehash: sa.filehash,
+            mediaKey: sa.mediaKey,
+            mediaKeyTimestamp: sa.mediaKeyTimestamp,
+            type: 'audio',
+            mimetype,
+            signal: new AbortController().signal,
+            downloadQpl: mockQpl,
+          })
+          .catch(() => null);
+
+        if (!decryptedMedia || decryptedMedia.byteLength === 0) return null;
+
+        let base64 = '';
+        if (w.WWebJS?.arrayBufferToBase64Async) {
+          base64 = await w.WWebJS.arrayBufferToBase64Async(decryptedMedia);
+        } else {
+          const bytes = new Uint8Array(decryptedMedia);
+          let binary = '';
+          for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          base64 = btoa(binary);
+        }
+        if (!base64) return null;
+
+        return `data:${mimetype};base64,${base64}`;
+      }, msgId);
+
+      if (dataUrl) {
+        this.stickerAudioCache.set(msgId, dataUrl);
+      }
+      return dataUrl || null;
+    } catch (err) {
+      console.error('[WhatsAppService] Error in downloadStickerAudio:', err);
+      return null;
+    }
+  }
+
   public async sendSticker(payload: {
     chatId: string;
     stickerDataUrl: string;
     quotedMessageId?: string;
+    stickerAudioDataUrl?: string;
+    stickerAudioDuration?: number;
+    stickerAudioMeta?: StickerAudioDescriptor;
   }): Promise<FormattedChatMessage | null> {
     if (!this.client || this.status !== 'ready') {
       return null;
@@ -6492,11 +6771,126 @@ export class WhatsAppService {
       const base64Data = match[2];
       const media = new MessageMedia(mimetype, base64Data, 'sticker.webp');
 
+      await this.patchWWebJSGetChatModel();
+
+      // Prepara stickerAudio nativo (se houver áudio embutido na figurinha)
+      let resolvedStickerAudio: Record<string, unknown> | undefined;
+      let localAudioDataUrlForCache: string | undefined =
+        payload.stickerAudioDataUrl || payload.stickerAudioMeta?.audioUrl;
+
+      const meta = payload.stickerAudioMeta;
+      const hasCompleteNativeMeta = Boolean(
+        meta &&
+          meta.mediaKey &&
+          (meta.directPath || meta.deprecatedMms3Url) &&
+          meta.filehash &&
+          meta.encFilehash &&
+          typeof meta.size === 'number' &&
+          meta.size > 0
+      );
+
+      if (hasCompleteNativeMeta && meta) {
+        resolvedStickerAudio = {
+          directPath: meta.directPath || null,
+          deprecatedMms3Url: meta.deprecatedMms3Url || null,
+          mediaKey: meta.mediaKey,
+          mediaKeyTimestamp: meta.mediaKeyTimestamp || Math.floor(Date.now() / 1000),
+          filehash: meta.filehash,
+          encFilehash: meta.encFilehash,
+          size: meta.size,
+          mimetype: meta.mimetype || 'audio/ogg; codecs=opus',
+          duration: meta.durationSeconds || undefined,
+        };
+      } else if (payload.stickerAudioDataUrl && this.client.pupPage) {
+        try {
+          const commaIdx = payload.stickerAudioDataUrl.indexOf(',');
+          const rawHeader =
+            commaIdx !== -1 ? payload.stickerAudioDataUrl.slice(0, commaIdx) : 'data:audio/webm;base64';
+          const rawAudioB64 =
+            commaIdx !== -1
+              ? payload.stickerAudioDataUrl.slice(commaIdx + 1).replace(/[\r\n\s]/g, '')
+              : payload.stickerAudioDataUrl.replace(/[\r\n\s]/g, '');
+
+          let ext = '.webm';
+          if (rawHeader.includes('mpeg') || rawHeader.includes('mp3')) ext = '.mp3';
+          else if (rawHeader.includes('wav')) ext = '.wav';
+          else if (rawHeader.includes('ogg') || rawHeader.includes('opus')) ext = '.ogg';
+          else if (rawHeader.includes('mp4') || rawHeader.includes('m4a')) ext = '.m4a';
+
+          const rawBuf = Buffer.from(rawAudioB64, 'base64');
+          const { buffer: oggBuf, isOgg } = await convertAudioToStickerAudioOgg(rawBuf, ext);
+          const finalAudioMime = isOgg ? 'audio/ogg; codecs=opus' : 'audio/mp4';
+          const finalAudioB64 = oggBuf.toString('base64');
+          localAudioDataUrlForCache = `data:${finalAudioMime};base64,${finalAudioB64}`;
+
+          const uploadedAudio = await this.client.pupPage.evaluate(
+            async ({ audioB64, audioMime, durationSec }) => {
+              const w = window as any;
+              if (!w.WWebJS || typeof w.require !== 'function') return null;
+
+              const binStr = atob(audioB64);
+              const bytes = new Uint8Array(binStr.length);
+              for (let i = 0; i < binStr.length; i++) {
+                bytes[i] = binStr.charCodeAt(i);
+              }
+              const blob = new Blob([bytes], { type: audioMime });
+              const file = new File([blob], 'sticker-audio.ogg', { type: audioMime });
+
+              const filehash = await w.WWebJS.getFileHash(file);
+              const mediaKey = await w.WWebJS.generateHash(32);
+              const uploadManager = w.require('WAWebUploadManager');
+              if (!uploadManager?.encryptAndUpload) return null;
+
+              const uploadQpl = w.require('WAWebStartMediaUploadQpl')?.startMediaUploadQpl?.({
+                entryPoint: 'MediaUpload',
+              });
+
+              const uploaded = await uploadManager.encryptAndUpload({
+                blob: file,
+                type: 'audio',
+                signal: new AbortController().signal,
+                mediaKey,
+                uploadQpl,
+              });
+
+              if (!uploaded?.directPath && !uploaded?.url) return null;
+
+              return {
+                directPath: uploaded.directPath || null,
+                deprecatedMms3Url: uploaded.url || null,
+                mediaKey: uploaded.mediaKey || mediaKey,
+                mediaKeyTimestamp: uploaded.mediaKeyTimestamp || Math.floor(Date.now() / 1000),
+                filehash,
+                encFilehash: uploaded.encFilehash,
+                size: file.size,
+                mimetype: audioMime,
+                duration: durationSec ? Math.min(10, Math.max(1, Math.round(durationSec))) : undefined,
+              };
+            },
+            {
+              audioB64: finalAudioB64,
+              audioMime: finalAudioMime,
+              durationSec: payload.stickerAudioDuration || meta?.durationSeconds || undefined,
+            }
+          );
+
+          if (uploadedAudio) {
+            resolvedStickerAudio = uploadedAudio;
+          }
+        } catch (audioUploadErr) {
+          console.warn(
+            '[WhatsAppService] Falha ao anexar áudio na figurinha (enviando figurinha padrão):',
+            audioUploadErr
+          );
+        }
+      }
+
       const options: {
         sendMediaAsSticker: boolean;
         stickerName: string;
         stickerAuthor: string;
         quotedMessageId?: string;
+        extra?: Record<string, unknown>;
       } = {
         sendMediaAsSticker: true,
         stickerName: 'WhatsApp Bubbles',
@@ -6505,19 +6899,51 @@ export class WhatsAppService {
       if (payload.quotedMessageId) {
         options.quotedMessageId = payload.quotedMessageId;
       }
+      if (resolvedStickerAudio) {
+        options.extra = { stickerAudio: resolvedStickerAudio };
+      }
 
-      await this.patchWWebJSGetChatModel();
-      const sent = await this.client.sendMessage(payload.chatId, media, options);
+      let sent: any;
+      try {
+        sent = await this.client.sendMessage(payload.chatId, media, options);
+      } catch (sendErr) {
+        if (options.extra) {
+          console.warn('[WhatsAppService] Fallback enviando figurinha sem stickerAudio:', sendErr);
+          delete options.extra;
+          sent = await this.client.sendMessage(payload.chatId, media, options);
+        } else {
+          throw sendErr;
+        }
+      }
+
       const sentId = (sent as unknown as { id?: { _serialized?: string } })?.id?._serialized;
       if (sentId) {
         this.mediaCache.set(sentId, payload.stickerDataUrl);
+        if (localAudioDataUrlForCache && resolvedStickerAudio) {
+          this.stickerAudioCache.set(sentId, localAudioDataUrlForCache);
+        }
       }
 
       const recent = await this.getMessages(payload.chatId, 5);
       const latest = recent[recent.length - 1] || null;
-      if (latest && latest.type === 'sticker' && !latest.imageUrl) {
-        latest.imageUrl = payload.stickerDataUrl;
-        latest.isHdLoaded = true;
+      if (latest && latest.type === 'sticker') {
+        if (!latest.imageUrl) {
+          latest.imageUrl = payload.stickerDataUrl;
+          latest.isHdLoaded = true;
+        }
+        if (resolvedStickerAudio && localAudioDataUrlForCache) {
+          const durSec =
+            typeof resolvedStickerAudio.duration === 'number'
+              ? resolvedStickerAudio.duration
+              : payload.stickerAudioDuration;
+          latest.stickerAudio = {
+            ...(latest.stickerAudio || {}),
+            ...(resolvedStickerAudio as StickerAudioDescriptor),
+            audioUrl: localAudioDataUrlForCache,
+            durationSeconds: durSec,
+            duration: durSec ? formatDuration(durSec) : latest.stickerAudio?.duration,
+          };
+        }
       }
       return latest;
     } catch (err) {
@@ -6705,7 +7131,7 @@ export class WhatsAppService {
   }
 
   public async getWhatsAppStickers(): Promise<
-    Array<{ id: string; dataUrl: string; source: 'whatsapp' }>
+    Array<{ id: string; dataUrl: string; source: 'whatsapp'; stickerAudio?: StickerAudioDescriptor }>
   > {
     if (!this.client?.pupPage || this.status !== 'ready') {
       return [];
@@ -6729,7 +7155,12 @@ export class WhatsAppService {
 
         const collections = w.require('WAWebCollections');
         const seenHashes = new Set<string>();
-        const found: Array<{ id: string; filehash: string; thumb: string }> = [];
+        const found: Array<{
+          id: string;
+          filehash: string;
+          thumb: string;
+          stickerAudio?: any;
+        }> = [];
 
         // 1. Verifica mensagens de figurinha nas conversas carregadas (mais recentes primeiro)
         const MsgCol = collections?.Msg;
@@ -6754,14 +7185,37 @@ export class WhatsAppService {
               : `data:image/webp;base64,${rawPreview}`;
           }
 
-          found.push({ id: msgId, filehash: hash, thumb });
+          const sa = m.stickerAudio || m.__x_stickerAudio || null;
+          const stickerAudio =
+            sa && typeof sa === 'object'
+              ? {
+                  directPath: sa.directPath || null,
+                  deprecatedMms3Url: sa.deprecatedMms3Url || null,
+                  mediaKey: sa.mediaKey || null,
+                  mediaKeyTimestamp:
+                    typeof sa.mediaKeyTimestamp === 'number' ? sa.mediaKeyTimestamp : undefined,
+                  filehash: sa.filehash || undefined,
+                  encFilehash: sa.encFilehash || undefined,
+                  size: typeof sa.size === 'number' ? sa.size : undefined,
+                  mimetype: sa.mimetype || 'audio/ogg; codecs=opus',
+                  durationSeconds:
+                    typeof sa.duration === 'number' && sa.duration > 0 ? sa.duration : undefined,
+                }
+              : undefined;
+
+          found.push({ id: msgId, filehash: hash, thumb, stickerAudio });
           if (found.length >= 28) break;
         }
 
         return found;
       });
 
-      const resolved: Array<{ id: string; dataUrl: string; source: 'whatsapp' }> = [];
+      const resolved: Array<{
+        id: string;
+        dataUrl: string;
+        source: 'whatsapp';
+        stickerAudio?: StickerAudioDescriptor;
+      }> = [];
 
       // Decripta as figurinhas encontradas (em paralelo limitado)
       await Promise.all(
@@ -6771,10 +7225,23 @@ export class WhatsAppService {
               this.mediaCache.get(item.id) || (await this.downloadMedia(item.id));
             const finalUrl = hdDataUrl || item.thumb;
             if (finalUrl) {
+              let enrichedAudio: StickerAudioDescriptor | undefined = item.stickerAudio;
+              if (enrichedAudio) {
+                const cachedAudio =
+                  this.stickerAudioCache.get(item.id) ||
+                  (await this.downloadStickerAudio(item.id).catch(() => null));
+                const durSec = enrichedAudio.durationSeconds;
+                enrichedAudio = {
+                  ...enrichedAudio,
+                  audioUrl: cachedAudio || undefined,
+                  duration: durSec ? formatDuration(durSec) : undefined,
+                };
+              }
               resolved.push({
                 id: `wa-${item.filehash.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || item.id}`,
                 dataUrl: finalUrl,
                 source: 'whatsapp',
+                ...(enrichedAudio ? { stickerAudio: enrichedAudio } : {}),
               });
             }
           } catch {
@@ -6783,6 +7250,7 @@ export class WhatsAppService {
                 id: `wa-${item.id}`,
                 dataUrl: item.thumb,
                 source: 'whatsapp',
+                ...(item.stickerAudio ? { stickerAudio: item.stickerAudio } : {}),
               });
             }
           }
@@ -7701,6 +8169,7 @@ export class WhatsAppService {
   public async refresh(): Promise<FormattedChatSummary[]> {
     console.log('[WhatsAppService] Manual refresh requested...');
     this.mediaCache.clear();
+    this.stickerAudioCache.clear();
     this.avatarCache.clear();
 
     if (!this.client || this.status !== 'ready') {
@@ -9680,6 +10149,7 @@ export class WhatsAppService {
     this.qrDataUrl = null;
     this.avatarCache.clear();
     this.mediaCache.clear();
+    this.stickerAudioCache.clear();
     this.updateStatus('disconnected', null, {
       stage: 'session_expired',
       title: 'Sessão encerrada',

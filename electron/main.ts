@@ -1319,12 +1319,60 @@ function registerIpcHandlers() {
     'wa:send-sticker',
     async (
       _event,
-      payload: { chatId: string; stickerDataUrl: string; quotedMessageId?: string }
+      payload: {
+        chatId: string;
+        stickerDataUrl: string;
+        quotedMessageId?: string;
+        stickerAudioDataUrl?: string;
+        stickerAudioDuration?: number;
+        stickerAudioMeta?: Record<string, unknown>;
+      }
     ) => {
       if (!waService) return null;
-      return await waService.sendSticker(payload);
+      return await waService.sendSticker(payload as any);
     }
   );
+
+  ipcMain.handle('wa:download-sticker-audio', async (_event, msgId: string) => {
+    if (!waService || !msgId) return null;
+    return await waService.downloadStickerAudio(msgId);
+  });
+
+  ipcMain.handle('wa:select-sticker-audio-file', async () => {
+    try {
+      const res = await dialog.showOpenDialog({
+        title: 'Selecionar Áudio para Figurinha (até 10s)',
+        filters: [
+          {
+            name: 'Arquivos de Áudio',
+            extensions: ['mp3', 'ogg', 'opus', 'wav', 'm4a', 'webm', 'aac'],
+          },
+        ],
+        properties: ['openFile'],
+      });
+
+      if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
+        return null;
+      }
+
+      const filePath = res.filePaths[0];
+      const buf = fs.readFileSync(filePath);
+      const ext = (path.extname(filePath) || '').toLowerCase();
+      let mime = 'audio/mpeg';
+      if (ext === '.ogg' || ext === '.opus') mime = 'audio/ogg; codecs=opus';
+      else if (ext === '.wav') mime = 'audio/wav';
+      else if (ext === '.m4a' || ext === '.aac') mime = 'audio/mp4';
+      else if (ext === '.webm') mime = 'audio/webm';
+
+      return {
+        dataUrl: `data:${mime};base64,${buf.toString('base64')}`,
+        filename: path.basename(filePath),
+      };
+    } catch (err) {
+      console.error('[main] Error selecting sticker audio file:', err);
+      return null;
+    }
+  });
 
   ipcMain.handle(
     'wa:send-media',
@@ -1470,11 +1518,22 @@ function registerIpcHandlers() {
         const ext = path.extname(fileName);
         const mime = extToMime(ext);
         const buf = fs.readFileSync(fullPath);
+        let stickerAudio: Record<string, unknown> | undefined;
+        try {
+          const sidecarPath = `${fullPath}.audio.json`;
+          if (fs.existsSync(sidecarPath)) {
+            const parsed = JSON.parse(fs.readFileSync(sidecarPath, 'utf-8'));
+            if (parsed && typeof parsed === 'object') {
+              stickerAudio = parsed;
+            }
+          }
+        } catch {}
         return {
           id: fileName,
           name: path.basename(fileName, ext),
           dataUrl: `data:${mime};base64,${buf.toString('base64')}`,
           source: 'library' as const,
+          ...(stickerAudio ? { stickerAudio } : {}),
         };
       });
     } catch (err) {
@@ -1532,38 +1591,77 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('wa:save-sticker-to-library', async (_event, dataUrl: string) => {
-    try {
-      const match = /^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/.exec(dataUrl);
-      if (!match) return null;
-      const subtype = match[1].toLowerCase();
-      const base64Data = match[2];
-      const ext =
-        subtype === 'webp'
-          ? '.webp'
-          : subtype === 'png'
-          ? '.png'
-          : subtype === 'gif'
-          ? '.gif'
-          : '.jpg';
-      const buf = Buffer.from(base64Data, 'base64');
-      const hash = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 14);
-      const dir = getUserStickersDir();
-      const targetFileName = `sticker-${hash}${ext}`;
-      const targetPath = path.join(dir, targetFileName);
-      fs.writeFileSync(targetPath, buf);
+  ipcMain.handle(
+    'wa:save-sticker-to-library',
+    async (
+      _event,
+      payload:
+        | string
+        | {
+            dataUrl: string;
+            audioDataUrl?: string;
+            audioDuration?: number;
+            stickerAudioMeta?: Record<string, unknown>;
+          }
+    ) => {
+      try {
+        const dataUrl = typeof payload === 'string' ? payload : payload?.dataUrl;
+        if (!dataUrl) return null;
+        const match = /^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/.exec(dataUrl);
+        if (!match) return null;
+        const subtype = match[1].toLowerCase();
+        const base64Data = match[2];
+        const ext =
+          subtype === 'webp'
+            ? '.webp'
+            : subtype === 'png'
+            ? '.png'
+            : subtype === 'gif'
+            ? '.gif'
+            : '.jpg';
+        const buf = Buffer.from(base64Data, 'base64');
+        const audioDataUrl = typeof payload === 'object' ? payload?.audioDataUrl : undefined;
+        const audioDuration = typeof payload === 'object' ? payload?.audioDuration : undefined;
+        const stickerAudioMeta = typeof payload === 'object' ? payload?.stickerAudioMeta : undefined;
 
-      return {
-        id: targetFileName,
-        name: `Figurinha ${hash.slice(0, 6)}`,
-        dataUrl,
-        source: 'library' as const,
-      };
-    } catch (err) {
-      console.error('[main] Error saving sticker to library:', err);
-      return null;
+        const hashInput = audioDataUrl ? Buffer.concat([buf, Buffer.from(audioDataUrl.slice(0, 256))]) : buf;
+        const hash = crypto.createHash('sha1').update(hashInput).digest('hex').slice(0, 14);
+        const dir = getUserStickersDir();
+        const targetFileName = `sticker-${hash}${ext}`;
+        const targetPath = path.join(dir, targetFileName);
+        fs.writeFileSync(targetPath, buf);
+
+        let stickerAudio: Record<string, unknown> | undefined;
+        if (audioDataUrl || stickerAudioMeta) {
+          const durSec =
+            typeof audioDuration === 'number' && audioDuration > 0
+              ? Math.min(10, Math.round(audioDuration))
+              : typeof (stickerAudioMeta as any)?.durationSeconds === 'number'
+              ? Math.min(10, Math.round((stickerAudioMeta as any).durationSeconds))
+              : undefined;
+          stickerAudio = {
+            ...(stickerAudioMeta || {}),
+            ...(audioDataUrl ? { audioUrl: audioDataUrl } : {}),
+            ...(durSec ? { durationSeconds: durSec, duration: `0:${String(durSec).padStart(2, '0')}` } : {}),
+          };
+          try {
+            fs.writeFileSync(`${targetPath}.audio.json`, JSON.stringify(stickerAudio), 'utf-8');
+          } catch {}
+        }
+
+        return {
+          id: targetFileName,
+          name: `Figurinha ${hash.slice(0, 6)}`,
+          dataUrl,
+          source: 'library' as const,
+          ...(stickerAudio ? { stickerAudio } : {}),
+        };
+      } catch (err) {
+        console.error('[main] Error saving sticker to library:', err);
+        return null;
+      }
     }
-  });
+  );
 
   ipcMain.handle('wa:delete-user-sticker', async (_event, stickerId: string) => {
     try {
@@ -1572,6 +1670,10 @@ function registerIpcHandlers() {
       const targetPath = path.join(dir, safeName);
       if (fs.existsSync(targetPath)) {
         fs.unlinkSync(targetPath);
+      }
+      const sidecarPath = `${targetPath}.audio.json`;
+      if (fs.existsSync(sidecarPath)) {
+        fs.unlinkSync(sidecarPath);
       }
       return true;
     } catch (err) {
