@@ -483,13 +483,18 @@ export class WhatsAppService {
 
   private hasSavedLocalAuthSession(): boolean {
     try {
-      const sessionDefaultDir = path.join(this.getAuthDataPath(), 'session', 'Default');
-      if (!fs.existsSync(sessionDefaultDir)) return false;
-      return (
-        fs.existsSync(path.join(sessionDefaultDir, 'IndexedDB')) ||
-        fs.existsSync(path.join(sessionDefaultDir, 'Local Storage')) ||
-        fs.existsSync(path.join(sessionDefaultDir, 'Preferences'))
+      const idbDir = path.join(
+        this.getAuthDataPath(),
+        'session',
+        'Default',
+        'IndexedDB',
+        'https_web.whatsapp.com_0.indexeddb.leveldb'
       );
+      if (fs.existsSync(idbDir)) {
+        const entries = fs.readdirSync(idbDir);
+        if (entries.length > 0) return true;
+      }
+      return false;
     } catch {
       return false;
     }
@@ -1214,6 +1219,7 @@ export class WhatsAppService {
         },
       });
 
+      this.patchClientInjectForLoginPage(this.client);
       this.registerEvents(gen);
       this.startStartupMonitor(gen);
 
@@ -1296,6 +1302,184 @@ export class WhatsAppService {
     this.status = 'disconnected';
     await this.clearAuthDataDir();
     return await this.initialize();
+  }
+
+  /**
+   * Compatibilidade com a nova rota https://web.whatsapp.com/login/ (WhatsApp Web 2.3000.1056+):
+   * Quando não há sessão autenticada, o WhatsApp Web redireciona para /login/, onde o módulo
+   * WAWebSocketModel ainda não é carregado (window.require('WAWebSocketModel') === null),
+   * fazendo o whatsapp-web.js falhar com "Cannot read properties of null (reading 'Socket')".
+   * Este patch aguarda os módulos de login (WAWebConnModel/Conn.ref), fornece um shim seguro
+   * apenas quando WAWebSocketModel é nulo em /login/, e devolve o módulo real assim que o
+   * usuário escaneia o QR Code e a página navega para a sessão autenticada.
+   */
+  private patchClientInjectForLoginPage(client: Client) {
+    const anyClient = client as any;
+    const origInject = anyClient.inject;
+    if (typeof origInject !== 'function' || anyClient._loginPagePatched) return;
+
+    let injectQueue: Promise<void> = Promise.resolve();
+
+    anyClient.inject = function patchedInject(this: any) {
+      const self = this;
+      const run = async () => {
+        const page = self.pupPage;
+        if (!page || page.isClosed()) return;
+
+        const timeoutMs = self.options?.authTimeoutMs || 30000;
+        const start = Date.now();
+        let readyKind: 'socket' | 'login' | null = null;
+
+        while (Date.now() - start < timeoutMs) {
+          if (page.isClosed()) return;
+          try {
+            readyKind = await page.evaluate(() => {
+              const w = window as any;
+              if (!w.Debug?.VERSION || typeof w.require !== 'function') return null;
+              try {
+                const sockMod = w.require('WAWebSocketModel');
+                if (sockMod && sockMod.Socket && !sockMod.__isZapBolhasShim) {
+                  return 'socket';
+                }
+              } catch {}
+
+              const isLoginPath = window.location.pathname.startsWith('/login');
+              if (isLoginPath) {
+                try {
+                  const connMod = w.require('WAWebConnModel');
+                  const cmdMod = w.require('WAWebCmd');
+                  if (connMod?.Conn && cmdMod?.Cmd) {
+                    return 'login';
+                  }
+                } catch {}
+              }
+              return null;
+            });
+          } catch {
+            // Navegação/redirect em andamento (ex: / -> /login/ ou /login/ -> /)
+            readyKind = null;
+          }
+
+          if (readyKind) break;
+          await new Promise((r) => setTimeout(r, 250));
+        }
+
+        if (!readyKind || page.isClosed()) {
+          // Fallback: deixa o inject original reportar erro/timeout padrão
+          await origInject.call(self);
+          return;
+        }
+
+        if (readyKind === 'login') {
+          // Evita reinjeção duplicada no mesmo documento /login/ (ex: framenavigated de subframes)
+          const alreadyInjectedLogin = await page
+            .evaluate(() => Boolean((window as any).__zapBolhasLoginInjected))
+            .catch(() => false);
+          if (alreadyInjectedLogin) {
+            return;
+          }
+
+          // Aguarda o Conn.ref (token do QR Code) ser gerado pelo WhatsApp Web antes de emitir o QR inicial
+          const refStart = Date.now();
+          while (Date.now() - refStart < 12000) {
+            if (page.isClosed()) return;
+            try {
+              const refReady = await page.evaluate(() => {
+                const w = window as any;
+                if (!window.location.pathname.startsWith('/login')) return 'navigated';
+                const ref = w.require?.('WAWebConnModel')?.Conn?.ref;
+                return typeof ref === 'string' && ref.length > 0 ? 'ready' : null;
+              });
+              if (refReady === 'navigated') return;
+              if (refReady === 'ready') break;
+            } catch {
+              return;
+            }
+            await new Promise((r) => setTimeout(r, 200));
+          }
+
+          await page.evaluate(() => {
+            const w = window as any;
+            w.__zapBolhasLoginInjected = true;
+
+            if (typeof w.require === 'function' && !w.require.__zapBolhasLoginPatched) {
+              const origRequire = w.require;
+              const shimSocket = {
+                state: 'UNPAIRED',
+                hasSynced: false,
+                on: () => {},
+                off: () => {},
+                takeover: () => {},
+                logout: () => Promise.resolve(),
+              };
+              const shimMod = {
+                Socket: shimSocket,
+                __isZapBolhasShim: true,
+              };
+              const wrappedRequire = function (this: any, modName: string) {
+                const res = origRequire.apply(this, arguments as any);
+                if (modName === 'WAWebSocketModel' && (!res || !res.Socket)) {
+                  return shimMod;
+                }
+                return res;
+              };
+              Object.assign(wrappedRequire, origRequire);
+              (wrappedRequire as any).__zapBolhasLoginPatched = true;
+              w.require = wrappedRequire;
+            }
+
+            try {
+              const cmdMod = w.require('WAWebCmd');
+              const loginUtils = w.require('WAWebLoginLaunchSocketUtils');
+              if (
+                cmdMod?.Cmd &&
+                typeof cmdMod.Cmd.refreshQR !== 'function' &&
+                typeof loginUtils?.refreshLoginQR === 'function'
+              ) {
+                cmdMod.Cmd.refreshQR = () => loginUtils.refreshLoginQR();
+              }
+            } catch {}
+          });
+        }
+
+        try {
+          await origInject.call(self);
+        } catch (err: any) {
+          const msg = String(err?.message || err || '');
+          // Ignora erros transitórios de navegação durante o redirect /login/ -> / após escanear o QR
+          if (
+            msg.includes('Execution context was destroyed') ||
+            msg.includes('Cannot find context with specified id')
+          ) {
+            console.warn('[WhatsAppService] Navegação detectada durante inject; aguardando novo frame...');
+            return;
+          }
+          throw err;
+        }
+
+        // Na página principal autenticada, se hasSynced já ficou true antes do listener ser anexado, dispara agora
+        if (readyKind === 'socket') {
+          try {
+            await page.evaluate(async () => {
+              const w = window as any;
+              const sock = w.require?.('WAWebSocketModel')?.Socket;
+              if (
+                sock?.hasSynced &&
+                typeof w.WWebJS === 'undefined' &&
+                typeof w.onAppStateHasSyncedEvent === 'function'
+              ) {
+                await w.onAppStateHasSyncedEvent();
+              }
+            });
+          } catch {}
+        }
+      };
+
+      injectQueue = injectQueue.then(run, run);
+      return injectQueue;
+    };
+
+    anyClient._loginPagePatched = true;
   }
 
   private async patchWWebJSGetChatModel() {
@@ -1538,6 +1722,7 @@ export class WhatsAppService {
 
     this.client.on('qr', async (qr: string) => {
       if (gen !== this.initGeneration) return;
+      if (!qr || qr.startsWith('undefined,') || qr.startsWith('null,')) return;
       try {
         const dataUrl = await QRCode.toDataURL(qr, {
           width: 240,
